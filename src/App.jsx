@@ -36,6 +36,7 @@ import {
  * UPDATE V11.x:
  * - Stable studio UI with streaming targets (OBS, YouTube, Facebook, Instagram, Zoom/Teams).
  * - Output target selection gently applies AI presets (no audio-graph changes).
+ * - Intelligent Hyper-Gate Reduction with hysteresis + envelope (very strong noise kill, smooth voice).
  */
 
 const TiwatonApp = () => {
@@ -159,6 +160,11 @@ const AudioProcessor = ({ goHome }) => {
   });
   const isMonitoringRef = useRef(isMonitoring);
 
+  // envelope for intelligent gate
+  const canvasRef = useRef(null);
+  const animationRef = useRef(null);
+  const gateEnvRef = useRef(1.0); // remembers last gate gain for smooth attack/release
+
   // -- Feature Toggles --
   const [features, setFeatures] = useState({
     denoise: false,
@@ -259,9 +265,6 @@ const AudioProcessor = ({ goHome }) => {
   const activeTarget =
     outputTargets.find((t) => t.name === outputTarget) ?? outputTargets[0];
 
-  const canvasRef = useRef(null);
-  const animationRef = useRef(null);
-
   useEffect(() => {
     isMonitoringRef.current = isMonitoring;
   }, [isMonitoring]);
@@ -344,6 +347,7 @@ const AudioProcessor = ({ goHome }) => {
     setExportStatus(null);
     if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
     setRecordingState('idle');
+    gateEnvRef.current = 1.0;
   };
 
   const startAudioEngine = async (inputStream = null, fileElement = null) => {
@@ -453,12 +457,14 @@ const AudioProcessor = ({ goHome }) => {
       analyser: ana,
     };
 
+    gateEnvRef.current = 1.0;
+
     visualizeAndGate(setVisualizerGateStatus, canvasRef, animationRef, {
       features,
       settingsRef,
       processingRefs,
-      noiseFloorThreshold,
       visualizerGateStatus,
+      gateEnvRef,
     });
   };
 
@@ -1380,12 +1386,12 @@ const Badge = ({ active, text }) => (
   </div>
 );
 
-/* Visualizer + gate logic extracted to keep component cleaner */
+/* Visualizer + intelligent Hyper-Gate */
 const visualizeAndGate = (
   setVisualizerGateStatus,
   canvasRef,
   animationRef,
-  { features, settingsRef, processingRefs, visualizerGateStatus }
+  { features, settingsRef, processingRefs, visualizerGateStatus, gateEnvRef }
 ) => {
   const { analyser, gateGain } = processingRefs.current;
   const canvas = canvasRef.current;
@@ -1397,21 +1403,25 @@ const visualizeAndGate = (
   const timeData = new Uint8Array(bufferLength);
 
   let lastGateUpdate = 0;
-  const updateInterval = 100;
+  const updateInterval = 100; // ms for UI updates only
 
   const draw = (timestamp) => {
     animationRef.current = requestAnimationFrame(draw);
     analyser.getByteFrequencyData(dataArray);
     analyser.getByteTimeDomainData(timeData);
 
+    // --- VISUALS ---
     ctx.fillStyle = '#0f172a';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     const barWidth = (canvas.width / bufferLength) * 2.5;
     let x = 0;
 
+    // Threshold guideline
     if (features.denoise && !settingsRef.current.isBypassed) {
-      const threshY =
-        canvas.height * (1 - (settingsRef.current.threshold + 100) / 100);
+      // clamp slider into a sensible range for dB
+      const sliderThresh = settingsRef.current.threshold;
+      const clamped = Math.min(Math.max(sliderThresh, -80), -30);
+      const threshY = canvas.height * (1 - (clamped + 100) / 100);
       ctx.strokeStyle = '#6366f1';
       ctx.setLineDash([5, 5]);
       ctx.lineWidth = 1;
@@ -1434,7 +1444,9 @@ const visualizeAndGate = (
       x += barWidth + 1;
     }
 
+    // --- INTELLIGENT HYPER-GATE ---
     if (gateGain && features.denoise && !settingsRef.current.isBypassed) {
+      // RMS → dB
       let sum = 0;
       for (let i = 0; i < bufferLength; i++) {
         const sample = (timeData[i] - 128) / 128.0;
@@ -1443,22 +1455,49 @@ const visualizeAndGate = (
       const rms = Math.sqrt(sum / bufferLength);
       const db = 20 * Math.log10(rms || 0.00001);
 
-      const threshold = settingsRef.current.threshold;
-      const target = db < threshold ? 0.001 : 1.0;
+      // Hysteresis: open & close thresholds so gate doesn’t chatter
+      const base = Math.min(
+        Math.max(settingsRef.current.threshold, -80),
+        -30
+      );
+      const openThreshold = base + 4; // needs to be a bit louder to open
+      const closeThreshold = base - 2; // a bit quieter to fully close
 
-      const current = gateGain.gain.value;
-      const smoothing = target > current ? 0.2 : 0.05;
-      gateGain.gain.value = current + (target - current) * smoothing;
+      let env = gateEnvRef.current ?? 1.0;
+      let targetGain;
 
+      if (db < closeThreshold) {
+        // clearly noise: close hard
+        targetGain = 0.001;
+      } else if (db > openThreshold) {
+        // clearly voice: fully open
+        targetGain = 1.0;
+      } else {
+        // between thresholds → keep current envelope (prevents flicker)
+        targetGain = env;
+      }
+
+      // Smooth attack/release (fast open, slower close)
+      const isOpening = targetGain > env;
+      const coeff = isOpening ? 0.35 : 0.08; // tweak for feel
+      env = env + (targetGain - env) * coeff;
+      env = Math.min(Math.max(env, 0.001), 1.0);
+
+      gateGain.gain.value = env;
+      gateEnvRef.current = env;
+
+      // Throttled UI update
       if (timestamp - lastGateUpdate > updateInterval) {
-        const closed = gateGain.gain.value < 0.1;
+        const closed = env < 0.12;
         if (visualizerGateStatus !== closed) {
           setVisualizerGateStatus(closed);
         }
         lastGateUpdate = timestamp;
       }
     } else if (gateGain) {
+      // Gate off or bypassed → full pass-through, reset envelope
       gateGain.gain.value = 1.0;
+      gateEnvRef.current = 1.0;
       if (visualizerGateStatus !== false) {
         setVisualizerGateStatus(false);
       }
