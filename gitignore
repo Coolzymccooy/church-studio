@@ -1,0 +1,45 @@
+------------------------------------
+
+Node / NPM Files
+
+------------------------------------
+
+/node_modules
+/npm-debug.log
+/yarn-error.log
+/package-lock.json
+/yarn.lock
+
+------------------------------------
+
+Build Output / Vercel Deploy Files
+
+------------------------------------
+
+Vite/Rollup compilation output directory
+
+/dist
+/build
+/out
+
+------------------------------------
+
+Operating System & IDE Files
+
+------------------------------------
+
+.DS_Store
+Thumbs.db
+.vscode/
+
+------------------------------------
+
+Local React/Vite/Environment Caches
+
+------------------------------------
+
+.cache
+.env
+.env.local
+.eslintcache
+/coverage
