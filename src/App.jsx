@@ -29,6 +29,7 @@ import {
   Speaker,
   RefreshCw,
   Menu,
+  HelpCircle,
 } from 'lucide-react';
 
 /**
@@ -47,10 +48,13 @@ const TiwatonApp = () => {
   if (view === 'landing') {
     return <LandingPage onEnter={() => setView('studio')} />;
   }
-
-  return <AudioProcessor goHome={() => setView('landing')} />;
+return (
+    <>
+      <AudioProcessor goHome={() => setView('landing')} />
+      <HelpCorner />   {/* ← This is the correct place */}
+    </>
+  );
 };
-
 // --- LANDING PAGE ---
 const LandingPage = ({ onEnter }) => {
   return (
@@ -652,50 +656,58 @@ if (gateGain && settingsRef.current.denoise && !settingsRef.current.isBypassed) 
 
 
     // ---------- SMART GAIN RIDER ----------
-    const autoGain = processingRefs.current.autoGain;
-    const gainRiderEnabled =
-      features.smartMixing && !settingsRef.current.isBypassed;
+   // ---------- SMART GAIN RIDER (with Speech Focus Boost) ----------
+const autoGain = processingRefs.current.autoGain;
+const gainRiderEnabled =
+  features.smartMixing && !settingsRef.current.isBypassed;
 
-    if (autoGain && gainRiderEnabled && !gateClosed) {
-      // Only ride gain when gate is OPEN (speech/music present)
-      const targetSpeechDb = -24; // desired average level
-      const maxBoostDb = 12;
-      const maxCutDb = -12;
-      const gainUpdateInterval = 200;
+if (autoGain && gainRiderEnabled && !gateClosed) {
+  // Only ride gain when gate is OPEN (speech/music present)
 
-      let neededChange = targetSpeechDb - db;
-      if (neededChange > maxBoostDb) neededChange = maxBoostDb;
-      if (neededChange < maxCutDb) neededChange = maxCutDb;
+  // If gate threshold is very high (aggressive noise kill),
+  // we assume a noisy environment and push speech a bit hotter.
+  const aggressiveMode =
+    settingsRef.current.denoise && settingsRef.current.threshold > -40;
 
-      const desiredLinear = Math.pow(10, neededChange / 20);
-      const currentLinear = autoGain.gain.value || 1.0;
+  const targetSpeechDb = aggressiveMode ? -18 : -24;  // louder target when gating hard
+  const maxBoostDb = aggressiveMode ? 16 : 12;        // allow a bit more upward gain
+  const maxCutDb = -12;
+  const gainUpdateInterval = 200;
 
-      const smoothing = 0.02;
-      autoGain.gain.value =
-        currentLinear + (desiredLinear - currentLinear) * smoothing;
+  let neededChange = targetSpeechDb - db;
+  if (neededChange > maxBoostDb) neededChange = maxBoostDb;
+  if (neededChange < maxCutDb) neededChange = maxCutDb;
 
-      if (timestamp - lastGainUpdate > gainUpdateInterval) {
-        const appliedDb =
-          20 * Math.log10(autoGain.gain.value || 0.00001);
-        setGainRiderDb(parseFloat(appliedDb.toFixed(1)));
-        lastGainUpdate = timestamp;
-      }
-    } else if (autoGain) {
-      // Gate closed OR SmartMixing off:
-      // → do NOT boost noise, gently return toward unity and reset display
-      const currentLinear = autoGain.gain.value || 1.0;
-      const targetLinear = 1.0;
-      const smoothingBack = 0.05;
+  const desiredLinear = Math.pow(10, neededChange / 20);
+  const currentLinear = autoGain.gain.value || 1.0;
 
-      autoGain.gain.value =
-        currentLinear + (targetLinear - currentLinear) * smoothingBack;
+  // Smooth rider so it doesn't pump
+  const smoothing = 0.02;
+  autoGain.gain.value =
+    currentLinear + (desiredLinear - currentLinear) * smoothing;
 
-      if (timestamp - lastGainUpdate > 200 && gainRiderDb !== 0) {
-        setGainRiderDb(0);
-        lastGainUpdate = timestamp;
-      }
-    }
-  };
+  if (timestamp - lastGainUpdate > gainUpdateInterval) {
+    const appliedDb =
+      20 * Math.log10(autoGain.gain.value || 0.00001);
+    setGainRiderDb(parseFloat(appliedDb.toFixed(1)));
+    lastGainUpdate = timestamp;
+  }
+} else if (autoGain) {
+  // Gate closed OR SmartMixing off:
+  // → do NOT boost noise, gently return toward unity and reset display
+  const currentLinear = autoGain.gain.value || 1.0;
+  const targetLinear = 1.0;
+  const smoothingBack = 0.05;
+
+  autoGain.gain.value =
+    currentLinear + (targetLinear - currentLinear) * smoothingBack;
+
+  if (timestamp - lastGainUpdate > 200 && gainRiderDb !== 0) {
+    setGainRiderDb(0);
+    lastGainUpdate = timestamp;
+  }
+}
+};
 
   draw(performance.now());
 };
@@ -1403,5 +1415,110 @@ const Badge = ({ active, text }) => (
     {text}
   </div>
 );
+
+function HelpCorner() {
+  const [isOpen, setIsOpen] = useState(false);
+
+  return (
+    <>
+      {/* Floating Help Button */}
+      <button
+        type="button"
+        onClick={() => setIsOpen(true)}
+        className="fixed bottom-20 right-4 z-40 flex items-center gap-2 rounded-full bg-slate-900/95 px-4 py-2 text-xs font-semibold text-slate-100 shadow-lg border border-slate-700 hover:bg-slate-800"
+      >
+        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-indigo-500 text-[11px] font-bold">
+          ?
+        </span>
+        <span className="hidden sm:inline">Need help with audio?</span>
+        <span className="sm:hidden">Help</span>
+      </button>
+
+      {/* Help Panel */}
+      {isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
+          <div className="flex max-h-[80vh] w-full max-w-lg flex-col rounded-2xl border border-slate-700 bg-slate-950 shadow-2xl">
+            
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
+              <div className="flex items-center gap-2">
+                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-600 text-xs font-bold text-white">
+                  ?
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-slate-100">
+                    Quick help for better live sound
+                  </p>
+                  <p className="text-[11px] text-slate-400">
+                    60-second checklist to make Tiwaton feel “magic”.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setIsOpen(false)}
+                className="rounded-full p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3 text-[11px] leading-relaxed text-slate-300">
+
+              <p className="font-semibold text-slate-100">1️⃣ Before you start</p>
+              <ul className="ml-4 list-disc space-y-1">
+                <li>Use a wired mic or mixer feed if possible.</li>
+                <li>Set mixer gain correctly before enabling AI.</li>
+                <li>Turn off system Noise Suppression and AGC.</li>
+              </ul>
+
+              <p className="mt-2 font-semibold text-slate-100">2️⃣ Dial in Hyper-Gate</p>
+              <ul className="ml-4 list-disc space-y-1">
+                <li>Quiet the room first.</li>
+                <li>Increase Noise Threshold until background disappears.</li>
+                <li>If speech chops, move threshold slightly left.</li>
+              </ul>
+
+              <p className="mt-2 font-semibold text-slate-100">3️⃣ Troubleshooting</p>
+              <ul className="ml-4 list-disc space-y-1">
+                <li>
+                  <span className="font-semibold text-slate-100">❗ Echo / doubling</span>
+                  <ul className="ml-4 list-disc">
+                    <li>Do not send RAW + AI output to stream.</li>
+                    <li>Send ONLY Tiwaton output to OBS/YouTube.</li>
+                  </ul>
+                </li>
+
+                <li>
+                  <span className="font-semibold text-slate-100">❗ Gate too aggressive</span>
+                  <ul className="ml-4 list-disc">
+                    <li>Lower Noise Threshold (move left).</li>
+                    <li>Start at −55 dB and increase gradually.</li>
+                  </ul>
+                </li>
+              </ul>
+
+              <div className="mt-2 rounded-xl border border-slate-800 bg-slate-900 px-3 py-2">
+                <p className="text-[11px] text-slate-400">
+                  <span className="font-semibold text-indigo-300">Golden rule:</span>{' '}
+                  Fix physical mic problems first, then let Tiwaton polish.
+                </p>
+              </div>
+
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-between border-t border-slate-800 px-4 py-2 text-[10px] text-slate-500">
+              <span>Tips tuned for your studio version.</span>
+              <span className="hidden sm:inline">Your audio co-pilot is here.</span>
+            </div>
+
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
 
 export default TiwatonApp;
