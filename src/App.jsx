@@ -1313,7 +1313,7 @@ if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
 
     draw(performance.now());
   };
-
+//
   // Monitor gain on/off
   useEffect(() => {
     if (processingRefs.current.monitorGain && audioContext) {
@@ -1327,7 +1327,7 @@ if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
     }
   }, [isMonitoring, recordingState, audioContext]);
 
-  // --- Helper: Resolve labels for Output Router panel ---
+  // --- Helper: Resolve labels for Output Router panel ---//
   const resolveOutputLabel = (id) => {
     if (id === 'default') return 'System Default';
     const found = availableDevices.outputs.find((d) => d.deviceId === id);
