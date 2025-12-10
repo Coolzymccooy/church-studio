@@ -29,17 +29,17 @@ import {
   Speaker,
   RefreshCw,
   Menu,
-  HelpCircle,
 } from 'lucide-react';
 
 /**
  * TIWATON AUDIO AI
  * UPDATE:
  * - Hyper-Gate + VAD
- * - File Upload mode
+ * - File Upload mode (audio + video audio track)
  * - Smart Gain Rider after compressor (driven by RMS)
  * - Gain Rider readout in footer
- * - Smart Auto-Mixing description updated to reflect gain riding
+ * - Speech Priority Boost visual + label
+ * - Process & Export for File mode (AI-mastered audio) — now more robust
  */
 
 const TiwatonApp = () => {
@@ -48,23 +48,25 @@ const TiwatonApp = () => {
   if (view === 'landing') {
     return <LandingPage onEnter={() => setView('studio')} />;
   }
-return (
+
+  return (
     <>
       <AudioProcessor goHome={() => setView('landing')} />
-      <HelpCorner />   {/* ← This is the correct place */}
+      <HelpCorner />
     </>
   );
 };
+
 // --- LANDING PAGE ---
 const LandingPage = ({ onEnter }) => {
   return (
     <div className="h-[100dvh] bg-slate-950 text-white flex flex-col items-center justify-center relative overflow-hidden font-sans selection:bg-indigo-500 selection:text-white">
       <div className="absolute inset-0 z-0 opacity-20">
-        <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] bg-indigo-600 rounded-full blur-[120px] animate-pulse"></div>
+        <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] bg-indigo-600 rounded-full blur-[120px] animate-pulse" />
         <div
           className="absolute bottom-[-20%] right-[-10%] w-[500px] h-[500px] bg-purple-600 rounded-full blur-[120px]"
           style={{ animationDuration: '4s' }}
-        ></div>
+        />
       </div>
 
       <div className="z-10 text-center max-w-3xl px-6">
@@ -90,7 +92,7 @@ const LandingPage = ({ onEnter }) => {
           onClick={onEnter}
           className="group relative px-8 py-5 bg-white text-slate-950 font-bold text-lg rounded-full overflow-hidden hover:scale-105 transition-transform duration-300 shadow-[0_0_30px_rgba(255,255,255,0.3)]"
         >
-          <div className="absolute inset-0 bg-gradient-to-r from-indigo-400 to-purple-400 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+          <div className="absolute inset-0 bg-gradient-to-r from-indigo-400 to-purple-400 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
           <span className="relative z-10 flex items-center gap-3 group-hover:text-white transition-colors">
             Enter Studio <ArrowRight size={20} />
           </span>
@@ -113,6 +115,8 @@ const AudioProcessor = ({ goHome }) => {
   const [exportStatus, setExportStatus] = useState(null);
   const [inputGainValue, setInputGainValue] = useState(1.0);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [voiceActive, setVoiceActive] = useState(false);
+  const [isAutoCalibrating, setIsAutoCalibrating] = useState(false);
 
   const [noiseFloorThreshold, setNoiseFloorThreshold] = useState(-50);
   const [visualizerGateStatus, setVisualizerGateStatus] = useState(false);
@@ -120,6 +124,16 @@ const AudioProcessor = ({ goHome }) => {
   const [recordedUrl, setRecordedUrl] = useState(null);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [gainRiderDb, setGainRiderDb] = useState(0); // Smart Gain Rider readout
+
+  // playback tracking for record-check review
+  const [playbackPosition, setPlaybackPosition] = useState(0);
+  const [playbackDuration, setPlaybackDuration] = useState(0);
+  const [isPlayingBack, setIsPlayingBack] = useState(false);
+  const playbackAudioRef = useRef(null);
+
+  // File mode info + export state
+  const [fileInfo, setFileInfo] = useState(null); // { name, type, isVideo }
+  const [fileExportStatus, setFileExportStatus] = useState(null);
 
   const [availableDevices, setAvailableDevices] = useState({
     inputs: [],
@@ -139,6 +153,7 @@ const AudioProcessor = ({ goHome }) => {
   const contextRef = useRef(null);
   const streamRef = useRef(null);
   const audioElRef = useRef(null);
+  const videoElRef = useRef(null);
   const fileInputRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const recordedChunksRef = useRef([]);
@@ -153,7 +168,7 @@ const AudioProcessor = ({ goHome }) => {
     gateGain: null,
     deEsser: null,
     compressor: null,
-    autoGain: null, // NEW: Smart Gain Rider node
+    autoGain: null, // Smart Gain Rider node
     eqWarmth: null,
     eqClarity: null,
     master: null,
@@ -168,6 +183,13 @@ const AudioProcessor = ({ goHome }) => {
     isBypassed: false,
   });
   const isMonitoringRef = useRef(isMonitoring);
+
+  const calibrateRef = useRef({
+    active: false,
+    startedAt: 0,
+    sumSq: 0,
+    frames: 0,
+  });
 
   // -- Features --
   const [features, setFeatures] = useState({
@@ -195,9 +217,7 @@ const AudioProcessor = ({ goHome }) => {
   ];
 
   const cycleOutputTarget = () => {
-    const currentIndex = outputTargets.findIndex(
-      (t) => t.name === outputTarget,
-    );
+    const currentIndex = outputTargets.findIndex((t) => t.name === outputTarget);
     const nextIndex = (currentIndex + 1) % outputTargets.length;
     setOutputTarget(outputTargets[nextIndex].name);
   };
@@ -233,21 +253,26 @@ const AudioProcessor = ({ goHome }) => {
     };
 
     // Force gate open if denoise is off
-    if (!features.denoise && processingRefs.current.gateGain) {
+    if (!features.denoise && processingRefs.current.gateGain && audioContext) {
       processingRefs.current.gateGain.gain.setValueAtTime(
         1.0,
-        audioContext?.currentTime || 0,
+        audioContext.currentTime,
       );
     }
   }, [features.denoise, noiseFloorThreshold, isBypassed, audioContext]);
 
   useEffect(() => {
     return () => cleanupAudio();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const cleanupAudio = () => {
     if (contextRef.current) {
-      contextRef.current.close();
+      try {
+        contextRef.current.close();
+      } catch (e) {
+        console.warn('Error closing audio context', e);
+      }
       contextRef.current = null;
     }
     if (streamRef.current) {
@@ -255,6 +280,16 @@ const AudioProcessor = ({ goHome }) => {
       streamRef.current = null;
     }
     if (animationRef.current) cancelAnimationFrame(animationRef.current);
+
+    // stop media elements
+    if (audioElRef.current) {
+      audioElRef.current.pause();
+      audioElRef.current.src = '';
+    }
+    if (videoElRef.current) {
+      videoElRef.current.pause();
+      videoElRef.current.src = '';
+    }
 
     processingRefs.current = {
       source: null,
@@ -270,21 +305,67 @@ const AudioProcessor = ({ goHome }) => {
       monitorGain: null,
       analyser: null,
     };
+    destNodeRef.current = null;
 
     setAudioContext(null);
     setIsLive(false);
     setIsPlayingFile(false);
     setAudioStats({ sampleRate: 0, bufferSize: 0, state: 'suspended' });
     setExportStatus(null);
+    setFileExportStatus(null);
+    setFileInfo(null);
+
     if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
     setRecordingState('idle');
   };
 
-  const startAudioEngine = async (inputStream = null, fileElement = null) => {
-    if (contextRef.current && contextRef.current.state !== 'closed') return;
+  const hardReset = () => {
+    cleanupAudio();
 
-    const ctx = new (window.AudioContext ||
-      window.webkitAudioContext)();
+    setMode('live');
+    setIsBypassed(false);
+    setIsMonitoring(false);
+    setFeatures({
+      denoise: false,
+      dereverb: false,
+      pastorIsolation: false,
+      sermonWarmth: false,
+      smartMixing: false,
+      mastering: false,
+    });
+
+    setNoiseFloorThreshold(-50);
+    setGainRiderDb(0);
+    setVoiceActive(false);
+    setVisualizerGateStatus(false);
+
+    setRecordingState('idle');
+    setRecordingDuration(0);
+    setRecordedUrl(null);
+    setExportStatus(null);
+
+    setFileInfo(null);
+    setFileExportStatus(null);
+    setPlaybackPosition(0);
+    setPlaybackDuration(0);
+    setIsPlayingBack(false);
+
+    resetDeviceState();
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const startAudioEngine = async (inputStream = null, mediaElement = null) => {
+    // Stop any previous animation loop
+    if (animationRef.current) {
+      cancelAnimationFrame(animationRef.current);
+      animationRef.current = null;
+    }
+
+    // Create a fresh context every time
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
 
     if (ctx.state === 'suspended') {
       await ctx.resume();
@@ -292,15 +373,21 @@ const AudioProcessor = ({ goHome }) => {
 
     contextRef.current = ctx;
     setAudioContext(ctx);
-    setAudioStats({ sampleRate: ctx.sampleRate, bufferSize: 128, state: ctx.state });
+    setAudioStats({
+      sampleRate: ctx.sampleRate,
+      bufferSize: 128,
+      state: ctx.state,
+    });
 
     let source;
     try {
       if (inputStream) {
         source = ctx.createMediaStreamSource(inputStream);
-      } else if (fileElement) {
-        source = ctx.createMediaElementSource(fileElement);
-      } else return;
+      } else if (mediaElement) {
+        source = ctx.createMediaElementSource(mediaElement);
+      } else {
+        return;
+      }
     } catch (e) {
       console.error(e);
       return;
@@ -445,21 +532,83 @@ const AudioProcessor = ({ goHome }) => {
     }
   };
 
+  const startAutoCalibrate = () => {
+    // Needs an active audio engine
+    if (!processingRefs.current.analyser || !audioContext) {
+      alert('Start Live or play a file first so I can listen to the room.');
+      return;
+    }
+
+    calibrateRef.current = {
+      active: true,
+      startedAt: performance.now(),
+      sumSq: 0,
+      frames: 0,
+    };
+    setIsAutoCalibrating(true);
+  };
+
+  // --- AUDIO + VIDEO FILE UPLOAD ---
   const handleFileUpload = (event) => {
     const file = event.target.files?.[0];
-    if (file) {
-      const url = URL.createObjectURL(file);
-      if (audioElRef.current) {
-        audioElRef.current.src = url;
-        audioElRef.current.play();
-      }
-      setIsPlayingFile(true);
-      startAudioEngine(null, audioElRef.current);
+    if (!file) return;
+
+    // Make sure each new file gets a fresh engine + clean state
+    cleanupAudio();
+
+    const isVideo = file.type.startsWith('video/');
+    const url = URL.createObjectURL(file);
+
+    setMode('file');
+    setIsPlayingFile(true);
+    setFileExportStatus(null);
+    setFileInfo({
+      name: file.name,
+      type: file.type || (isVideo ? 'video/*' : 'audio/*'),
+      isVideo,
+    });
+
+    if (isVideo) {
+      const el = videoElRef.current;
+      if (!el) return;
+      el.src = url;
+      el.currentTime = 0;
+      el.onloadedmetadata = () => {
+        startAudioEngine(null, el);
+        const playPromise = el.play();
+        if (playPromise && playPromise.catch) {
+          playPromise.catch((err) => {
+            console.error('Autoplay blocked or failed for video file', err);
+            setIsPlayingFile(false);
+          });
+        }
+      };
+    } else {
+      const el = audioElRef.current;
+      if (!el) return;
+      el.src = url;
+      el.currentTime = 0;
+      el.onloadedmetadata = () => {
+        startAudioEngine(null, el);
+        const playPromise = el.play();
+        if (playPromise && playPromise.catch) {
+          playPromise.catch((err) => {
+            console.error('Autoplay blocked or failed for audio file', err);
+            setIsPlayingFile(false);
+          });
+        }
+      };
     }
   };
 
+  // --- RECORD CHECK ---
   const toggleRecording = () => {
     if (recordingState === 'idle') {
+      if (!destNodeRef.current || !destNodeRef.current.stream) {
+        alert('Start Live or load a file first so I have a processed stream to record.');
+        return;
+      }
+
       recordedChunksRef.current = [];
       const recorder = new MediaRecorder(destNodeRef.current.stream);
       recorder.ondataavailable = (e) => {
@@ -486,7 +635,33 @@ const AudioProcessor = ({ goHome }) => {
       if (processingRefs.current.monitorGain) {
         processingRefs.current.monitorGain.gain.value = 0;
       }
+
+      if (playbackAudioRef.current) {
+        playbackAudioRef.current.pause();
+        playbackAudioRef.current = null;
+      }
+
+      if (!recordedUrl) return;
+
       const testAudio = new Audio(recordedUrl);
+      playbackAudioRef.current = testAudio;
+
+      setPlaybackPosition(0);
+      setPlaybackDuration(0);
+      setIsPlayingBack(true);
+
+      testAudio.addEventListener('loadedmetadata', () => {
+        setPlaybackDuration(Math.floor(testAudio.duration || 0));
+      });
+
+      testAudio.addEventListener('timeupdate', () => {
+        setPlaybackPosition(Math.floor(testAudio.currentTime || 0));
+      });
+
+      testAudio.addEventListener('ended', () => {
+        setIsPlayingBack(false);
+      });
+
       testAudio.play();
     }
   };
@@ -496,6 +671,14 @@ const AudioProcessor = ({ goHome }) => {
     setRecordingState('idle');
     setRecordingDuration(0);
     setExportStatus(null);
+    setPlaybackPosition(0);
+    setPlaybackDuration(0);
+    setIsPlayingBack(false);
+
+    if (playbackAudioRef.current) {
+      playbackAudioRef.current.pause();
+      playbackAudioRef.current = null;
+    }
   };
 
   const shareRecording = () => {
@@ -511,6 +694,135 @@ const AudioProcessor = ({ goHome }) => {
       window.URL.revokeObjectURL(recordedUrl);
       setExportStatus('done');
     }, 1500);
+  };
+
+  // --- FILE MODE: PROCESS & EXPORT (AI MASTER) ---
+  const processAndExportFile = () => {
+    if (!fileInfo) {
+      alert('Load an audio or video file first.');
+      return;
+    }
+
+    if (fileExportStatus === 'processing') {
+      // Already running
+      return;
+    }
+
+    if (!destNodeRef.current || !destNodeRef.current.stream) {
+      alert('No processed audio stream found. Wait for the file to fully load, then try again.');
+      setFileExportStatus(null);
+      return;
+    }
+
+    const mediaEl =
+      (fileInfo?.isVideo ? videoElRef.current : audioElRef.current) ||
+      audioElRef.current ||
+      videoElRef.current;
+
+    if (!mediaEl || !mediaEl.src) {
+      alert('Load an audio or video file first.');
+      return;
+    }
+
+    try {
+      mediaEl.pause();
+      mediaEl.currentTime = 0;
+    } catch (e) {
+      console.warn('Could not reset media element.', e);
+    }
+
+    setFileExportStatus('processing');
+
+    let recorder;
+    const chunks = [];
+
+    try {
+      recorder = new MediaRecorder(destNodeRef.current.stream);
+    } catch (err) {
+      console.error(err);
+      setFileExportStatus('error');
+      alert('Browser does not support exporting processed audio.');
+      return;
+    }
+
+    // Safety timeout in case "ended" never fires
+    const duration = Number.isFinite(mediaEl.duration) && mediaEl.duration > 0
+      ? mediaEl.duration
+      : 300; // fallback for unknown duration (~5 min)
+    const maxRecordMs = duration * 1000 + 3000;
+    const timeoutId = setTimeout(() => {
+      if (recorder && recorder.state === 'recording') {
+        console.warn('Export timeout reached, stopping recorder.');
+        recorder.stop();
+      }
+    }, maxRecordMs);
+
+    recorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) chunks.push(e.data);
+    };
+
+    recorder.onstop = () => {
+      clearTimeout(timeoutId);
+
+      if (!chunks.length) {
+        console.warn('No audio data captured during export.');
+        setFileExportStatus('error');
+        alert('No audio captured from this file. Please check your source and try again.');
+        return;
+      }
+
+      const blob = new Blob(chunks, { type: 'audio/webm' });
+      const url = URL.createObjectURL(blob);
+
+      const safeName = (fileInfo?.name || 'tiwaton_sermon')
+        .replace(/\.[^/.]+$/, '')
+        .slice(0, 60);
+
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = `${safeName}_TIWATON_master.webm`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      setFileExportStatus('done');
+    };
+
+    const handleEnded = () => {
+      mediaEl.removeEventListener('ended', handleEnded);
+      if (recorder.state === 'recording') {
+        recorder.stop();
+      }
+    };
+
+    mediaEl.addEventListener('ended', handleEnded);
+
+    const playPromise = mediaEl.play();
+    if (playPromise && playPromise.catch) {
+      playPromise
+        .catch((err) => {
+          console.error('Playback failed during export', err);
+          mediaEl.removeEventListener('ended', handleEnded);
+          try {
+            if (recorder.state === 'recording') {
+              recorder.stop();
+            }
+          } catch (e) {
+            console.warn('Error stopping recorder after playback failure', e);
+          }
+          setFileExportStatus('error');
+          alert('Unable to play this file for export. Please interact with the player first and try again.');
+        })
+        .then(() => {
+          if (recorder.state === 'inactive') {
+            recorder.start();
+          }
+        });
+    } else {
+      recorder.start();
+    }
   };
 
   const formatTime = (secs) => {
@@ -534,184 +846,311 @@ const AudioProcessor = ({ goHome }) => {
   // --- Parameter updates (EQ & compressor tweaks based on features) ---
   useEffect(() => {
     if (!audioContext || !processingRefs.current.compressor) return;
-    const { compressor, eqWarmth, eqClarity } = processingRefs.current;
+    const { compressor, eqWarmth, eqClarity, master } = processingRefs.current;
     const now = audioContext.currentTime;
+
     const getTarget = (isActive, activeVal, passiveVal) =>
       isActive && !isBypassed ? activeVal : passiveVal;
 
+    // Small dynamic boost when voice is active
+    const speechBoost = voiceActive ? 2 : 0;
+
     if (eqClarity) {
-      eqClarity.gain.linearRampToValueAtTime(
-        getTarget(features.pastorIsolation, 8, 0),
-        now + 0.5,
-      );
+      const baseClarity = getTarget(features.pastorIsolation, 8, 0);
+      eqClarity.gain.linearRampToValueAtTime(baseClarity + speechBoost, now + 0.2);
     }
+
     if (eqWarmth) {
+      const baseWarmth = getTarget(features.sermonWarmth, 5, 0);
       eqWarmth.gain.linearRampToValueAtTime(
-        getTarget(features.sermonWarmth, 5, 0),
-        now + 0.5,
+        baseWarmth + speechBoost * 0.6,
+        now + 0.25,
       );
     }
+
     if (compressor) {
       compressor.ratio.linearRampToValueAtTime(
         getTarget(features.smartMixing, 4, 1),
-        now + 0.5,
+        now + 0.4,
       );
       compressor.threshold.linearRampToValueAtTime(
         getTarget(features.smartMixing, -24, 0),
-        now + 0.5,
+        now + 0.4,
       );
     }
-  }, [features, audioContext, isBypassed]);
 
-  // --- Visualizer + Gate + Smart Gain Rider ---
- // --- Visualizer + Gate + Smart Gain Rider (fixed so gate wins over auto-gain) ---
-const visualizeAndGate = () => {
-  const { analyser, gateGain } = processingRefs.current;
-  const canvas = canvasRef.current;
-  if (!analyser || !canvas) return;
+    if (master) {
+      const targetGain = isBypassed ? 1.0 : 1.0 + speechBoost * 0.08;
+      master.gain.linearRampToValueAtTime(targetGain, now + 0.15);
+    }
+  }, [features, audioContext, isBypassed, voiceActive]);
 
-  const ctx = canvas.getContext('2d');
-  const bufferLength = analyser.frequencyBinCount;
-  const dataArray = new Uint8Array(bufferLength);
-  const timeData = new Uint8Array(bufferLength);
+  // --- Visualizer + Gate + Smart Gain Rider (fancy visual AI state) ---
+  const visualizeAndGate = () => {
+    const { analyser, gateGain } = processingRefs.current;
+    const canvas = canvasRef.current;
+    if (!analyser || !canvas) return;
 
-  let lastGateUpdate = 0;
-  let lastGainUpdate = 0;
-  const updateInterval = 100;
+    const ctx = canvas.getContext('2d');
+    const bufferLength = analyser.frequencyBinCount;
+    const freqData = new Uint8Array(bufferLength);
+    const timeData = new Uint8Array(bufferLength);
 
-  const draw = (timestamp) => {
-    animationRef.current = requestAnimationFrame(draw);
-    analyser.getByteFrequencyData(dataArray);
-    analyser.getByteTimeDomainData(timeData);
+    let lastGateUpdate = 0;
+    let lastVoiceUpdate = 0;
+    let lastGainUpdate = 0;
+    const updateInterval = 100; // ms
+    const gainUpdateInterval = 200; // ms
 
-    // Clear background
-    ctx.fillStyle = '#0f172a';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const draw = (timestamp) => {
+      animationRef.current = requestAnimationFrame(draw);
 
-    const barWidth = (canvas.width / bufferLength) * 2.5;
-    let x = 0;
+      analyser.getByteFrequencyData(freqData);
+      analyser.getByteTimeDomainData(timeData);
 
-    // Basic spectrum bars
-    for (let i = 0; i < bufferLength; i++) {
-      const barHeight = dataArray[i] * 1.5;
-      ctx.fillStyle = barHeight > 240 ? '#ef4444' : '#4f46e5';
-      ctx.fillRect(
-        x,
-        canvas.height - barHeight / 2,
-        barWidth,
-        barHeight / 2
+      const w = canvas.width;
+      const h = canvas.height;
+      const cx = w / 2;
+      const cy = h / 2;
+
+      // Background gradient
+      const bgGrad = ctx.createLinearGradient(0, 0, 0, h);
+      bgGrad.addColorStop(0, '#020617');
+      bgGrad.addColorStop(0.5, '#020617');
+      bgGrad.addColorStop(1, '#020617');
+      ctx.fillStyle = bgGrad;
+      ctx.fillRect(0, 0, w, h);
+
+      const barWidth = (w / bufferLength) * 2.5;
+      let x = 0;
+
+      // Spectrum + band energies
+      let lowEnergy = 0;
+      let highEnergy = 0;
+      const splitIndex = Math.floor(bufferLength * 0.4);
+
+      for (let i = 0; i < bufferLength; i++) {
+        const v = freqData[i];
+        const barHeight = v * 1.5;
+
+        if (i < splitIndex) {
+          lowEnergy += v;
+        } else {
+          highEnergy += v;
+        }
+
+        let barColor = 'rgba(37,99,235,0.75)'; // blue-600
+        if (i > splitIndex * 0.6 && i < splitIndex * 1.3) {
+          barColor = 'rgba(56,189,248,0.75)'; // cyan-400
+        }
+
+        ctx.fillStyle = barColor;
+        ctx.fillRect(x, h - barHeight / 2, barWidth, barHeight / 2);
+        x += barWidth + 1;
+      }
+
+      const lowAvg = lowEnergy / (splitIndex || 1);
+      const highAvg = highEnergy / (bufferLength - splitIndex || 1);
+      const highBias = highAvg / (lowAvg + 1e-6);
+      const antiChildNoiseActive = features.denoise;
+      const highOnlyNoise = antiChildNoiseActive && highBias > 2.2 && lowAvg < 40;
+
+      // Time-domain RMS
+      let sumSq = 0;
+      for (let i = 0; i < bufferLength; i++) {
+        const sample = (timeData[i] - 128) / 128.0;
+        sumSq += sample * sample;
+      }
+      const rms = Math.sqrt(sumSq / bufferLength);
+      const db = 20 * Math.log10(rms || 0.00001);
+
+      let gateClosed = false;
+      let localVoiceActive = false;
+
+      // Auto-calibrator
+      if (calibrateRef.current.active) {
+        calibrateRef.current.sumSq += sumSq;
+        calibrateRef.current.frames += 1;
+
+        const elapsed = timestamp - calibrateRef.current.startedAt;
+
+        if (elapsed > 1800) {
+          const meanSq =
+            calibrateRef.current.sumSq / (calibrateRef.current.frames || 1);
+          const roomRms = Math.sqrt(meanSq);
+          const roomDb = 20 * Math.log10(roomRms || 0.00001);
+
+          const targetThreshold = Math.max(-70, Math.min(roomDb + 8, -25));
+          setNoiseFloorThreshold(targetThreshold);
+
+          calibrateRef.current.active = false;
+          setIsAutoCalibrating(false);
+        }
+      }
+
+      // Gate decision + VAD
+      if (gateGain && features.denoise && !settingsRef.current.isBypassed) {
+        const threshold = settingsRef.current.threshold;
+
+        let shouldOpen = db >= threshold;
+        if (highOnlyNoise) {
+          shouldOpen = false;
+        }
+
+        const target = shouldOpen ? 1.0 : 0.001;
+
+        const current = gateGain.gain.value;
+        const smoothing = target > current ? 0.2 : 0.05;
+        gateGain.gain.value = current + (target - current) * smoothing;
+
+        gateClosed = gateGain.gain.value < 0.1;
+
+        localVoiceActive = !gateClosed && db > threshold + 3 && !highOnlyNoise;
+
+        if (timestamp - lastVoiceUpdate > updateInterval) {
+          setVoiceActive((prev) =>
+            prev !== localVoiceActive ? localVoiceActive : prev,
+          );
+          lastVoiceUpdate = timestamp;
+        }
+
+        if (timestamp - lastGateUpdate > updateInterval) {
+          setVisualizerGateStatus((prev) =>
+            prev !== gateClosed ? gateClosed : prev,
+          );
+          lastGateUpdate = timestamp;
+        }
+      } else if (gateGain) {
+        gateGain.gain.value = 1.0;
+        gateClosed = false;
+        localVoiceActive = false;
+
+        if (visualizerGateStatus !== false) {
+          setVisualizerGateStatus(false);
+        }
+        if (voiceActive !== false) {
+          setVoiceActive(false);
+        }
+      }
+
+      // Core orb
+      const coreRadius = h * 0.35;
+      const coreGrad = ctx.createRadialGradient(
+        cx,
+        cy,
+        coreRadius * 0.1,
+        cx,
+        cy,
+        coreRadius,
       );
-      x += barWidth + 1;
-    }
 
-    // Shared RMS / dB computation
-    let sum = 0;
-    for (let i = 0; i < bufferLength; i++) {
-      const sample = (timeData[i] - 128) / 128.0;
-      sum += sample * sample;
-    }
-    const rms = Math.sqrt(sum / bufferLength);
-    const db = 20 * Math.log10(rms || 0.00001); // approx -100..0 dB
+      if (highOnlyNoise) {
+        coreGrad.addColorStop(0, 'rgba(248,113,113,0.45)');
+        coreGrad.addColorStop(0.5, 'rgba(127,29,29,0.25)');
+        coreGrad.addColorStop(1, 'rgba(15,23,42,0.0)');
+      } else if (!gateClosed && localVoiceActive) {
+        coreGrad.addColorStop(0, 'rgba(56,189,248,0.6)');
+        coreGrad.addColorStop(0.4, 'rgba(59,130,246,0.35)');
+        coreGrad.addColorStop(1, 'rgba(15,23,42,0.0)');
+      } else {
+        coreGrad.addColorStop(0, 'rgba(129,140,248,0.35)');
+        coreGrad.addColorStop(0.5, 'rgba(30,64,175,0.25)');
+        coreGrad.addColorStop(1, 'rgba(15,23,42,0.0)');
+      }
 
-    // Draw Hyper-Gate threshold line
-    if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
-      const threshY =
-        canvas.height * (1 - (settingsRef.current.threshold + 100) / 100);
-      ctx.strokeStyle = '#6366f1';
-      ctx.setLineDash([5, 5]);
-      ctx.lineWidth = 1;
+      ctx.fillStyle = coreGrad;
       ctx.beginPath();
-      ctx.moveTo(0, threshY);
-      ctx.lineTo(canvas.width, threshY);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
+      ctx.arc(cx, cy, coreRadius, 0, Math.PI * 2);
+      ctx.fill();
 
-    // ---------- HYPER-GATE ----------
-    let gateClosed = false;
-if (gateGain && settingsRef.current.denoise && !settingsRef.current.isBypassed) {
-  const threshold = settingsRef.current.threshold;
-  const target = db < threshold ? 0.001 : 1.0; // closed vs open
+      // Red veil for harsh highs
+      if (highOnlyNoise) {
+        const noiseGrad = ctx.createLinearGradient(0, 0, 0, h * 0.4);
+        noiseGrad.addColorStop(0, 'rgba(248,113,113,0.4)');
+        noiseGrad.addColorStop(1, 'rgba(15,23,42,0.0)');
+        ctx.fillStyle = noiseGrad;
+        ctx.fillRect(0, 0, w, h * 0.4);
+      }
 
-  const current = gateGain.gain.value;
-  const smoothing = target > current ? 0.2 : 0.05; // attack / release
-  gateGain.gain.value = current + (target - current) * smoothing;
+      // Breathing ring when voice active
+      if (!gateClosed && localVoiceActive) {
+        const t = (timestamp % 2000) / 2000;
+        const pulse = 0.85 + 0.15 * Math.sin(t * Math.PI * 2);
+        const ringRadius = coreRadius * pulse;
 
-  gateClosed = gateGain.gain.value < 0.1;
+        ctx.beginPath();
+        ctx.arc(cx, cy, ringRadius, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(56,189,248,0.7)';
+        ctx.lineWidth = 3;
+        ctx.setLineDash([10, 8]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
 
-  if (timestamp - lastGateUpdate > updateInterval) {
-    setVisualizerGateStatus((prev) =>
-      prev !== gateClosed ? gateClosed : prev
-    );
-    lastGateUpdate = timestamp;
-  }
-} else if (gateGain) {
-  // Gate off or bypassed: fully open
-  gateGain.gain.value = 1.0;
-  gateClosed = false;
-  if (visualizerGateStatus !== false) {
-    setVisualizerGateStatus(false);
-  }
-}
+      // Gate threshold line
+      if (features.denoise && !settingsRef.current.isBypassed) {
+        const threshold = settingsRef.current.threshold;
+        const norm = (threshold + 100) / 100;
+        const threshY = h * (1 - norm);
+        ctx.strokeStyle = '#6366f1';
+        ctx.setLineDash([5, 5]);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, threshY);
+        ctx.lineTo(w, threshY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
 
+      // Smart Gain Rider
+      const autoGainNode = processingRefs.current.autoGain;
+      const gainRiderEnabled =
+        features.smartMixing && !settingsRef.current.isBypassed;
 
-    // ---------- SMART GAIN RIDER ----------
-   // ---------- SMART GAIN RIDER (with Speech Focus Boost) ----------
-const autoGain = processingRefs.current.autoGain;
-const gainRiderEnabled =
-  features.smartMixing && !settingsRef.current.isBypassed;
+      if (autoGainNode && gainRiderEnabled && !gateClosed) {
+        const aggressiveMode =
+          settingsRef.current.denoise && settingsRef.current.threshold > -40;
 
-if (autoGain && gainRiderEnabled && !gateClosed) {
-  // Only ride gain when gate is OPEN (speech/music present)
+        const targetSpeechDb = aggressiveMode ? -18 : -24;
+        const maxBoostDb = aggressiveMode ? 16 : 12;
+        const maxCutDb = -12;
 
-  // If gate threshold is very high (aggressive noise kill),
-  // we assume a noisy environment and push speech a bit hotter.
-  const aggressiveMode =
-    settingsRef.current.denoise && settingsRef.current.threshold > -40;
+        let neededChange = targetSpeechDb - db;
+        if (neededChange > maxBoostDb) neededChange = maxBoostDb;
+        if (neededChange < maxCutDb) neededChange = maxCutDb;
 
-  const targetSpeechDb = aggressiveMode ? -18 : -24;  // louder target when gating hard
-  const maxBoostDb = aggressiveMode ? 16 : 12;        // allow a bit more upward gain
-  const maxCutDb = -12;
-  const gainUpdateInterval = 200;
+        const desiredLinear = Math.pow(10, neededChange / 20);
+        const currentLinear = autoGainNode.gain.value || 1.0;
 
-  let neededChange = targetSpeechDb - db;
-  if (neededChange > maxBoostDb) neededChange = maxBoostDb;
-  if (neededChange < maxCutDb) neededChange = maxCutDb;
+        const smoothingRider = 0.02;
+        autoGainNode.gain.value =
+          currentLinear + (desiredLinear - currentLinear) * smoothingRider;
 
-  const desiredLinear = Math.pow(10, neededChange / 20);
-  const currentLinear = autoGain.gain.value || 1.0;
+        if (timestamp - lastGainUpdate > gainUpdateInterval) {
+          const appliedDb =
+            20 * Math.log10(autoGainNode.gain.value || 0.00001);
+          setGainRiderDb(parseFloat(appliedDb.toFixed(1)));
+          lastGainUpdate = timestamp;
+        }
+      } else if (autoGainNode) {
+        const currentLinear = autoGainNode.gain.value || 1.0;
+        const targetLinear = 1.0;
+        const smoothingBack = 0.05;
 
-  // Smooth rider so it doesn't pump
-  const smoothing = 0.02;
-  autoGain.gain.value =
-    currentLinear + (desiredLinear - currentLinear) * smoothing;
+        autoGainNode.gain.value =
+          currentLinear + (targetLinear - currentLinear) * smoothingBack;
 
-  if (timestamp - lastGainUpdate > gainUpdateInterval) {
-    const appliedDb =
-      20 * Math.log10(autoGain.gain.value || 0.00001);
-    setGainRiderDb(parseFloat(appliedDb.toFixed(1)));
-    lastGainUpdate = timestamp;
-  }
-} else if (autoGain) {
-  // Gate closed OR SmartMixing off:
-  // → do NOT boost noise, gently return toward unity and reset display
-  const currentLinear = autoGain.gain.value || 1.0;
-  const targetLinear = 1.0;
-  const smoothingBack = 0.05;
+        if (timestamp - lastGainUpdate > gainUpdateInterval && gainRiderDb !== 0) {
+          setGainRiderDb(0);
+          lastGainUpdate = timestamp;
+        }
+      }
+    };
 
-  autoGain.gain.value =
-    currentLinear + (targetLinear - currentLinear) * smoothingBack;
+    draw(performance.now());
+  };
 
-  if (timestamp - lastGainUpdate > 200 && gainRiderDb !== 0) {
-    setGainRiderDb(0);
-    lastGainUpdate = timestamp;
-  }
-}
-};
-
-  draw(performance.now());
-};
-
+  // Monitor gain on/off
   useEffect(() => {
     if (processingRefs.current.monitorGain && audioContext) {
       const shouldHear = isMonitoring && recordingState !== 'review';
@@ -724,10 +1163,17 @@ if (autoGain && gainRiderEnabled && !gateClosed) {
     }
   }, [isMonitoring, recordingState, audioContext]);
 
+  // --- RENDER ---
   return (
     <div className="flex flex-col h-[100dvh] bg-slate-900 text-white font-sans overflow-hidden">
       <audio
         ref={audioElRef}
+        crossOrigin="anonymous"
+        onEnded={() => setIsPlayingFile(false)}
+      />
+      <video
+        ref={videoElRef}
+        className="hidden"
         crossOrigin="anonymous"
         onEnded={() => setIsPlayingFile(false)}
       />
@@ -736,7 +1182,7 @@ if (autoGain && gainRiderEnabled && !gateClosed) {
       <input
         type="file"
         ref={fileInputRef}
-        accept="audio/*"
+        accept="audio/*,video/*"
         className="hidden"
         onChange={handleFileUpload}
       />
@@ -760,7 +1206,7 @@ if (autoGain && gainRiderEnabled && !gateClosed) {
                     ? 'bg-green-500 animate-pulse'
                     : 'bg-slate-600'
                 }`}
-              ></span>
+              />
               <p className="text-[10px] md:text-xs text-slate-400 font-medium">
                 System Ready • v11.x
               </p>
@@ -886,8 +1332,7 @@ if (autoGain && gainRiderEnabled && !gateClosed) {
                 <div className="text-xs font-bold mb-1">SAMPLE RATE</div>
                 <div
                   className={`text-lg font-mono flex items-center gap-2 ${
-                    audioStats.sampleRate > 0 &&
-                    audioStats.sampleRate < 44100
+                    audioStats.sampleRate > 0 && audioStats.sampleRate < 44100
                       ? 'text-amber-500'
                       : 'text-indigo-400'
                   }`}
@@ -940,7 +1385,7 @@ if (autoGain && gainRiderEnabled && !gateClosed) {
           <div className="flex-1 overflow-y-auto p-6 pb-20 lg:pb-6">
             <div className="mb-6">
               <h2 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">
-                Input & Pre-Gain
+                Input &amp; Pre-Gain
               </h2>
               <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
                 <div className="flex justify-between items-center mb-2">
@@ -982,7 +1427,7 @@ if (autoGain && gainRiderEnabled && !gateClosed) {
               />
 
               {features.denoise && (
-                <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 mt-3 -mb-3 transition-opacity duration-300">
+                <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 mt-3 -mb-3 transition-opacity duration-300 animate-in fade-in slide-in-from-top-2">
                   <div className="flex justify-between items-center mb-2">
                     <span className="text-xs font-medium text-slate-400">
                       Noise Threshold
@@ -1008,6 +1453,7 @@ if (autoGain && gainRiderEnabled && !gateClosed) {
                       </span>
                     </div>
                   </div>
+
                   <input
                     type="range"
                     min="-100"
@@ -1019,10 +1465,25 @@ if (autoGain && gainRiderEnabled && !gateClosed) {
                     }
                     className="w-full h-1 bg-indigo-700 rounded-lg appearance-none cursor-pointer"
                   />
-                  <p className="text-[10px] text-slate-500 mt-2 leading-tight">
-                    Move until background noise disappears on the meters, but
-                    voices still open cleanly.
-                  </p>
+
+                  <div className="mt-3 flex items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={startAutoCalibrate}
+                      disabled={isAutoCalibrating}
+                      className={`text-[10px] px-3 py-1.5 rounded-lg border ${
+                        isAutoCalibrating
+                          ? 'border-indigo-500/60 bg-indigo-900/30 text-indigo-300 cursor-wait'
+                          : 'border-slate-700 bg-slate-950 text-slate-300 hover:bg-slate-900'
+                      }`}
+                    >
+                      {isAutoCalibrating ? 'Listening to room…' : 'Auto-calibrate gate'}
+                    </button>
+                    <span className="text-[9px] text-slate-500 text-right">
+                      Tip: Run auto-calibrate when the room is “normally noisy” (fans,
+                      kids, AC, etc).
+                    </span>
+                  </div>
                 </div>
               )}
 
@@ -1144,7 +1605,7 @@ if (autoGain && gainRiderEnabled && !gateClosed) {
                     onClick={toggleRecording}
                     className="flex items-center gap-3 px-4 py-2 text-white font-mono text-sm"
                   >
-                    <span className="w-3 h-3 bg-red-500 rounded-sm animate-pulse"></span>
+                    <span className="w-3 h-3 bg-red-500 rounded-sm animate-pulse" />
                     {formatTime(recordingDuration)}
                     <span className="font-bold border-l border-red-500 pl-3 ml-1">
                       STOP
@@ -1159,19 +1620,18 @@ if (autoGain && gainRiderEnabled && !gateClosed) {
                     >
                       <Play size={14} fill="currentColor" /> PLAY
                     </button>
-                    <div className="w-px h-4 bg-slate-600"></div>
+                    <div className="w-px h-4 bg-slate-600" />
                     <button
                       onClick={discardRecording}
                       className="px-3 py-2 hover:bg-slate-700 text-slate-400 hover:text-red-400"
                     >
                       <Trash2 size={16} />
                     </button>
-                    <div className="w-px h-4 bg-slate-600"></div>
+                    <div className="w-px h-4 bg-slate-600" />
                     <button
                       onClick={shareRecording}
                       disabled={
-                        exportStatus === 'sharing' ||
-                        exportStatus === 'done'
+                        exportStatus === 'sharing' || exportStatus === 'done'
                       }
                       className={`px-4 py-2 hover:bg-slate-700 rounded-r-full font-bold text-sm flex items-center gap-2 ${
                         exportStatus === 'done'
@@ -1190,6 +1650,19 @@ if (autoGain && gainRiderEnabled && !gateClosed) {
                   </div>
                 )}
               </div>
+
+              {recordingState === 'review' && (
+                <div className="mt-1 text-[10px] text-slate-300 font-mono text-center">
+                  {isPlayingBack
+                    ? `${formatTime(playbackPosition)} / ${
+                        playbackDuration ? formatTime(playbackDuration) : '--:--'
+                      }`
+                    : playbackDuration
+                    ? `Ready • ${formatTime(playbackDuration)}`
+                    : 'Ready'}
+                </div>
+              )}
+
               {recordingState === 'recording' && (
                 <div className="mt-2 text-[10px] text-red-400 font-bold tracking-widest animate-pulse">
                   RECORDING TEST SIGNAL...
@@ -1225,6 +1698,29 @@ if (autoGain && gainRiderEnabled && !gateClosed) {
                 text="MASTERING"
               />
             </div>
+
+            {/* File mode indicator */}
+            {mode === 'file' && fileInfo && (
+              <div className="absolute top-4 left-4 z-10 text-[11px] text-slate-300 bg-slate-900/80 px-3 py-1 rounded-full border border-slate-700">
+                File mode • {fileInfo.isVideo ? 'Video audio track' : 'Audio file'} •{' '}
+                <span className="text-slate-100 font-semibold">
+                  {fileInfo.name}
+                </span>
+              </div>
+            )}
+
+            {/* Speech Priority Badge */}
+            {voiceActive && !isBypassed && (
+              <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20">
+                <div className="px-4 py-1.5 rounded-full bg-slate-900/80 border border-cyan-400/70 shadow-[0_0_18px_rgba(34,211,238,0.55)] flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+                  <span className="text-[11px] font-semibold tracking-[0.18em] text-cyan-200 uppercase">
+                    Speech Priority Active
+                  </span>
+                </div>
+              </div>
+            )}
+
             <canvas
               ref={canvasRef}
               width={1000}
@@ -1235,6 +1731,7 @@ if (autoGain && gainRiderEnabled && !gateClosed) {
             />
           </div>
 
+          {/* FOOTER TRANSPORT */}
           <div className="flex-none h-20 md:h-24 bg-slate-950 border-t border-slate-800 px-4 md:px-8 flex items-center justify-between z-20">
             <div className="flex items-center gap-4 md:gap-6">
               <button
@@ -1261,9 +1758,7 @@ if (autoGain && gainRiderEnabled && !gateClosed) {
                   }`}
                 >
                   {isLive && recordingState === 'review' ? (
-                    <span className="text-amber-400">
-                      Reviewing (Mic Muted)
-                    </span>
+                    <span className="text-amber-400">Reviewing (Mic Muted)</span>
                   ) : isLive ? (
                     <>
                       <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
@@ -1279,7 +1774,7 @@ if (autoGain && gainRiderEnabled && !gateClosed) {
             {/* Meters + Gain Rider readout */}
             <div className="flex items-center gap-2 md:gap-8">
               <Meter label="In L" level={isLive ? 75 : 0} />
-              <div className="h-8 w-px bg-slate-800 hidden md:block"></div>
+              <div className="h-8 w-px bg-slate-800 hidden md:block" />
               <Meter
                 label="Out L"
                 level={isLive && recordingState !== 'review' ? 85 : 0}
@@ -1300,6 +1795,13 @@ if (autoGain && gainRiderEnabled && !gateClosed) {
                   ? `${gainRiderDb >= 0 ? '+' : ''}${gainRiderDb.toFixed(1)} dB`
                   : 'OFF'}
               </span>
+
+              {voiceActive && !isBypassed && (
+                <span className="mt-1 text-[10px] text-amber-400 flex items-center gap-1">
+                  <AlertCircle className="w-3 h-3" />
+                  Speech priority boost is active
+                </span>
+              )}
             </div>
 
             <div className="flex items-center gap-2 md:gap-4">
@@ -1311,11 +1813,12 @@ if (autoGain && gainRiderEnabled && !gateClosed) {
                     : 'bg-slate-800 border-slate-700 text-slate-400'
                 }`}
               >
-                <Power size={18} />{' '}
+                <Power size={18} />
                 <span className="hidden md:inline">
                   {isBypassed ? 'BYPASSED' : 'BYPASS AI'}
                 </span>
               </button>
+
               <button
                 onClick={() => setIsMonitoring(!isMonitoring)}
                 disabled={recordingState === 'review'}
@@ -1331,10 +1834,66 @@ if (autoGain && gainRiderEnabled && !gateClosed) {
               >
                 <Headphones size={20} />
                 {isMonitoring && recordingState !== 'review' && (
-                  <span className="absolute -top-1 -right-1 w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
+                  <span className="absolute -top-1 -right-1 w-2 h-2 bg-green-400 rounded-full animate-pulse" />
                 )}
               </button>
-              <div className="hidden md:block h-8 w-px bg-slate-800 mx-2"></div>
+
+              {/* Hard Reset / Troubleshoot */}
+              <button
+                onClick={hardReset}
+                className="hidden md:flex items-center gap-1 px-3 py-2 rounded-lg border border-amber-500/60 bg-slate-900 text-amber-300 text-[11px] font-semibold hover:bg-slate-800"
+                title="Stop audio engine and reset AI if something feels stuck"
+              >
+                <RefreshCw className="w-3 h-3" />
+                Reset
+              </button>
+
+              {/* Process & Export (File mode) */}
+              {mode === 'file' && fileInfo && (
+                <button
+                  onClick={processAndExportFile}
+                  disabled={
+                    fileExportStatus === 'processing' ||
+                    !destNodeRef.current ||
+                    !destNodeRef.current.stream
+                  }
+                  className={`
+                    hidden md:flex items-center gap-1 px-3 py-2 rounded-lg border text-[11px] font-semibold 
+                    ${
+                      fileExportStatus === 'done'
+                        ? 'border-emerald-500/70 bg-emerald-900/20 text-emerald-300'
+                        : fileExportStatus === 'processing'
+                        ? 'border-emerald-500/70 bg-slate-900 text-emerald-300 opacity-80 cursor-wait'
+                        : !destNodeRef.current || !destNodeRef.current.stream
+                        ? 'border-slate-700 bg-slate-900 text-slate-500 cursor-not-allowed'
+                        : 'border-emerald-500/70 bg-slate-900 text-emerald-300 hover:bg-slate-800'
+                    }
+                  `}
+                  title="Play the file through TIWATON and download the processed audio"
+                >
+                  {fileExportStatus === 'processing' && (
+                    <span className="w-3 h-3 rounded-full border-2 border-emerald-300 border-t-transparent animate-spin" />
+                  )}
+                  {fileExportStatus === 'done' ? (
+                    <>
+                      <Check className="w-3 h-3" />
+                      <span>Mastered</span>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-3 h-3" />
+                      <span>
+                        {fileExportStatus === 'processing'
+                          ? 'Processing…'
+                          : 'Process & Export'}
+                      </span>
+                    </>
+                  )}
+                </button>
+              )}
+
+              <div className="hidden md:block h-8 w-px bg-slate-800 mx-2" />
+
               <button
                 onClick={cycleOutputTarget}
                 className="hidden md:block p-3 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 border border-slate-700"
@@ -1365,9 +1924,7 @@ const FeatureToggle = ({ icon, label, desc, active, onClick }) => (
     <div className="flex items-center justify-between mb-1">
       <div
         className={`flex items-center gap-3 ${
-          active
-            ? 'text-indigo-400'
-            : 'text-slate-400 group-hover:text-slate-300'
+          active ? 'text-indigo-400' : 'text-slate-400 group-hover:text-slate-300'
         }`}
       >
         {icon}
@@ -1438,7 +1995,6 @@ function HelpCorner() {
       {isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
           <div className="flex max-h-[80vh] w-full max-w-lg flex-col rounded-2xl border border-slate-700 bg-slate-950 shadow-2xl">
-            
             {/* Header */}
             <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
               <div className="flex items-center gap-2">
@@ -1465,7 +2021,6 @@ function HelpCorner() {
 
             {/* Body */}
             <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3 text-[11px] leading-relaxed text-slate-300">
-
               <p className="font-semibold text-slate-100">1️⃣ Before you start</p>
               <ul className="ml-4 list-disc space-y-1">
                 <li>Use a wired mic or mixer feed if possible.</li>
@@ -1473,17 +2028,23 @@ function HelpCorner() {
                 <li>Turn off system Noise Suppression and AGC.</li>
               </ul>
 
-              <p className="mt-2 font-semibold text-slate-100">2️⃣ Dial in Hyper-Gate</p>
+              <p className="mt-2 font-semibold text-slate-100">
+                2️⃣ Dial in Hyper-Gate
+              </p>
               <ul className="ml-4 list-disc space-y-1">
                 <li>Quiet the room first.</li>
                 <li>Increase Noise Threshold until background disappears.</li>
                 <li>If speech chops, move threshold slightly left.</li>
               </ul>
 
-              <p className="mt-2 font-semibold text-slate-100">3️⃣ Troubleshooting</p>
+              <p className="mt-2 font-semibold text-slate-100">
+                3️⃣ Troubleshooting
+              </p>
               <ul className="ml-4 list-disc space-y-1">
                 <li>
-                  <span className="font-semibold text-slate-100">❗ Echo / doubling</span>
+                  <span className="font-semibold text-slate-100">
+                    ❗ Echo / doubling
+                  </span>
                   <ul className="ml-4 list-disc">
                     <li>Do not send RAW + AI output to stream.</li>
                     <li>Send ONLY Tiwaton output to OBS/YouTube.</li>
@@ -1491,7 +2052,9 @@ function HelpCorner() {
                 </li>
 
                 <li>
-                  <span className="font-semibold text-slate-100">❗ Gate too aggressive</span>
+                  <span className="font-semibold text-slate-100">
+                    ❗ Gate too aggressive
+                  </span>
                   <ul className="ml-4 list-disc">
                     <li>Lower Noise Threshold (move left).</li>
                     <li>Start at −55 dB and increase gradually.</li>
@@ -1501,11 +2064,12 @@ function HelpCorner() {
 
               <div className="mt-2 rounded-xl border border-slate-800 bg-slate-900 px-3 py-2">
                 <p className="text-[11px] text-slate-400">
-                  <span className="font-semibold text-indigo-300">Golden rule:</span>{' '}
+                  <span className="font-semibold text-indigo-300">
+                    Golden rule:
+                  </span>{' '}
                   Fix physical mic problems first, then let Tiwaton polish.
                 </p>
               </div>
-
             </div>
 
             {/* Footer */}
@@ -1513,7 +2077,6 @@ function HelpCorner() {
               <span>Tips tuned for your studio version.</span>
               <span className="hidden sm:inline">Your audio co-pilot is here.</span>
             </div>
-
           </div>
         </div>
       )}
