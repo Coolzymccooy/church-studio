@@ -108,7 +108,10 @@ const AudioProcessor = ({ goHome }) => {
   const [isPlayingFile, setIsPlayingFile] = useState(false);
   const [audioContext, setAudioContext] = useState(null);
   const [mode, setMode] = useState('live');
+
+  // OLD single "outputTarget" (display of which streaming app you're sending to)
   const [outputTarget, setOutputTarget] = useState('OBS Studio');
+
   const [showSettings, setShowSettings] = useState(false);
   const [isMonitoring, setIsMonitoring] = useState(false);
   const [isBypassed, setIsBypassed] = useState(false);
@@ -146,10 +149,17 @@ const AudioProcessor = ({ goHome }) => {
     inputs: [],
     outputs: [],
   });
+
+  // UPDATED: selectedDevices now holds:
+  // - inputId           → mic / mixer
+  // - outputId          → monitoring output (AirPods, speakers) – used by setSinkId
+  // - broadcastBus      → conceptual “broadcast output” (VB-Cable, Loopback, etc)
   const [selectedDevices, setSelectedDevices] = useState({
     inputId: 'default',
     outputId: 'default',
+    broadcastBus: 'Not set',
   });
+
   const [audioStats, setAudioStats] = useState({
     sampleRate: 0,
     bufferSize: 0,
@@ -231,7 +241,11 @@ const AudioProcessor = ({ goHome }) => {
 
   const resetDeviceState = () => {
     setAvailableDevices({ inputs: [], outputs: [] });
-    setSelectedDevices({ inputId: 'default', outputId: 'default' });
+    setSelectedDevices({
+      inputId: 'default',
+      outputId: 'default',
+      broadcastBus: 'Not set',
+    });
   };
 
   const getDevices = async () => {
@@ -489,6 +503,7 @@ const AudioProcessor = ({ goHome }) => {
       ana.connect(monitorGain);
       ana.connect(destNode);
 
+      // MONITORING OUTPUT DEVICE (AirPods / speakers)
       if (ctx.destination.setSinkId && selectedDevices.outputId !== 'default') {
         try {
           await ctx.destination.setSinkId(selectedDevices.outputId);
@@ -1328,6 +1343,20 @@ const AudioProcessor = ({ goHome }) => {
     }
   }, [isMonitoring, recordingState, audioContext]);
 
+  // --- Helper: Resolve labels for Output Router panel ---
+  const resolveOutputLabel = (id) => {
+    if (id === 'default') return 'System Default';
+    const found = availableDevices.outputs.find((d) => d.deviceId === id);
+    if (found?.label) return found.label;
+    return 'Custom Device';
+  };
+
+  const monitorLabel = resolveOutputLabel(selectedDevices.outputId);
+  const broadcastLabel =
+    selectedDevices.broadcastBus === 'Same as monitor'
+      ? monitorLabel
+      : selectedDevices.broadcastBus || 'Not set';
+
   // --- RENDER ---
   return (
     <div className="flex flex-col h-[100dvh] bg-slate-900 text-white font-sans overflow-hidden">
@@ -1442,9 +1471,11 @@ const AudioProcessor = ({ goHome }) => {
                 </button>
               </div>
             </div>
+
+            {/* INPUT SOURCE */}
             <div>
               <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">
-                Input Source
+                Input Source (Mic / Mixer)
               </label>
               <select
                 className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3"
@@ -1464,9 +1495,11 @@ const AudioProcessor = ({ goHome }) => {
                 ))}
               </select>
             </div>
+
+            {/* OUTPUT: MONITORING */}
             <div>
               <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">
-                Output Destination
+                Monitoring Output (what you hear)
               </label>
               <select
                 className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3"
@@ -1485,7 +1518,40 @@ const AudioProcessor = ({ goHome }) => {
                   </option>
                 ))}
               </select>
+              <p className="mt-1 text-[10px] text-slate-500">
+                Choose AirPods, headphones, or speakers the sound engineer will monitor on.
+              </p>
             </div>
+
+            {/* OUTPUT: BROADCAST BUS (VIRTUAL CABLE) */}
+            <div>
+              <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">
+                Broadcast Output (what OBS / YouTube hears)
+              </label>
+              <select
+                className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3"
+                value={selectedDevices.broadcastBus}
+                onChange={(e) =>
+                  setSelectedDevices({
+                    ...selectedDevices,
+                    broadcastBus: e.target.value,
+                  })
+                }
+              >
+                <option value="Not set">Not set yet (set device in OBS)</option>
+                <option value="Same as monitor">Same as monitor output</option>
+                {availableDevices.outputs.map((d) => (
+                  <option key={d.deviceId} value={d.label || d.deviceId}>
+                    {d.label || `Bus ${d.deviceId.slice(0, 5)}...`}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-[10px] text-slate-500">
+                Pick the virtual cable / loopback device you also select as the input in OBS
+                (e.g. VB-CABLE, BlackHole, Loopback).
+              </p>
+            </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div
                 className={`p-4 rounded-xl border ${
@@ -2174,12 +2240,35 @@ const AudioProcessor = ({ goHome }) => {
                 </button>
               )}
 
+              {/* OUTPUT ROUTER PANEL (Monitor + Broadcast) */}
+              {/* OUTPUT ROUTER PANEL (Monitor + Broadcast) */}
+<div className="hidden md:flex flex-col items-end text-[10px] leading-tight mx-2 max-w-[260px]">
+  <span className="uppercase font-bold tracking-wide text-slate-500">
+    Output Router
+  </span>
+
+  <div className="flex items-baseline gap-1 text-slate-400">
+    <span>Monitor:</span>
+    <span className="text-slate-100 truncate inline-block max-w-[180px] align-bottom">
+      {monitorLabel}
+    </span>
+  </div>
+
+  <div className="flex items-baseline gap-1 text-slate-400">
+    <span>Broadcast:</span>
+    <span className="text-slate-100 truncate inline-block max-w-[180px] align-bottom">
+      {broadcastLabel}
+    </span>
+  </div>
+</div>
+
+
               <div className="hidden md:block h-8 w-px bg-slate-800 mx-2" />
 
               <button
                 onClick={cycleOutputTarget}
                 className="hidden md:block p-3 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 border border-slate-700"
-                title="Visual Reference Only: Configure in Settings"
+                title="Visual reference of your streaming app"
               >
                 {outputTargets.find((t) => t.name === outputTarget)?.icon || (
                   <Cpu size={20} />
