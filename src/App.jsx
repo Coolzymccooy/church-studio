@@ -615,7 +615,7 @@ const AudioProcessor = ({ goHome }) => {
 
     setMode('file');
     setIsPlayingFile(true);
-    setFileExportStatus(null); // reset export status on new file
+    setFileExportStatus(null);
     setFileInfo({
       name: file.name,
       type: file.type || (isVideo ? 'video/*' : 'audio/*'),
@@ -666,33 +666,6 @@ const AudioProcessor = ({ goHome }) => {
       };
     }
   };
-
-  // >>> added: helper to clear current file cleanly
-  const clearCurrentFile = () => {
-    try {
-      if (audioElRef.current) {
-        audioElRef.current.pause();
-        audioElRef.current.removeAttribute('src');
-        audioElRef.current.load();
-      }
-      if (videoElRef.current) {
-        videoElRef.current.pause();
-        videoElRef.current.removeAttribute('src');
-        videoElRef.current.load();
-      }
-    } catch (e) {
-      console.warn('Error clearing media elements', e);
-    }
-
-    setIsPlayingFile(false);
-    setFileInfo(null);
-    setFileExportStatus(null);
-    setFileDuration(0);
-    setTrimStart(0);
-    setTrimEnd(0);
-    setIsPreviewingTrim(false);
-  };
-  // <<< end added
 
   // --- RECORD CHECK ---
   const toggleRecording = () => {
@@ -803,22 +776,8 @@ const AudioProcessor = ({ goHome }) => {
 
     if (!destNodeRef.current || !destNodeRef.current.stream) {
       alert('No processed audio stream found. Start playback or wait for file to load fully.');
-      setFileExportStatus('error'); // >>> added
       return;
     }
-
-    // >>> added: check the processed stream has audio tracks
-    const tracks = destNodeRef.current.stream.getAudioTracks
-      ? destNodeRef.current.stream.getAudioTracks()
-      : [];
-    if (!tracks || tracks.length === 0) {
-      alert(
-        'The processed audio stream appears to be silent or has no audio track. Try playing the file once, then export again.',
-      );
-      setFileExportStatus('error');
-      return;
-    }
-    // <<< end added
 
     const mediaEl =
       (fileInfo?.isVideo ? videoElRef.current : audioElRef.current) ||
@@ -827,7 +786,6 @@ const AudioProcessor = ({ goHome }) => {
 
     if (!mediaEl || !mediaEl.src) {
       alert('Load an audio or video file first.');
-      setFileExportStatus('error'); // >>> added
       return;
     }
 
@@ -841,7 +799,6 @@ const AudioProcessor = ({ goHome }) => {
 
     if (!fullDuration || effectiveEnd <= effectiveStart) {
       alert('Trim selection is invalid. Check start/end and try again.');
-      setFileExportStatus('error'); // >>> added
       return;
     }
 
@@ -866,20 +823,15 @@ const AudioProcessor = ({ goHome }) => {
       return;
     }
 
-    // >>> adjusted timeout: shorter, safer
+    // Safety timeout in case "ended" never fires
     const effectiveDuration = effectiveEnd - effectiveStart;
-    const fallbackDuration =
-      fullDuration && fullDuration > 0 ? fullDuration : fileDuration || 30;
-    const safeDurationSeconds =
-      effectiveDuration > 0 ? effectiveDuration : fallbackDuration;
-    const maxRecordMs = (safeDurationSeconds + 5) * 1000;
+    const maxRecordMs = (effectiveDuration > 0 ? effectiveDuration : 300) * 1000 + 3000;
     const timeoutId = setTimeout(() => {
       if (recorder && recorder.state === 'recording') {
         console.warn('Export timeout reached, stopping recorder.');
         recorder.stop();
       }
     }, maxRecordMs);
-    // <<< timeout tweak
 
     recorder.ondataavailable = (e) => {
       if (e.data && e.data.size > 0) chunks.push(e.data);
@@ -936,56 +888,33 @@ const AudioProcessor = ({ goHome }) => {
     mediaEl.addEventListener('timeupdate', handleTimeUpdate);
     mediaEl.addEventListener('ended', handleEnded);
 
-    const startRecorderSafely = () => {
-      try {
-        if (recorder.state === 'inactive') {
-          recorder.start();
-        }
-      } catch (e) {
-        console.warn('Error starting recorder', e);
-        setFileExportStatus('error');
-      }
-    };
-
-    // >>> ensure media is ready before play
-    const startPlayback = () => {
-      const playPromise = mediaEl.play();
-      if (playPromise && playPromise.catch) {
-        playPromise
-          .catch((err) => {
-            console.error('Playback failed during export', err);
-            mediaEl.removeEventListener('ended', handleEnded);
-            mediaEl.removeEventListener('timeupdate', handleTimeUpdate);
-            try {
-              if (recorder.state === 'recording') {
-                recorder.stop();
-              }
-            } catch (e) {
-              console.warn('Error stopping recorder after playback failure', e);
+    const playPromise = mediaEl.play();
+    if (playPromise && playPromise.catch) {
+      playPromise
+        .catch((err) => {
+          console.error('Playback failed during export', err);
+          mediaEl.removeEventListener('ended', handleEnded);
+          mediaEl.removeEventListener('timeupdate', handleTimeUpdate);
+          try {
+            if (recorder.state === 'recording') {
+              recorder.stop();
             }
-            setFileExportStatus('error');
-            alert(
-              'Unable to play this file for export. Try pressing play once manually, then export again.',
-            );
-          })
-          .then(() => {
-            startRecorderSafely();
-          });
-      } else {
-        startRecorderSafely();
-      }
-    };
-
-    if (mediaEl.readyState < 2) {
-      const onCanPlay = () => {
-        mediaEl.removeEventListener('canplay', onCanPlay);
-        startPlayback();
-      };
-      mediaEl.addEventListener('canplay', onCanPlay);
+          } catch (e) {
+            console.warn('Error stopping recorder after playback failure', e);
+          }
+          setFileExportStatus('error');
+          alert(
+            'Unable to play this file for export. Try pressing play once manually, then export again.',
+          );
+        })
+        .then(() => {
+          if (recorder.state === 'inactive') {
+            recorder.start();
+          }
+        });
     } else {
-      startPlayback();
+      recorder.start();
     }
-    // <<< end added guards
   };
 
   const formatTime = (secs) => {
@@ -1136,7 +1065,7 @@ const AudioProcessor = ({ goHome }) => {
     let lastVoiceUpdate = 0;
     let lastGainUpdate = 0;
     const updateInterval = 100; // ms
-    const gainUpdateInterval = 200; // ms
+    const gainUpdateInterval = 200; // ms;
 
     const draw = (timestamp) => {
       animationRef.current = requestAnimationFrame(draw);
@@ -2203,15 +2132,14 @@ const AudioProcessor = ({ goHome }) => {
 
               {/* Process & Export (File mode) */}
               {mode === 'file' && fileInfo && (
-                <>
-                  <button
-                    onClick={processAndExportFile}
-                    disabled={
-                      fileExportStatus === 'processing' ||
-                      !destNodeRef.current ||
-                      !destNodeRef.current.stream
-                    }
-                    className={`
+                <button
+                  onClick={processAndExportFile}
+                  disabled={
+                    fileExportStatus === 'processing' ||
+                    !destNodeRef.current ||
+                    !destNodeRef.current.stream
+                  }
+                  className={`
                     hidden md:flex items-center gap-1 px-3 py-2 rounded-lg border text-[11px] font-semibold 
                     ${
                       fileExportStatus === 'done'
@@ -2223,39 +2151,27 @@ const AudioProcessor = ({ goHome }) => {
                         : 'border-emerald-500/70 bg-slate-900 text-emerald-300 hover:bg-slate-800'
                     }
                   `}
-                    title="Play the file through TIWATON and download the processed audio"
-                  >
-                    {fileExportStatus === 'processing' && (
-                      <span className="w-3 h-3 rounded-full border-2 border-emerald-300 border-t-transparent animate-spin" />
-                    )}
-                    {fileExportStatus === 'done' ? (
-                      <>
-                        <Check className="w-3 h-3" />
-                        <span>Mastered</span>
-                      </>
-                    ) : (
-                      <>
-                        <Upload className="w-3 h-3" />
-                        <span>
-                          {fileExportStatus === 'processing'
-                            ? 'Processing…'
-                            : 'Process & Export'}
-                        </span>
-                      </>
-                    )}
-                  </button>
-
-                  {/* >>> added small Clear button for file mode */}
-                  <button
-                    onClick={clearCurrentFile}
-                    className="hidden md:flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-700 bg-slate-900 text-slate-300 text-[11px] font-semibold hover:bg-slate-800"
-                    title="Clear current file from File mode"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                    <span>Clear File</span>
-                  </button>
-                  {/* <<< end added */}
-                </>
+                  title="Play the file through TIWATON and download the processed audio"
+                >
+                  {fileExportStatus === 'processing' && (
+                    <span className="w-3 h-3 rounded-full border-2 border-emerald-300 border-t-transparent animate-spin" />
+                  )}
+                  {fileExportStatus === 'done' ? (
+                    <>
+                      <Check className="w-3 h-3" />
+                      <span>Mastered</span>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-3 h-3" />
+                      <span>
+                        {fileExportStatus === 'processing'
+                          ? 'Processing…'
+                          : 'Process & Export'}
+                      </span>
+                    </>
+                  )}
+                </button>
               )}
 
               <div className="hidden md:block h-8 w-px bg-slate-800 mx-2" />
@@ -2369,10 +2285,10 @@ function HelpCorner() {
                 </div>
                 <div>
                   <p className="text-sm font-semibold text-slate-100">
-                    Quick help for better live sound
+                    TIWATON Sunday Service Assistant
                   </p>
                   <p className="text-[11px] text-slate-400">
-                    60-second checklist to make Tiwaton feel “magic”.
+                    Routing, setup & quick fixes for clean livestream audio.
                   </p>
                 </div>
               </div>
@@ -2385,62 +2301,154 @@ function HelpCorner() {
               </button>
             </div>
 
-            {/* Body */}
-            <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3 text-[11px] leading-relaxed text-slate-300">
-              <p className="font-semibold text-slate-100">1️⃣ Before you start</p>
-              <ul className="ml-4 list-disc space-y-1">
-                <li>Use a wired mic or mixer feed if possible.</li>
-                <li>Set mixer gain correctly before enabling AI.</li>
-                <li>Turn off system Noise Suppression and AGC.</li>
-              </ul>
-
-              <p className="mt-2 font-semibold text-slate-100">
-                2️⃣ Dial in Hyper-Gate
+            {/* Body – upgraded routing guide */}
+            <div className="flex-1 space-y-4 overflow-y-auto px-4 py-3 text-[11px] leading-relaxed text-slate-300">
+              {/* SECTION: Title */}
+              <p className="font-semibold text-slate-100 text-sm">
+                🎚 TIWATON + OBS Routing Guide
               </p>
-              <ul className="ml-4 list-disc space-y-1">
-                <li>Quiet the room first.</li>
-                <li>Increase Noise Threshold until background disappears.</li>
-                <li>If speech chops, move threshold slightly left.</li>
-              </ul>
-
-              <p className="mt-2 font-semibold text-slate-100">
-                3️⃣ Troubleshooting
+              <p className="text-[11px] text-slate-400">
+                Follow this quick workflow every Sunday to get clean, consistent livestream audio.
               </p>
-              <ul className="ml-4 list-disc space-y-1">
-                <li>
-                  <span className="font-semibold text-slate-100">
-                    ❗ Echo / doubling
-                  </span>
-                  <ul className="ml-4 list-disc">
-                    <li>Do not send RAW + AI output to stream.</li>
-                    <li>Send ONLY Tiwaton output to OBS/YouTube.</li>
-                  </ul>
-                </li>
 
-                <li>
-                  <span className="font-semibold text-slate-100">
-                    ❗ Gate too aggressive
-                  </span>
-                  <ul className="ml-4 list-disc">
-                    <li>Lower Noise Threshold (move left).</li>
-                    <li>Start at −55 dB and increase gradually.</li>
-                  </ul>
-                </li>
-              </ul>
+              {/* SECTION 1: Physical Setup */}
+              <div className="rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 space-y-1">
+                <p className="font-semibold text-slate-100">1️⃣ Physical Setup</p>
+                <ul className="ml-4 list-disc space-y-1">
+                  <li>Pastor mic → Mixer / Audio Interface (correct gain, no clipping).</li>
+                  <li>
+                    Only <span className="font-semibold text-indigo-300">one</span> clean feed to the computer (USB preferred).
+                  </li>
+                  <li>Turn off system Noise Suppression / AGC.</li>
+                  <li>Sound engineer monitors with AirPods / headphones.</li>
+                </ul>
+              </div>
 
+              {/* SECTION 2: TIWATON INPUT */}
+              <div>
+                <p className="font-semibold text-slate-100">2️⃣ Inside TIWATON Studio</p>
+
+                <div className="mt-1 ml-4">
+                  <p className="font-semibold text-slate-200">A. Input Source</p>
+                  <ul className="ml-4 list-disc space-y-1">
+                    <li>Select mixer or USB interface (e.g. Scarlett, Behringer, Yamaha AG06).</li>
+                    <li>Confirm levels are healthy but not clipping.</li>
+                  </ul>
+                </div>
+
+                <div className="mt-2 ml-4">
+                  <p className="font-semibold text-slate-200">B. Outputs</p>
+                  <ul className="ml-4 list-disc space-y-1">
+                    <li>
+                      <span className="text-indigo-300 font-semibold">Monitoring Output</span>{' '}
+                      → AirPods / Headphones (what you listen on).
+                    </li>
+                    <li>
+                      <span className="text-indigo-300 font-semibold">Broadcast Output</span>{' '}
+                      → Virtual Cable (what OBS / YouTube hears).
+                    </li>
+                    <li>
+                      Footer will show something like:
+                      <br />
+                      <span className="text-slate-400 ml-4">
+                        Monitor: AirPods Max · Broadcast: VB-CABLE Input
+                      </span>
+                    </li>
+                  </ul>
+                </div>
+
+                <div className="mt-2 ml-4">
+                  <p className="font-semibold text-slate-200">C. Processing Checklist</p>
+                  <ul className="ml-4 list-disc space-y-1">
+                    <li>Enable Hyper-Gate, Voice Isolation, Warmth, Auto-Mixing.</li>
+                    <li>
+                      Run{' '}
+                      <span className="font-semibold text-indigo-300">
+                        Auto-Calibrate Gate
+                      </span>{' '}
+                      once when the room is at normal noise level.
+                    </li>
+                    <li>
+                      Use <span className="font-semibold">Record Check</span> to confirm clarity
+                      before going live.
+                    </li>
+                  </ul>
+                </div>
+              </div>
+
+              {/* SECTION 3: OBS Setup */}
+              <div>
+                <p className="font-semibold text-slate-100">3️⃣ In OBS / Streaming Apps</p>
+
+                <ul className="ml-4 list-disc space-y-1 mt-1">
+                  <li>
+                    Add{' '}
+                    <span className="font-semibold text-indigo-300">
+                      Audio Input Capture
+                    </span>{' '}
+                    → Choose:{' '}
+                    <span className="font-semibold">VB-CABLE / BlackHole / Loopback</span>.
+                  </li>
+                  <li>
+                    Remove all raw mics (webcam, laptop mic, mixer direct, built-in mic,
+                    etc).
+                  </li>
+                  <li>
+                    Rule:
+                    <br />
+                    <span className="ml-4 text-amber-300 font-semibold">
+                      If TIWATON says “Broadcast: VB-CABLE”, OBS must also use VB-CABLE.
+                    </span>
+                  </li>
+                </ul>
+              </div>
+
+              {/* SECTION 4: Troubleshooting */}
+              <div>
+                <p className="font-semibold text-slate-100">4️⃣ Troubleshooting (Live)</p>
+
+                <ul className="ml-4 list-disc space-y-1 mt-1">
+                  <li>
+                    <span className="text-red-400 font-semibold">
+                      No sound on stream?
+                    </span>{' '}
+                    Check Live is ON and OBS is using the Virtual Cable device.
+                  </li>
+                  <li>
+                    <span className="text-red-400 font-semibold">
+                      Echo / double audio?
+                    </span>{' '}
+                    Two mics active. In OBS, keep only the virtual cable input.
+                  </li>
+                  <li>
+                    <span className="text-amber-300 font-semibold">
+                      Gate too strong?
+                    </span>{' '}
+                    Lower Noise Threshold in TIWATON (move the slider left).
+                  </li>
+                  <li>
+                    <span className="text-indigo-300 font-semibold">
+                      TIWATON acting strange?
+                    </span>{' '}
+                    Use Reset in the footer and restart Live.
+                  </li>
+                </ul>
+              </div>
+
+              {/* GOLDEN RULE CARD */}
               <div className="mt-2 rounded-xl border border-slate-800 bg-slate-900 px-3 py-2">
                 <p className="text-[11px] text-slate-400">
-                  <span className="font-semibold text-indigo-300">
-                    Golden rule:
-                  </span>{' '}
-                  Fix physical mic problems first, then let Tiwaton polish.
+                  <span className="font-semibold text-indigo-300">Golden Rule:</span>{' '}
+                  TIWATON replaces all mics in OBS. Only the{' '}
+                  <span className="font-semibold text-indigo-300">Broadcast Output</span> from
+                  TIWATON should be selected as the mic in OBS / streaming apps.
                 </p>
               </div>
             </div>
 
             {/* Footer */}
             <div className="flex items-center justify-between border-t border-slate-800 px-4 py-2 text-[10px] text-slate-500">
-              <span>Tips tuned for your studio version.</span>
+              <span>Checklist tuned for your TIWATON studio.</span>
               <span className="hidden sm:inline">Your audio co-pilot is here.</span>
             </div>
           </div>
