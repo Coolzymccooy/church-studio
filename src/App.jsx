@@ -39,7 +39,7 @@ import {
  * - Smart Gain Rider after compressor (driven by RMS)
  * - Gain Rider readout in footer
  * - Speech Priority Boost visual + label
- * - Process & Export for File mode (AI-mastered audio) — now more robust
+ * - Process & Export for File mode (AI-mastered audio)
  */
 
 const TiwatonApp = () => {
@@ -117,6 +117,7 @@ const AudioProcessor = ({ goHome }) => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [voiceActive, setVoiceActive] = useState(false);
   const [isAutoCalibrating, setIsAutoCalibrating] = useState(false);
+  const [audioEngineError, setAudioEngineError] = useState(null);
 
   const [noiseFloorThreshold, setNoiseFloorThreshold] = useState(-50);
   const [visualizerGateStatus, setVisualizerGateStatus] = useState(false);
@@ -134,6 +135,12 @@ const AudioProcessor = ({ goHome }) => {
   // File mode info + export state
   const [fileInfo, setFileInfo] = useState(null); // { name, type, isVideo }
   const [fileExportStatus, setFileExportStatus] = useState(null);
+
+  // File editing (trim & timing)
+  const [fileDuration, setFileDuration] = useState(0);
+  const [trimStart, setTrimStart] = useState(0);
+  const [trimEnd, setTrimEnd] = useState(0);
+  const [isPreviewingTrim, setIsPreviewingTrim] = useState(false);
 
   const [availableDevices, setAvailableDevices] = useState({
     inputs: [],
@@ -197,7 +204,7 @@ const AudioProcessor = ({ goHome }) => {
     dereverb: false,
     pastorIsolation: false,
     sermonWarmth: false,
-    smartMixing: false, // drives Smart Gain Rider as well
+    smartMixing: false,
     mastering: false,
   });
 
@@ -315,8 +322,15 @@ const AudioProcessor = ({ goHome }) => {
     setFileExportStatus(null);
     setFileInfo(null);
 
+    // reset trim editor
+    setFileDuration(0);
+    setTrimStart(0);
+    setTrimEnd(0);
+    setIsPreviewingTrim(false);
+
     if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
     setRecordingState('idle');
+    setAudioEngineError(null);
   };
 
   const hardReset = () => {
@@ -358,168 +372,208 @@ const AudioProcessor = ({ goHome }) => {
   };
 
   const startAudioEngine = async (inputStream = null, mediaElement = null) => {
-    // Stop any previous animation loop
-    if (animationRef.current) {
-      cancelAnimationFrame(animationRef.current);
-      animationRef.current = null;
-    }
-
-    // Create a fresh context every time
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-
-    if (ctx.state === 'suspended') {
-      await ctx.resume();
-    }
-
-    contextRef.current = ctx;
-    setAudioContext(ctx);
-    setAudioStats({
-      sampleRate: ctx.sampleRate,
-      bufferSize: 128,
-      state: ctx.state,
-    });
-
-    let source;
     try {
+      // Reuse existing context if it's already open
+      if (contextRef.current && contextRef.current.state !== 'closed') {
+        setAudioEngineError(null);
+        visualizeAndGate();
+        return;
+      }
+
+      const Ctor = window.AudioContext || window.webkitAudioContext;
+      if (!Ctor) {
+        throw new Error(
+          'Web Audio is not supported in this browser. Try Chrome, Edge, or a modern browser.',
+        );
+      }
+
+      const ctx = new Ctor();
+
+      if (ctx.state === 'suspended') {
+        await ctx.resume();
+      }
+
+      contextRef.current = ctx;
+      setAudioContext(ctx);
+      setAudioStats({
+        sampleRate: ctx.sampleRate,
+        bufferSize: 128,
+        state: ctx.state,
+      });
+
+      let source;
+
       if (inputStream) {
+        const hasAudioTracks =
+          typeof inputStream.getAudioTracks === 'function' &&
+          inputStream.getAudioTracks().length > 0;
+
+        if (!hasAudioTracks) {
+          throw new Error(
+            'Selected input has no audio track. Check your microphone / audio device.',
+          );
+        }
+
         source = ctx.createMediaStreamSource(inputStream);
       } else if (mediaElement) {
         source = ctx.createMediaElementSource(mediaElement);
       } else {
-        return;
+        throw new Error('No input stream or media element provided to audio engine.');
       }
-    } catch (e) {
-      console.error(e);
-      return;
-    }
 
-    // --- DSP NODES ---
-    const inputGain = ctx.createGain();
-    inputGain.gain.value = inputGainValue;
+      // --- DSP NODES ---
+      const inputGain = ctx.createGain();
+      inputGain.gain.value = inputGainValue;
 
-    const lowCut = ctx.createBiquadFilter();
-    lowCut.type = 'highpass';
-    lowCut.frequency.value = 80;
+      const lowCut = ctx.createBiquadFilter();
+      lowCut.type = 'highpass';
+      lowCut.frequency.value = 80;
 
-    const gateGain = ctx.createGain();
-    gateGain.gain.value = 1.0;
+      const gateGain = ctx.createGain();
+      gateGain.gain.value = 1.0;
 
-    const deEsser = ctx.createBiquadFilter();
-    deEsser.type = 'peaking';
-    deEsser.frequency.value = 7000;
-    deEsser.Q.value = 1;
-    deEsser.gain.value = 0;
+      const deEsser = ctx.createBiquadFilter();
+      deEsser.type = 'peaking';
+      deEsser.frequency.value = 7000;
+      deEsser.Q.value = 1;
+      deEsser.gain.value = 0;
 
-    const compressor = ctx.createDynamicsCompressor();
-    compressor.threshold.value = -24;
-    compressor.knee.value = 30;
-    compressor.ratio.value = 4;
-    compressor.attack.value = 0.003;
-    compressor.release.value = 0.25;
+      const compressor = ctx.createDynamicsCompressor();
+      compressor.threshold.value = -24;
+      compressor.knee.value = 30;
+      compressor.ratio.value = 4;
+      compressor.attack.value = 0.003;
+      compressor.release.value = 0.25;
 
-    const autoGain = ctx.createGain();
-    autoGain.gain.value = 1.0; // Smart Gain Rider moves this
+      const autoGain = ctx.createGain();
+      autoGain.gain.value = 1.0; // Smart Gain Rider moves this
 
-    const eqWarmth = ctx.createBiquadFilter();
-    eqWarmth.type = 'peaking';
-    eqWarmth.frequency.value = 250;
-    eqWarmth.Q.value = 1;
-    eqWarmth.gain.value = 0;
+      const eqWarmth = ctx.createBiquadFilter();
+      eqWarmth.type = 'peaking';
+      eqWarmth.frequency.value = 250;
+      eqWarmth.Q.value = 1;
+      eqWarmth.gain.value = 0;
 
-    const eqClarity = ctx.createBiquadFilter();
-    eqClarity.type = 'peaking';
-    eqClarity.frequency.value = 3500;
-    eqClarity.Q.value = 1;
-    eqClarity.gain.value = 0;
+      const eqClarity = ctx.createBiquadFilter();
+      eqClarity.type = 'peaking';
+      eqClarity.frequency.value = 3500;
+      eqClarity.Q.value = 1;
+      eqClarity.gain.value = 0;
 
-    const master = ctx.createGain();
-    master.gain.value = 1.0;
+      const master = ctx.createGain();
+      master.gain.value = 1.0;
 
-    const ana = ctx.createAnalyser();
-    ana.fftSize = 2048;
+      const ana = ctx.createAnalyser();
+      ana.fftSize = 2048;
 
-    const monitorGain = ctx.createGain();
-    monitorGain.gain.value = isMonitoringRef.current ? 1.0 : 0.0;
+      const monitorGain = ctx.createGain();
+      monitorGain.gain.value = isMonitoringRef.current ? 1.0 : 0.0;
 
-    const destNode = ctx.createMediaStreamDestination();
-    destNodeRef.current = destNode;
+      const destNode = ctx.createMediaStreamDestination();
+      destNodeRef.current = destNode;
 
-    // --- CHAIN CONNECTIONS ---
-    source.connect(inputGain);
-    inputGain.connect(lowCut);
-    lowCut.connect(gateGain);
+      // Chain connections
+      source.connect(inputGain);
+      inputGain.connect(lowCut);
+      lowCut.connect(gateGain);
 
-    gateGain.connect(deEsser);
-    deEsser.connect(compressor);
+      gateGain.connect(deEsser);
+      deEsser.connect(compressor);
 
-    // Smart Gain Rider after compressor
-    compressor.connect(autoGain);
-    autoGain.connect(eqWarmth);
+      compressor.connect(autoGain);
+      autoGain.connect(eqWarmth);
 
-    eqWarmth.connect(eqClarity);
-    eqClarity.connect(master);
-    master.connect(ana);
-    ana.connect(monitorGain);
-    ana.connect(destNode);
+      eqWarmth.connect(eqClarity);
+      eqClarity.connect(master);
+      master.connect(ana);
+      ana.connect(monitorGain);
+      ana.connect(destNode);
 
-    if (ctx.destination.setSinkId && selectedDevices.outputId !== 'default') {
-      try {
-        await ctx.destination.setSinkId(selectedDevices.outputId);
-      } catch (err) {
-        console.warn('setSinkId failed', err);
+      if (ctx.destination.setSinkId && selectedDevices.outputId !== 'default') {
+        try {
+          await ctx.destination.setSinkId(selectedDevices.outputId);
+        } catch (err) {
+          console.warn('setSinkId failed', err);
+        }
       }
+      monitorGain.connect(ctx.destination);
+
+      processingRefs.current = {
+        source,
+        inputGain,
+        lowCut,
+        gateGain,
+        deEsser,
+        compressor,
+        autoGain,
+        eqWarmth,
+        eqClarity,
+        master,
+        monitorGain,
+        analyser: ana,
+      };
+
+      setAudioEngineError(null);
+      visualizeAndGate();
+    } catch (err) {
+      console.error('Error starting audio engine', err);
+      setAudioEngineError(
+        err?.message ||
+          'Could not start audio engine. Check microphone permissions and audio device.',
+      );
+
+      if (contextRef.current) {
+        try {
+          contextRef.current.close();
+        } catch (_) {}
+        contextRef.current = null;
+      }
+      setAudioContext(null);
     }
-    monitorGain.connect(ctx.destination);
-
-    processingRefs.current = {
-      source,
-      inputGain,
-      lowCut,
-      gateGain,
-      deEsser,
-      compressor,
-      autoGain,
-      eqWarmth,
-      eqClarity,
-      master,
-      monitorGain,
-      analyser: ana,
-    };
-
-    visualizeAndGate();
   };
 
   const toggleLive = async () => {
     if (isLive) {
+      // turning OFF live
       cleanupAudio();
-    } else {
-      try {
-        const constraints = {
-          audio: {
-            deviceId:
-              selectedDevices.inputId !== 'default'
-                ? { exact: selectedDevices.inputId }
-                : undefined,
-            echoCancellation: false,
-            noiseSuppression: false,
-            autoGainControl: false,
-          },
-        };
-        const s = await navigator.mediaDevices.getUserMedia(constraints);
-        streamRef.current = s;
-        setIsLive(true);
-        if (audioElRef.current) {
-          audioElRef.current.pause();
-          setIsPlayingFile(false);
-        }
-        startAudioEngine(s, null);
-      } catch (err) {
-        console.error(err);
-        alert(
-          'Microphone access blocked or unavailable. Please check browser permissions and audio device.',
-        );
-        cleanupAudio();
+      return;
+    }
+
+    try {
+      const constraints = {
+        audio: {
+          deviceId:
+            selectedDevices.inputId !== 'default'
+              ? { exact: selectedDevices.inputId }
+              : undefined,
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+        },
+      };
+
+      const s = await navigator.mediaDevices.getUserMedia(constraints);
+      streamRef.current = s;
+
+      if (audioElRef.current) {
+        audioElRef.current.pause();
+        setIsPlayingFile(false);
       }
+
+      await startAudioEngine(s, null);
+
+      // Only mark as live if engine actually started
+      if (contextRef.current) {
+        setIsLive(true);
+      } else {
+        setIsLive(false);
+      }
+    } catch (err) {
+      console.error(err);
+      alert(
+        'Microphone access blocked or unavailable. Please check browser permissions and audio device.',
+      );
+      cleanupAudio();
     }
   };
 
@@ -561,7 +615,7 @@ const AudioProcessor = ({ goHome }) => {
 
     setMode('file');
     setIsPlayingFile(true);
-    setFileExportStatus(null);
+    setFileExportStatus(null); // reset export status on new file
     setFileInfo({
       name: file.name,
       type: file.type || (isVideo ? 'video/*' : 'audio/*'),
@@ -574,6 +628,12 @@ const AudioProcessor = ({ goHome }) => {
       el.src = url;
       el.currentTime = 0;
       el.onloadedmetadata = () => {
+        const duration = el.duration || 0;
+        setFileDuration(duration);
+        setTrimStart(0);
+        setTrimEnd(duration);
+        setIsPreviewingTrim(false);
+
         startAudioEngine(null, el);
         const playPromise = el.play();
         if (playPromise && playPromise.catch) {
@@ -589,6 +649,12 @@ const AudioProcessor = ({ goHome }) => {
       el.src = url;
       el.currentTime = 0;
       el.onloadedmetadata = () => {
+        const duration = el.duration || 0;
+        setFileDuration(duration);
+        setTrimStart(0);
+        setTrimEnd(duration);
+        setIsPreviewingTrim(false);
+
         startAudioEngine(null, el);
         const playPromise = el.play();
         if (playPromise && playPromise.catch) {
@@ -600,6 +666,33 @@ const AudioProcessor = ({ goHome }) => {
       };
     }
   };
+
+  // >>> added: helper to clear current file cleanly
+  const clearCurrentFile = () => {
+    try {
+      if (audioElRef.current) {
+        audioElRef.current.pause();
+        audioElRef.current.removeAttribute('src');
+        audioElRef.current.load();
+      }
+      if (videoElRef.current) {
+        videoElRef.current.pause();
+        videoElRef.current.removeAttribute('src');
+        videoElRef.current.load();
+      }
+    } catch (e) {
+      console.warn('Error clearing media elements', e);
+    }
+
+    setIsPlayingFile(false);
+    setFileInfo(null);
+    setFileExportStatus(null);
+    setFileDuration(0);
+    setTrimStart(0);
+    setTrimEnd(0);
+    setIsPreviewingTrim(false);
+  };
+  // <<< end added
 
   // --- RECORD CHECK ---
   const toggleRecording = () => {
@@ -709,10 +802,23 @@ const AudioProcessor = ({ goHome }) => {
     }
 
     if (!destNodeRef.current || !destNodeRef.current.stream) {
-      alert('No processed audio stream found. Wait for the file to fully load, then try again.');
-      setFileExportStatus(null);
+      alert('No processed audio stream found. Start playback or wait for file to load fully.');
+      setFileExportStatus('error'); // >>> added
       return;
     }
+
+    // >>> added: check the processed stream has audio tracks
+    const tracks = destNodeRef.current.stream.getAudioTracks
+      ? destNodeRef.current.stream.getAudioTracks()
+      : [];
+    if (!tracks || tracks.length === 0) {
+      alert(
+        'The processed audio stream appears to be silent or has no audio track. Try playing the file once, then export again.',
+      );
+      setFileExportStatus('error');
+      return;
+    }
+    // <<< end added
 
     const mediaEl =
       (fileInfo?.isVideo ? videoElRef.current : audioElRef.current) ||
@@ -721,12 +827,27 @@ const AudioProcessor = ({ goHome }) => {
 
     if (!mediaEl || !mediaEl.src) {
       alert('Load an audio or video file first.');
+      setFileExportStatus('error'); // >>> added
+      return;
+    }
+
+    // Compute effective trimmed region
+    const fullDuration = mediaEl.duration || fileDuration || 0;
+    const effectiveStart = Math.max(0, trimStart || 0);
+    const effectiveEnd =
+      Number.isFinite(trimEnd) && trimEnd > effectiveStart
+        ? trimEnd
+        : fullDuration || 0;
+
+    if (!fullDuration || effectiveEnd <= effectiveStart) {
+      alert('Trim selection is invalid. Check start/end and try again.');
+      setFileExportStatus('error'); // >>> added
       return;
     }
 
     try {
       mediaEl.pause();
-      mediaEl.currentTime = 0;
+      mediaEl.currentTime = effectiveStart;
     } catch (e) {
       console.warn('Could not reset media element.', e);
     }
@@ -745,17 +866,20 @@ const AudioProcessor = ({ goHome }) => {
       return;
     }
 
-    // Safety timeout in case "ended" never fires
-    const duration = Number.isFinite(mediaEl.duration) && mediaEl.duration > 0
-      ? mediaEl.duration
-      : 300; // fallback for unknown duration (~5 min)
-    const maxRecordMs = duration * 1000 + 3000;
+    // >>> adjusted timeout: shorter, safer
+    const effectiveDuration = effectiveEnd - effectiveStart;
+    const fallbackDuration =
+      fullDuration && fullDuration > 0 ? fullDuration : fileDuration || 30;
+    const safeDurationSeconds =
+      effectiveDuration > 0 ? effectiveDuration : fallbackDuration;
+    const maxRecordMs = (safeDurationSeconds + 5) * 1000;
     const timeoutId = setTimeout(() => {
       if (recorder && recorder.state === 'recording') {
         console.warn('Export timeout reached, stopping recorder.');
         recorder.stop();
       }
     }, maxRecordMs);
+    // <<< timeout tweak
 
     recorder.ondataavailable = (e) => {
       if (e.data && e.data.size > 0) chunks.push(e.data);
@@ -790,39 +914,78 @@ const AudioProcessor = ({ goHome }) => {
       setFileExportStatus('done');
     };
 
+    const handleTimeUpdate = () => {
+      // Stop when we reach the trim end (even if the underlying file is longer)
+      if (mediaEl.currentTime >= effectiveEnd) {
+        mediaEl.removeEventListener('timeupdate', handleTimeUpdate);
+        mediaEl.pause();
+        if (recorder.state === 'recording') {
+          recorder.stop();
+        }
+      }
+    };
+
     const handleEnded = () => {
       mediaEl.removeEventListener('ended', handleEnded);
+      mediaEl.removeEventListener('timeupdate', handleTimeUpdate);
       if (recorder.state === 'recording') {
         recorder.stop();
       }
     };
 
+    mediaEl.addEventListener('timeupdate', handleTimeUpdate);
     mediaEl.addEventListener('ended', handleEnded);
 
-    const playPromise = mediaEl.play();
-    if (playPromise && playPromise.catch) {
-      playPromise
-        .catch((err) => {
-          console.error('Playback failed during export', err);
-          mediaEl.removeEventListener('ended', handleEnded);
-          try {
-            if (recorder.state === 'recording') {
-              recorder.stop();
+    const startRecorderSafely = () => {
+      try {
+        if (recorder.state === 'inactive') {
+          recorder.start();
+        }
+      } catch (e) {
+        console.warn('Error starting recorder', e);
+        setFileExportStatus('error');
+      }
+    };
+
+    // >>> ensure media is ready before play
+    const startPlayback = () => {
+      const playPromise = mediaEl.play();
+      if (playPromise && playPromise.catch) {
+        playPromise
+          .catch((err) => {
+            console.error('Playback failed during export', err);
+            mediaEl.removeEventListener('ended', handleEnded);
+            mediaEl.removeEventListener('timeupdate', handleTimeUpdate);
+            try {
+              if (recorder.state === 'recording') {
+                recorder.stop();
+              }
+            } catch (e) {
+              console.warn('Error stopping recorder after playback failure', e);
             }
-          } catch (e) {
-            console.warn('Error stopping recorder after playback failure', e);
-          }
-          setFileExportStatus('error');
-          alert('Unable to play this file for export. Please interact with the player first and try again.');
-        })
-        .then(() => {
-          if (recorder.state === 'inactive') {
-            recorder.start();
-          }
-        });
+            setFileExportStatus('error');
+            alert(
+              'Unable to play this file for export. Try pressing play once manually, then export again.',
+            );
+          })
+          .then(() => {
+            startRecorderSafely();
+          });
+      } else {
+        startRecorderSafely();
+      }
+    };
+
+    if (mediaEl.readyState < 2) {
+      const onCanPlay = () => {
+        mediaEl.removeEventListener('canplay', onCanPlay);
+        startPlayback();
+      };
+      mediaEl.addEventListener('canplay', onCanPlay);
     } else {
-      recorder.start();
+      startPlayback();
     }
+    // <<< end added guards
   };
 
   const formatTime = (secs) => {
@@ -840,6 +1003,79 @@ const AudioProcessor = ({ goHome }) => {
         audioContext.currentTime,
         0.1,
       );
+    }
+  };
+
+  const handleTrimStartChange = (e) => {
+    const v = parseFloat(e.target.value);
+    if (!Number.isFinite(v) || fileDuration <= 0) return;
+
+    // Ensure start is always before end
+    const safe = Math.max(0, Math.min(v, trimEnd - 0.1));
+    setTrimStart(safe);
+  };
+
+  const handleTrimEndChange = (e) => {
+    const v = parseFloat(e.target.value);
+    if (!Number.isFinite(v) || fileDuration <= 0) return;
+
+    // Ensure end is always after start
+    const safe = Math.min(fileDuration, Math.max(v, trimStart + 0.1));
+    setTrimEnd(safe);
+  };
+
+  const clearTrim = () => {
+    if (!fileDuration) return;
+    setTrimStart(0);
+    setTrimEnd(fileDuration);
+  };
+
+  const previewTrimSegment = () => {
+    if (!fileInfo) {
+      alert('Load a file first.');
+      return;
+    }
+
+    const mediaEl =
+      (fileInfo?.isVideo ? videoElRef.current : audioElRef.current) ||
+      audioElRef.current ||
+      videoElRef.current;
+
+    if (!mediaEl || !mediaEl.src) {
+      alert('No playable file found.');
+      return;
+    }
+
+    if (!Number.isFinite(trimEnd) || trimEnd <= trimStart) {
+      alert('Check your trim in/out points – end must be after start.');
+      return;
+    }
+
+    try {
+      mediaEl.pause();
+      mediaEl.currentTime = trimStart || 0;
+    } catch (e) {
+      console.warn('Could not seek preview media element', e);
+    }
+
+    const handleTimeUpdate = () => {
+      if (mediaEl.currentTime >= trimEnd) {
+        mediaEl.removeEventListener('timeupdate', handleTimeUpdate);
+        mediaEl.pause();
+        setIsPreviewingTrim(false);
+      }
+    };
+
+    mediaEl.addEventListener('timeupdate', handleTimeUpdate);
+    setIsPreviewingTrim(true);
+
+    const playPromise = mediaEl.play();
+    if (playPromise && playPromise.catch) {
+      playPromise.catch((err) => {
+        console.error('Preview playback failed', err);
+        setIsPreviewingTrim(false);
+        mediaEl.removeEventListener('timeupdate', handleTimeUpdate);
+      });
     }
   };
 
@@ -885,7 +1121,7 @@ const AudioProcessor = ({ goHome }) => {
     }
   }, [features, audioContext, isBypassed, voiceActive]);
 
-  // --- Visualizer + Gate + Smart Gain Rider (fancy visual AI state) ---
+  // --- Visualizer + Gate + Smart Gain Rider ---
   const visualizeAndGate = () => {
     const { analyser, gateGain } = processingRefs.current;
     const canvas = canvasRef.current;
@@ -1721,6 +1957,123 @@ const AudioProcessor = ({ goHome }) => {
               </div>
             )}
 
+            {/* File Trim / Timing Editor */}
+            {mode === 'file' && fileInfo && fileDuration > 0 && (
+              <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-20 w-[min(960px,95vw)]">
+                <div className="bg-slate-950/95 border border-slate-800 rounded-2xl px-4 py-3 md:px-6 md:py-4 flex flex-col gap-3 backdrop-blur">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-xs font-semibold text-slate-300 flex items-center gap-2">
+                      <Sliders className="w-3 h-3 text-indigo-400" />
+                      File Edit — Trim Sermon Section
+                    </div>
+                    <div className="text-[11px] font-mono text-slate-400">
+                      Total: {formatTime(Math.floor(fileDuration))} • Using:{' '}
+                      {trimEnd > trimStart
+                        ? `${formatTime(Math.floor(trimStart))} → ${formatTime(
+                            Math.floor(trimEnd),
+                          )}`
+                        : 'full file'}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {/* Start */}
+                    <div>
+                      <div className="flex items-center justify-between text-[11px] text-slate-400 mb-1">
+                        <span>Start</span>
+                        <span>{formatTime(Math.floor(trimStart || 0))}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max={fileDuration || 0}
+                        step="0.1"
+                        value={trimStart}
+                        onChange={handleTrimStartChange}
+                        className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer"
+                      />
+                    </div>
+
+                    {/* End */}
+                    <div>
+                      <div className="flex items-center justify-between text-[11px] text-slate-400 mb-1">
+                        <span>End</span>
+                        <span>{formatTime(Math.floor(trimEnd || fileDuration || 0))}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max={fileDuration || 0}
+                        step="0.1"
+                        value={trimEnd}
+                        onChange={handleTrimEndChange}
+                        className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 mt-1">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={previewTrimSegment}
+                        disabled={isPreviewingTrim}
+                        className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold flex items-center gap-2 border ${
+                          isPreviewingTrim
+                            ? 'border-indigo-500/60 bg-indigo-900/40 text-indigo-200 cursor-wait'
+                            : 'border-indigo-500/60 bg-slate-900 text-indigo-200 hover:bg-slate-800'
+                        }`}
+                      >
+                        {isPreviewingTrim && (
+                          <span className="w-3 h-3 rounded-full border-2 border-indigo-300 border-t-transparent animate-spin" />
+                        )}
+                        {!isPreviewingTrim && <Play className="w-3 h-3" />}
+                        <span>{isPreviewingTrim ? 'Previewing…' : 'Preview Trim'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={clearTrim}
+                        className="px-3 py-1.5 rounded-lg text-[11px] font-semibold border border-slate-600 text-slate-300 hover:bg-slate-800"
+                      >
+                        Use Full File
+                      </button>
+                    </div>
+
+                    <span className="text-[10px] text-slate-500">
+                      Tip: Trim out silence at the start/end before exporting your master.
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Audio engine error overlay (live mode) */}
+            {isLive && audioEngineError && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/70 z-30 backdrop-blur-sm px-4">
+                <div className="text-center p-6 bg-slate-800 rounded-2xl border border-red-500/70 shadow-2xl w-full max-w-md">
+                  <div className="flex justify-center mb-3">
+                    <AlertTriangle className="w-8 h-8 text-red-400" />
+                  </div>
+                  <h3 className="text-lg font-bold text-white mb-2">
+                    Audio engine failed to start
+                  </h3>
+                  <p className="text-xs text-slate-300 mb-4 whitespace-pre-line">
+                    {audioEngineError}
+                  </p>
+                  <button
+                    onClick={() => {
+                      cleanupAudio();
+                      setIsLive(false);
+                    }}
+                    className="px-6 py-2 rounded-lg bg-slate-900 border border-slate-600 text-slate-100 text-xs font-semibold hover:bg-slate-800"
+                  >
+                    Back to Sound Check
+                  </button>
+                </div>
+              </div>
+            )}
+
             <canvas
               ref={canvasRef}
               width={1000}
@@ -1850,14 +2203,15 @@ const AudioProcessor = ({ goHome }) => {
 
               {/* Process & Export (File mode) */}
               {mode === 'file' && fileInfo && (
-                <button
-                  onClick={processAndExportFile}
-                  disabled={
-                    fileExportStatus === 'processing' ||
-                    !destNodeRef.current ||
-                    !destNodeRef.current.stream
-                  }
-                  className={`
+                <>
+                  <button
+                    onClick={processAndExportFile}
+                    disabled={
+                      fileExportStatus === 'processing' ||
+                      !destNodeRef.current ||
+                      !destNodeRef.current.stream
+                    }
+                    className={`
                     hidden md:flex items-center gap-1 px-3 py-2 rounded-lg border text-[11px] font-semibold 
                     ${
                       fileExportStatus === 'done'
@@ -1869,27 +2223,39 @@ const AudioProcessor = ({ goHome }) => {
                         : 'border-emerald-500/70 bg-slate-900 text-emerald-300 hover:bg-slate-800'
                     }
                   `}
-                  title="Play the file through TIWATON and download the processed audio"
-                >
-                  {fileExportStatus === 'processing' && (
-                    <span className="w-3 h-3 rounded-full border-2 border-emerald-300 border-t-transparent animate-spin" />
-                  )}
-                  {fileExportStatus === 'done' ? (
-                    <>
-                      <Check className="w-3 h-3" />
-                      <span>Mastered</span>
-                    </>
-                  ) : (
-                    <>
-                      <Upload className="w-3 h-3" />
-                      <span>
-                        {fileExportStatus === 'processing'
-                          ? 'Processing…'
-                          : 'Process & Export'}
-                      </span>
-                    </>
-                  )}
-                </button>
+                    title="Play the file through TIWATON and download the processed audio"
+                  >
+                    {fileExportStatus === 'processing' && (
+                      <span className="w-3 h-3 rounded-full border-2 border-emerald-300 border-t-transparent animate-spin" />
+                    )}
+                    {fileExportStatus === 'done' ? (
+                      <>
+                        <Check className="w-3 h-3" />
+                        <span>Mastered</span>
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="w-3 h-3" />
+                        <span>
+                          {fileExportStatus === 'processing'
+                            ? 'Processing…'
+                            : 'Process & Export'}
+                        </span>
+                      </>
+                    )}
+                  </button>
+
+                  {/* >>> added small Clear button for file mode */}
+                  <button
+                    onClick={clearCurrentFile}
+                    className="hidden md:flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-700 bg-slate-900 text-slate-300 text-[11px] font-semibold hover:bg-slate-800"
+                    title="Clear current file from File mode"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    <span>Clear File</span>
+                  </button>
+                  {/* <<< end added */}
+                </>
               )}
 
               <div className="hidden md:block h-8 w-px bg-slate-800 mx-2" />
