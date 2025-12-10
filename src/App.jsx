@@ -270,17 +270,18 @@ const AudioProcessor = ({ goHome }) => {
     settingsRef.current = {
       denoise: features.denoise,
       threshold: noiseFloorThreshold,
-      isBypassed,
+      isBypassed: isBypassed
     };
 
-    // Force gate open if denoise is off
-    if (!features.denoise && processingRefs.current.gateGain && audioContext) {
-      processingRefs.current.gateGain.gain.setValueAtTime(
-        1.0,
-        audioContext.currentTime,
-      );
-    }
-  }, [features.denoise, noiseFloorThreshold, isBypassed, audioContext]);
+
+    // Force open gate if disabled
+  if (!features.denoise && processingRefs.current.gateGain) {
+    processingRefs.current.gateGain.gain.setValueAtTime(
+      1.0,
+      audioContext?.currentTime || 0
+    );
+  }
+}, [features.denoise, noiseFloorThreshold, isBypassed, audioContext]);
 
   useEffect(() => {
     return () => cleanupAudio();
@@ -1169,49 +1170,33 @@ const AudioProcessor = ({ goHome }) => {
       }
 
       // Gate decision + VAD
-      if (gateGain && features.denoise && !settingsRef.current.isBypassed) {
-        const threshold = settingsRef.current.threshold;
+      if (gateGain && settingsRef.current.denoise && !settingsRef.current.isBypassed) {
+  const threshold = settingsRef.current.threshold;
+  const target = db < threshold ? 0.001 : 1.0; // closed vs open
 
-        let shouldOpen = db >= threshold;
-        if (highOnlyNoise) {
-          shouldOpen = false;
-        }
+  const current = gateGain.gain.value;
+  const smoothing = target > current ? 0.2 : 0.05; // attack / release
+  gateGain.gain.value = current + (target - current) * smoothing;
 
-        const target = shouldOpen ? 1.0 : 0.001;
+  gateClosed = gateGain.gain.value < 0.1;
 
-        const current = gateGain.gain.value;
-        const smoothing = target > current ? 0.2 : 0.05;
-        gateGain.gain.value = current + (target - current) * smoothing;
-
-        gateClosed = gateGain.gain.value < 0.1;
-
-        localVoiceActive = !gateClosed && db > threshold + 3 && !highOnlyNoise;
-
-        if (timestamp - lastVoiceUpdate > updateInterval) {
-          setVoiceActive((prev) =>
-            prev !== localVoiceActive ? localVoiceActive : prev,
-          );
-          lastVoiceUpdate = timestamp;
-        }
-
-        if (timestamp - lastGateUpdate > updateInterval) {
-          setVisualizerGateStatus((prev) =>
-            prev !== gateClosed ? gateClosed : prev,
-          );
-          lastGateUpdate = timestamp;
-        }
-      } else if (gateGain) {
-        gateGain.gain.value = 1.0;
-        gateClosed = false;
-        localVoiceActive = false;
-
-        if (visualizerGateStatus !== false) {
-          setVisualizerGateStatus(false);
-        }
+  if (timestamp - lastGateUpdate > updateInterval) {
+    setVisualizerGateStatus((prev) =>
+      prev !== gateClosed ? gateClosed : prev
+    );
+    lastGateUpdate = timestamp;
+  }
+} else if (gateGain) {
+  // Gate off or bypassed: fully open
+  gateGain.gain.value = 1.0;
+  gateClosed = false;
+  if (visualizerGateStatus !== false) {
+    setVisualizerGateStatus(false);
+  }
+}        
         if (voiceActive !== false) {
           setVoiceActive(false);
-        }
-      }
+        }      
 
       // Core orb
       const coreRadius = h * 0.35;
@@ -1268,20 +1253,19 @@ const AudioProcessor = ({ goHome }) => {
       }
 
       // Gate threshold line
-      if (features.denoise && !settingsRef.current.isBypassed) {
-        const threshold = settingsRef.current.threshold;
-        const norm = (threshold + 100) / 100;
-        const threshY = h * (1 - norm);
-        ctx.strokeStyle = '#6366f1';
-        ctx.setLineDash([5, 5]);
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(0, threshY);
-        ctx.lineTo(w, threshY);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
-
+     // 1) Draw threshold line
+if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
+  const threshY =
+    canvas.height * (1 - (settingsRef.current.threshold + 100) / 100);
+  ctx.strokeStyle = '#6366f1';
+  ctx.setLineDash([5, 5]);
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, threshY);
+  ctx.lineTo(canvas.width, threshY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
       // Smart Gain Rider
       const autoGainNode = processingRefs.current.autoGain;
       const gainRiderEnabled =
@@ -1754,7 +1738,7 @@ const AudioProcessor = ({ goHome }) => {
                   })
                 }
               />
-              <FeatureToggle
+              <FeatureToggle  
                 icon={<Sliders size={18} />}
                 label="Smart Auto-Mixing"
                 desc="Balances levels & gently rides speech"
@@ -2239,29 +2223,27 @@ const AudioProcessor = ({ goHome }) => {
                   )}
                 </button>
               )}
+           
+                 {/* OUTPUT ROUTER PANEL (Monitor + Broadcast) */}
+              <div className="hidden md:flex flex-col items-end text-[10px] leading-tight mx-2 max-w-[260px]">
+                <span className="uppercase font-bold tracking-wide text-slate-500">
+                  Output Router
+                </span>
 
-              {/* OUTPUT ROUTER PANEL (Monitor + Broadcast) */}
-              {/* OUTPUT ROUTER PANEL (Monitor + Broadcast) */}
-<div className="hidden md:flex flex-col items-end text-[10px] leading-tight mx-2 max-w-[260px]">
-  <span className="uppercase font-bold tracking-wide text-slate-500">
-    Output Router
-  </span>
+                <div className="flex items-baseline gap-1 text-slate-400">
+                  <span>Monitor:</span>
+                  <span className="text-slate-100 truncate inline-block max-w-[180px] align-bottom">
+                    {monitorLabel}
+                  </span>
+                </div>
 
-  <div className="flex items-baseline gap-1 text-slate-400">
-    <span>Monitor:</span>
-    <span className="text-slate-100 truncate inline-block max-w-[180px] align-bottom">
-      {monitorLabel}
-    </span>
-  </div>
-
-  <div className="flex items-baseline gap-1 text-slate-400">
-    <span>Broadcast:</span>
-    <span className="text-slate-100 truncate inline-block max-w-[180px] align-bottom">
-      {broadcastLabel}
-    </span>
-  </div>
-</div>
-
+                <div className="flex items-baseline gap-1 text-slate-400">
+                  <span>Broadcast:</span>
+                  <span className="text-slate-100 truncate inline-block max-w-[180px] align-bottom">
+                    {broadcastLabel}
+                  </span>
+                </div>
+              </div>
 
               <div className="hidden md:block h-8 w-px bg-slate-800 mx-2" />
 
@@ -2279,8 +2261,9 @@ const AudioProcessor = ({ goHome }) => {
         </div>
       </div>
     </div>
-  );
-};
+  );   // ✅ end of JSX returned from AudioProcessor
+ }; // ✅ end of: const AudioProcessor = ({ goHome }) => {
+
 
 // --- Small UI helpers ---
 const FeatureToggle = ({ icon, label, desc, active, onClick }) => (
