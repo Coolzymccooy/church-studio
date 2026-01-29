@@ -403,6 +403,7 @@ const AudioProcessor = ({ goHome }) => {
     eqClarity: null,
     reverbFilter: null,
     reverbDucker: null,
+ codex/enhance-ai-processing-logic-peupob
     noiseNotch: null,
     voiceContour: null,
     noiseBlend: null,
@@ -413,6 +414,8 @@ const AudioProcessor = ({ goHome }) => {
     polishPresence: null,
     polishAir: null,
     limiter: null,
+=======
+    dev
     master: null,
     monitorGain: null,
     analyser: null,
@@ -558,6 +561,7 @@ const AudioProcessor = ({ goHome }) => {
         eqClarity: null,
         reverbFilter: null,
         reverbDucker: null,
+    codex/enhance-ai-processing-logic-peupob
         noiseNotch: null,
         voiceContour: null,
         noiseBlend: null,
@@ -568,6 +572,8 @@ const AudioProcessor = ({ goHome }) => {
         polishPresence: null,
         polishAir: null,
         limiter: null,
+=======
+    dev
         master: null,
         monitorGain: null,
         analyser: null,
@@ -772,6 +778,7 @@ const AudioProcessor = ({ goHome }) => {
       const reverbDucker = ctx.createGain();
       reverbDucker.gain.value = 1.0;
 
+    
       const duckGain = ctx.createGain();
       duckGain.gain.value = 1.0;
 
@@ -797,6 +804,8 @@ const AudioProcessor = ({ goHome }) => {
       limiter.ratio.value = 1;
       limiter.attack.value = 0.003;
       limiter.release.value = 0.2;
+
+
 
       const master = ctx.createGain();
       master.gain.value = 1.0;
@@ -829,12 +838,16 @@ const AudioProcessor = ({ goHome }) => {
       eqWarmth.connect(eqClarity);
       eqClarity.connect(reverbFilter);
       reverbFilter.connect(reverbDucker);
+
       reverbDucker.connect(duckGain);
       duckGain.connect(polishLow);
       polishLow.connect(polishPresence);
       polishPresence.connect(polishAir);
       polishAir.connect(limiter);
       limiter.connect(master);
+
+      reverbDucker.connect(master);
+
       master.connect(ana);
       ana.connect(monitorGain);
       ana.connect(destNode);
