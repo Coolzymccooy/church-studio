@@ -43,7 +43,16 @@ import {
  */
 
 const TiwatonApp = () => {
-  const [view, setView] = useState('landing');
+  const [view, setView] = useState(() => {
+    if (typeof window === 'undefined') return 'landing';
+    const savedView = window.localStorage.getItem('tiwaton:view');
+    return savedView || 'landing';
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('tiwaton:view', view);
+  }, [view]);
 
   if (view === 'landing') {
     return <LandingPage onEnter={() => setView('studio')} />;
@@ -394,6 +403,19 @@ const AudioProcessor = ({ goHome }) => {
     eqClarity: null,
     reverbFilter: null,
     reverbDucker: null,
+ codex/enhance-ai-processing-logic-peupob
+    noiseNotch: null,
+    voiceContour: null,
+    noiseBlend: null,
+    noiseLowShelf: null,
+    noiseHighShelf: null,
+    duckGain: null,
+    polishLow: null,
+    polishPresence: null,
+    polishAir: null,
+    limiter: null,
+=======
+    dev
     master: null,
     monitorGain: null,
     analyser: null,
@@ -422,7 +444,20 @@ const AudioProcessor = ({ goHome }) => {
     sermonWarmth: false,
     smartMixing: false,
     mastering: false,
+    voicePattern: false,
+    musicDucking: false,
+    streamingSafe: false,
   });
+  const [speakerPreset, setSpeakerPreset] = useState('balanced');
+  const [loudnessDb, setLoudnessDb] = useState(null);
+  const [loudnessTarget, setLoudnessTarget] = useState(-14);
+  const [abMode, setAbMode] = useState('B');
+  const [snapshots, setSnapshots] = useState([]);
+  const snapshotCounterRef = useRef(1);
+  const [noiseProfiles, setNoiseProfiles] = useState([]);
+  const [selectedNoiseProfileId, setSelectedNoiseProfileId] = useState('');
+  const noiseProfileCounterRef = useRef(1);
+  const latestSpectrumRef = useRef(null);
 
   const canvasRef = useRef(null);
   const animationRef = useRef(null);
@@ -526,6 +561,19 @@ const AudioProcessor = ({ goHome }) => {
         eqClarity: null,
         reverbFilter: null,
         reverbDucker: null,
+    codex/enhance-ai-processing-logic-peupob
+        noiseNotch: null,
+        voiceContour: null,
+        noiseBlend: null,
+        noiseLowShelf: null,
+        noiseHighShelf: null,
+        duckGain: null,
+        polishLow: null,
+        polishPresence: null,
+        polishAir: null,
+        limiter: null,
+=======
+    dev
         master: null,
         monitorGain: null,
         analyser: null,
@@ -568,7 +616,19 @@ const AudioProcessor = ({ goHome }) => {
       sermonWarmth: false,
       smartMixing: false,
       mastering: false,
+      voicePattern: false,
+      musicDucking: false,
+      streamingSafe: false,
     });
+    setSpeakerPreset('balanced');
+    setLoudnessDb(null);
+    setLoudnessTarget(-14);
+    setAbMode('B');
+    setSnapshots([]);
+    snapshotCounterRef.current = 1;
+    setNoiseProfiles([]);
+    setSelectedNoiseProfileId('');
+    noiseProfileCounterRef.current = 1;
 
     setNoiseFloorThreshold(-50);
     setGainRiderDb(0);
@@ -592,6 +652,10 @@ const AudioProcessor = ({ goHome }) => {
       fileInputRef.current.value = '';
     }
   };
+
+  useEffect(() => {
+    setAbMode(isBypassed ? 'A' : 'B');
+  }, [isBypassed]);
 
   const startAudioEngine = async (inputStream = null, mediaElement = null) => {
     try {
@@ -654,6 +718,30 @@ const AudioProcessor = ({ goHome }) => {
       const gateGain = ctx.createGain();
       gateGain.gain.value = 1.0;
 
+      const noiseNotch = ctx.createBiquadFilter();
+      noiseNotch.type = 'notch';
+      noiseNotch.frequency.value = 80;
+      noiseNotch.Q.value = 1;
+
+      const voiceContour = ctx.createBiquadFilter();
+      voiceContour.type = 'peaking';
+      voiceContour.frequency.value = 1500;
+      voiceContour.Q.value = 0.7;
+      voiceContour.gain.value = 0;
+
+      const noiseBlend = ctx.createGain();
+      noiseBlend.gain.value = 1.0;
+
+      const noiseLowShelf = ctx.createBiquadFilter();
+      noiseLowShelf.type = 'lowshelf';
+      noiseLowShelf.frequency.value = 180;
+      noiseLowShelf.gain.value = 0;
+
+      const noiseHighShelf = ctx.createBiquadFilter();
+      noiseHighShelf.type = 'highshelf';
+      noiseHighShelf.frequency.value = 7500;
+      noiseHighShelf.gain.value = 0;
+
       const deEsser = ctx.createBiquadFilter();
       deEsser.type = 'peaking';
       deEsser.frequency.value = 7000;
@@ -690,6 +778,35 @@ const AudioProcessor = ({ goHome }) => {
       const reverbDucker = ctx.createGain();
       reverbDucker.gain.value = 1.0;
 
+    
+      const duckGain = ctx.createGain();
+      duckGain.gain.value = 1.0;
+
+      const polishLow = ctx.createBiquadFilter();
+      polishLow.type = 'lowshelf';
+      polishLow.frequency.value = 180;
+      polishLow.gain.value = 0;
+
+      const polishPresence = ctx.createBiquadFilter();
+      polishPresence.type = 'peaking';
+      polishPresence.frequency.value = 3200;
+      polishPresence.Q.value = 0.9;
+      polishPresence.gain.value = 0;
+
+      const polishAir = ctx.createBiquadFilter();
+      polishAir.type = 'highshelf';
+      polishAir.frequency.value = 9000;
+      polishAir.gain.value = 0;
+
+      const limiter = ctx.createDynamicsCompressor();
+      limiter.threshold.value = 0;
+      limiter.knee.value = 30;
+      limiter.ratio.value = 1;
+      limiter.attack.value = 0.003;
+      limiter.release.value = 0.2;
+
+
+
       const master = ctx.createGain();
       master.gain.value = 1.0;
 
@@ -707,7 +824,12 @@ const AudioProcessor = ({ goHome }) => {
       inputGain.connect(lowCut);
       lowCut.connect(gateGain);
 
-      gateGain.connect(deEsser);
+      gateGain.connect(noiseNotch);
+      noiseNotch.connect(voiceContour);
+      voiceContour.connect(noiseBlend);
+      noiseBlend.connect(noiseLowShelf);
+      noiseLowShelf.connect(noiseHighShelf);
+      noiseHighShelf.connect(deEsser);
       deEsser.connect(compressor);
 
       compressor.connect(autoGain);
@@ -716,7 +838,16 @@ const AudioProcessor = ({ goHome }) => {
       eqWarmth.connect(eqClarity);
       eqClarity.connect(reverbFilter);
       reverbFilter.connect(reverbDucker);
+
+      reverbDucker.connect(duckGain);
+      duckGain.connect(polishLow);
+      polishLow.connect(polishPresence);
+      polishPresence.connect(polishAir);
+      polishAir.connect(limiter);
+      limiter.connect(master);
+
       reverbDucker.connect(master);
+
       master.connect(ana);
       ana.connect(monitorGain);
       ana.connect(destNode);
@@ -736,6 +867,11 @@ const AudioProcessor = ({ goHome }) => {
         inputGain,
         lowCut,
         gateGain,
+        noiseNotch,
+        voiceContour,
+        noiseBlend,
+        noiseLowShelf,
+        noiseHighShelf,
         deEsser,
         compressor,
         autoGain,
@@ -743,6 +879,11 @@ const AudioProcessor = ({ goHome }) => {
         eqClarity,
         reverbFilter,
         reverbDucker,
+        duckGain,
+        polishLow,
+        polishPresence,
+        polishAir,
+        limiter,
         master,
         monitorGain,
         analyser: ana,
@@ -1248,29 +1389,81 @@ const AudioProcessor = ({ goHome }) => {
   // --- Parameter updates (EQ & compressor tweaks based on features) ---
   useEffect(() => {
     if (!audioContext || !processingRefs.current.compressor) return;
-    const { compressor, eqWarmth, eqClarity, reverbFilter, reverbDucker, master } =
-      processingRefs.current;
+    const {
+      compressor,
+      eqWarmth,
+      eqClarity,
+      reverbFilter,
+      reverbDucker,
+      noiseNotch,
+      voiceContour,
+      noiseBlend,
+      noiseLowShelf,
+      noiseHighShelf,
+      duckGain,
+      polishLow,
+      polishPresence,
+      polishAir,
+      limiter,
+      master,
+      deEsser,
+    } = processingRefs.current;
     const now = audioContext.currentTime;
 
     const getTarget = (isActive, activeVal, passiveVal) =>
       isActive && !isBypassed ? activeVal : passiveVal;
 
+    const mixActive = features.smartMixing || features.voicePattern;
+    const masterActive = features.mastering || features.voicePattern;
+
+    const speakerPresets = {
+      balanced: {
+        warmth: 0,
+        clarity: 0,
+        deEsser: 0,
+      },
+      pastor: {
+        warmth: 3.5,
+        clarity: 4,
+        deEsser: -3,
+      },
+      guest: {
+        warmth: 2,
+        clarity: 2.5,
+        deEsser: -1.5,
+      },
+      choir: {
+        warmth: 1.5,
+        clarity: 5,
+        deEsser: -4,
+      },
+    };
+    const preset = speakerPresets[speakerPreset] || speakerPresets.balanced;
+    const activeNoiseProfile = noiseProfiles.find(
+      (profile) => profile.id === selectedNoiseProfileId,
+    );
+
     // Small dynamic boost when voice is active
     const speechBoost = voiceActive ? 2 : 0;
 
     if (eqClarity) {
-      const baseClarity = getTarget(features.pastorIsolation, 12, 0);
+      const baseClarity = preset.clarity + getTarget(features.pastorIsolation, 12, 0);
       eqClarity.Q.value = getTarget(features.pastorIsolation, 1.2, 1);
       eqClarity.gain.linearRampToValueAtTime(baseClarity + speechBoost, now + 0.2);
     }
 
     if (eqWarmth) {
-      const baseWarmth = getTarget(features.sermonWarmth, 9, 0);
+      const baseWarmth = preset.warmth + getTarget(features.sermonWarmth, 9, 0);
       eqWarmth.Q.value = getTarget(features.sermonWarmth, 1.1, 1);
       eqWarmth.gain.linearRampToValueAtTime(
         baseWarmth + speechBoost * 0.8,
         now + 0.25,
       );
+    }
+
+    if (deEsser) {
+      const targetDeEsser = preset.deEsser + getTarget(features.pastorIsolation, -4, 0);
+      deEsser.gain.linearRampToValueAtTime(targetDeEsser, now + 0.2);
     }
 
     if (reverbFilter) {
@@ -1284,38 +1477,122 @@ const AudioProcessor = ({ goHome }) => {
       reverbDucker.gain.linearRampToValueAtTime(targetGain, now + 0.2);
     }
 
+    if (noiseNotch) {
+      const targetQ = getTarget(features.voicePattern, 5, 1);
+      noiseNotch.Q.value = targetQ;
+    }
+
+    if (voiceContour) {
+      const targetGain = getTarget(features.voicePattern, 3.5, 0);
+      voiceContour.gain.linearRampToValueAtTime(targetGain, now + 0.2);
+    }
+
+    if (noiseBlend) {
+      const targetGain = getTarget(features.voicePattern, 0.92, 1.0);
+      noiseBlend.gain.linearRampToValueAtTime(targetGain, now + 0.2);
+    }
+
+    if (noiseLowShelf) {
+      const targetGain = activeNoiseProfile ? activeNoiseProfile.lowReduction : 0;
+      noiseLowShelf.gain.linearRampToValueAtTime(targetGain, now + 0.2);
+    }
+
+    if (noiseHighShelf) {
+      const targetGain = activeNoiseProfile ? activeNoiseProfile.highReduction : 0;
+      noiseHighShelf.gain.linearRampToValueAtTime(targetGain, now + 0.2);
+    }
+
+    if (duckGain) {
+      const duckTarget =
+        features.musicDucking && voiceActive && !isBypassed ? 0.72 : 1.0;
+      duckGain.gain.setTargetAtTime(duckTarget, now, 0.12);
+    }
+
     if (compressor) {
       compressor.ratio.linearRampToValueAtTime(
-        getTarget(features.smartMixing, 6.5, 1),
+        getTarget(mixActive, 6.5, 1),
         now + 0.4,
       );
       compressor.threshold.linearRampToValueAtTime(
-        getTarget(features.smartMixing, -30, 0),
+        getTarget(mixActive, -30, 0),
         now + 0.4,
       );
       compressor.knee.linearRampToValueAtTime(
-        getTarget(features.smartMixing, 20, 30),
+        getTarget(mixActive, 20, 30),
         now + 0.4,
       );
       compressor.attack.linearRampToValueAtTime(
-        getTarget(features.smartMixing, 0.002, 0.003),
+        getTarget(mixActive, 0.002, 0.003),
         now + 0.35,
       );
       compressor.release.linearRampToValueAtTime(
-        getTarget(features.smartMixing, 0.18, 0.25),
+        getTarget(mixActive, 0.18, 0.25),
         now + 0.35,
+      );
+    }
+
+    if (polishLow) {
+      const targetGain = getTarget(masterActive, 3.2, 0);
+      polishLow.gain.linearRampToValueAtTime(targetGain, now + 0.2);
+    }
+
+    if (polishPresence) {
+      const targetGain = getTarget(masterActive, 4.5, 0);
+      polishPresence.gain.linearRampToValueAtTime(targetGain, now + 0.2);
+    }
+
+    if (polishAir) {
+      const targetGain = getTarget(masterActive, 3.8, 0);
+      polishAir.gain.linearRampToValueAtTime(targetGain, now + 0.2);
+    }
+
+    if (limiter) {
+      limiter.threshold.linearRampToValueAtTime(
+        getTarget(masterActive, -6, 0),
+        now + 0.2,
+      );
+      limiter.knee.linearRampToValueAtTime(
+        getTarget(masterActive, 10, 30),
+        now + 0.2,
+      );
+      limiter.ratio.linearRampToValueAtTime(
+        getTarget(masterActive, 10, 1),
+        now + 0.2,
+      );
+      limiter.attack.linearRampToValueAtTime(
+        getTarget(masterActive, 0.002, 0.003),
+        now + 0.2,
+      );
+      limiter.release.linearRampToValueAtTime(
+        getTarget(masterActive, 0.12, 0.2),
+        now + 0.2,
       );
     }
 
     if (master) {
-      const targetGain = isBypassed ? 1.0 : 1.0 + speechBoost * 0.08;
+      const loudnessGuard =
+        features.streamingSafe && typeof loudnessDb === 'number'
+          ? Math.max(0.7, 1 - Math.max(0, loudnessDb - loudnessTarget) * 0.05)
+          : 1.0;
+      const targetGain =
+        (isBypassed ? 1.0 : 1.0 + speechBoost * 0.08) * loudnessGuard;
       master.gain.linearRampToValueAtTime(targetGain, now + 0.15);
     }
-  }, [features, audioContext, isBypassed, voiceActive]);
+  }, [
+    features,
+    audioContext,
+    isBypassed,
+    voiceActive,
+    loudnessDb,
+    loudnessTarget,
+    speakerPreset,
+    noiseProfiles,
+    selectedNoiseProfileId,
+  ]);
 
   // --- Visualizer + Gate + Smart Gain Rider ---
   const visualizeAndGate = () => {
-    const { analyser, gateGain } = processingRefs.current;
+    const { analyser, gateGain, noiseBlend, noiseNotch } = processingRefs.current;
     const canvas = canvasRef.current;
     if (!analyser || !canvas) return;
 
@@ -1327,16 +1604,21 @@ const AudioProcessor = ({ goHome }) => {
     let lastGateUpdate = 0;
     let lastVoiceUpdate = 0;
     let lastGainUpdate = 0;
+    let lastPatternUpdate = 0;
+    let lastLoudnessUpdate = 0;
     let gateHoldUntil = 0;
     let voiceHoldUntil = 0;
     const updateInterval = 100; // ms
     const gainUpdateInterval = 200; // ms;
+    const patternUpdateInterval = 120; // ms
+    const loudnessUpdateInterval = 250; // ms
 
     const draw = (timestamp) => {
       animationRef.current = requestAnimationFrame(draw);
 
       analyser.getByteFrequencyData(freqData);
       analyser.getByteTimeDomainData(timeData);
+      latestSpectrumRef.current = freqData.slice(0);
 
       const w = canvas.width;
       const h = canvas.height;
@@ -1482,6 +1764,58 @@ const AudioProcessor = ({ goHome }) => {
         lastVoiceUpdate = timestamp;
       }
 
+      if (timestamp - lastLoudnessUpdate > loudnessUpdateInterval) {
+        setLoudnessDb(parseFloat(db.toFixed(1)));
+        lastLoudnessUpdate = timestamp;
+      }
+
+      if (
+        timestamp - lastPatternUpdate > patternUpdateInterval &&
+        features.voicePattern &&
+        !isBypassed &&
+        audioContext
+      ) {
+        lastPatternUpdate = timestamp;
+        const sampleRate = audioContext.sampleRate || 48000;
+        const binHz = sampleRate / 2 / bufferLength;
+        const bandAverage = (startHz, endHz) => {
+          const startBin = Math.max(0, Math.floor(startHz / binHz));
+          const endBin = Math.min(bufferLength - 1, Math.ceil(endHz / binHz));
+          if (endBin <= startBin) return 0;
+          let sum = 0;
+          let count = 0;
+          for (let i = startBin; i <= endBin; i += 1) {
+            sum += freqData[i];
+            count += 1;
+          }
+          return count ? sum / count : 0;
+        };
+
+        const voiceEnergy = bandAverage(300, 3400);
+        const lowNoise = bandAverage(40, 160);
+        const highNoise = bandAverage(6000, 12000);
+        const noiseEnergy = (lowNoise + highNoise) / 2;
+        const ratio = (voiceEnergy + 1) / (noiseEnergy + 1);
+        const blendTarget = Math.min(1, Math.max(0.35, ratio / 2));
+        const notchTarget = lowNoise > highNoise ? 90 : 120;
+
+        if (noiseBlend) {
+          noiseBlend.gain.setTargetAtTime(
+            blendTarget,
+            audioContext.currentTime,
+            0.15,
+          );
+        }
+
+        if (noiseNotch) {
+          noiseNotch.frequency.setTargetAtTime(
+            notchTarget,
+            audioContext.currentTime,
+            0.2,
+          );
+        }
+      }
+
       // Core orb
       const coreRadius = h * 0.35;
       const coreGrad = ctx.createRadialGradient(
@@ -1553,7 +1887,8 @@ if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
       // Smart Gain Rider
       const autoGainNode = processingRefs.current.autoGain;
       const gainRiderEnabled =
-        features.smartMixing && !settingsRef.current.isBypassed;
+        (features.smartMixing || features.voicePattern) &&
+        !settingsRef.current.isBypassed;
 
       if (autoGainNode && gainRiderEnabled && (!gateClosed || localVoiceActive)) {
         const aggressiveMode =
@@ -1624,6 +1959,72 @@ if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
     selectedDevices.broadcastBus === 'Same as monitor'
       ? monitorLabel
       : selectedDevices.broadcastBus || 'Not set';
+
+  const handleSnapshotSave = () => {
+    const nextId = snapshotCounterRef.current;
+    snapshotCounterRef.current += 1;
+    const label = `Snapshot ${nextId}`;
+    setSnapshots((prev) => [
+      ...prev,
+      {
+        id: nextId,
+        label,
+        features: { ...features },
+        speakerPreset,
+        selectedNoiseProfileId,
+        noiseFloorThreshold,
+        inputGainValue,
+      },
+    ]);
+  };
+
+  const handleSnapshotApply = (snapshot) => {
+    setFeatures({ ...snapshot.features });
+    setSpeakerPreset(snapshot.speakerPreset);
+    setSelectedNoiseProfileId(snapshot.selectedNoiseProfileId || '');
+    setNoiseFloorThreshold(snapshot.noiseFloorThreshold);
+    setInputGainValue(snapshot.inputGainValue);
+  };
+
+  const handleNoiseProfileCapture = () => {
+    const spectrum = latestSpectrumRef.current;
+    if (!spectrum || spectrum.length === 0) return;
+    const sampleRate = audioContext?.sampleRate || 48000;
+    const binHz = sampleRate / 2 / spectrum.length;
+    const bandAverage = (startHz, endHz) => {
+      const startBin = Math.max(0, Math.floor(startHz / binHz));
+      const endBin = Math.min(spectrum.length - 1, Math.ceil(endHz / binHz));
+      if (endBin <= startBin) return 0;
+      let sum = 0;
+      let count = 0;
+      for (let i = startBin; i <= endBin; i += 1) {
+        sum += spectrum[i];
+        count += 1;
+      }
+      return count ? sum / count : 0;
+    };
+
+    const lowEnergy = bandAverage(40, 200);
+    const highEnergy = bandAverage(6000, 12000);
+    const normalize = (val, min, max) =>
+      Math.max(min, Math.min(max, val));
+    const lowReduction = -normalize(lowEnergy / 18, 3, 12);
+    const highReduction = -normalize(highEnergy / 16, 3, 14);
+    const profileId = `profile-${noiseProfileCounterRef.current}`;
+    const label = `Noise Profile ${noiseProfileCounterRef.current}`;
+    noiseProfileCounterRef.current += 1;
+
+    setNoiseProfiles((prev) => [
+      ...prev,
+      {
+        id: profileId,
+        label,
+        lowReduction,
+        highReduction,
+      },
+    ]);
+    setSelectedNoiseProfileId(profileId);
+  };
 
   // --- RENDER ---
   return (
@@ -1912,6 +2313,111 @@ if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
                 AI Processing
               </h2>
 
+              <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-slate-400">
+                    Room Noise Profile
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleNoiseProfileCapture}
+                    disabled={!latestSpectrumRef.current}
+                    className={`px-2 py-1 rounded-md border text-[10px] ${
+                      latestSpectrumRef.current
+                        ? 'border-indigo-500/60 text-indigo-300 bg-indigo-900/20'
+                        : 'border-slate-700 text-slate-500 bg-slate-950'
+                    }`}
+                  >
+                    Capture
+                  </button>
+                </div>
+                <select
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm"
+                  value={selectedNoiseProfileId}
+                  onChange={(e) => setSelectedNoiseProfileId(e.target.value)}
+                >
+                  <option value="">No profile</option>
+                  {noiseProfiles.map((profile) => (
+                    <option key={profile.id} value={profile.id}>
+                      {profile.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-slate-500">
+                  Capture a noise print when the room is loud, then apply it to
+                  reduce steady fan and HVAC noise.
+                </p>
+              </div>
+
+              <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-medium text-slate-400">
+                    Loudness Target
+                  </span>
+                  <span className="text-[10px] text-indigo-300 font-semibold">
+                    {typeof loudnessDb === 'number' ? `${loudnessDb} dB` : '--'}
+                  </span>
+                </div>
+                <select
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm"
+                  value={loudnessTarget}
+                  onChange={(e) => setLoudnessTarget(Number(e.target.value))}
+                >
+                  <option value={-14}>YouTube Live (-14 LUFS)</option>
+                  <option value={-16}>Facebook Live (-16 LUFS)</option>
+                  <option value={-20}>Zoom / Teams (-20 LUFS)</option>
+                </select>
+                <div className="mt-3 flex items-center justify-between text-[10px] text-slate-500">
+                  <span>Streaming Safe</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setFeatures({
+                        ...features,
+                        streamingSafe: !features.streamingSafe,
+                      })
+                    }
+                    className={`px-2 py-1 rounded-md border ${
+                      features.streamingSafe
+                        ? 'border-emerald-400/70 text-emerald-300 bg-emerald-900/20'
+                        : 'border-slate-700 text-slate-400 bg-slate-950'
+                    }`}
+                  >
+                    {features.streamingSafe ? 'ON' : 'OFF'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-medium text-slate-400">
+                    Speaker Profile
+                  </span>
+                  <span className="text-[10px] text-indigo-300 font-semibold">
+                    {speakerPreset === 'balanced'
+                      ? 'Balanced'
+                      : speakerPreset === 'pastor'
+                      ? 'Pastor'
+                      : speakerPreset === 'guest'
+                      ? 'Guest Speaker'
+                      : 'Choir Lead'}
+                  </span>
+                </div>
+                <select
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm"
+                  value={speakerPreset}
+                  onChange={(e) => setSpeakerPreset(e.target.value)}
+                >
+                  <option value="balanced">Balanced</option>
+                  <option value="pastor">Pastor</option>
+                  <option value="guest">Guest Speaker</option>
+                  <option value="choir">Choir Lead</option>
+                </select>
+                <p className="text-[10px] text-slate-500 mt-2">
+                  Tunes clarity, warmth, and de-essing for each voice type.
+                </p>
+              </div>
+
               <FeatureToggle
                 icon={<Activity size={18} />}
                 label="Hyper-Gate Reduction"
@@ -1999,6 +2505,30 @@ if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
                 }
               />
               <FeatureToggle
+                icon={<Waves size={18} />}
+                label="Voice Pattern Cleanse"
+                desc="Learns voice shape, removes noise, blends clean output"
+                active={features.voicePattern}
+                onClick={() =>
+                  setFeatures({
+                    ...features,
+                    voicePattern: !features.voicePattern,
+                  })
+                }
+              />
+              <FeatureToggle
+                icon={<Volume2 size={18} />}
+                label="Auto Music Ducking"
+                desc="Drops background beds when speech is active"
+                active={features.musicDucking}
+                onClick={() =>
+                  setFeatures({
+                    ...features,
+                    musicDucking: !features.musicDucking,
+                  })
+                }
+              />
+              <FeatureToggle
                 icon={<Mic size={18} />}
                 label="Pastor Voice Isolation"
                 desc="Pushes speech forward in the mix"
@@ -2038,8 +2568,8 @@ if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
 
             <FeatureToggle
               icon={<Volume2 size={18} />}
-              label="Broadcast Limit"
-              desc="-14 LUFS-style output guard"
+              label="Audacity Voice Polish"
+              desc="Bold end-to-end vocal sheen & loudness"
               active={features.mastering}
               onClick={() =>
                 setFeatures({
@@ -2048,6 +2578,77 @@ if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
                 })
               }
             />
+
+            <div className="mt-6 bg-slate-900 p-4 rounded-xl border border-slate-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                  A/B Compare
+                </span>
+                <span className="text-[10px] text-indigo-300 font-semibold">
+                  {abMode === 'A' ? 'A (Raw)' : 'B (Processed)'}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsBypassed(true)}
+                  className={`px-3 py-2 rounded-lg border text-xs font-semibold ${
+                    abMode === 'A'
+                      ? 'border-amber-400/70 bg-amber-900/20 text-amber-300'
+                      : 'border-slate-700 bg-slate-950 text-slate-400'
+                  }`}
+                >
+                  A (Raw)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsBypassed(false)}
+                  className={`px-3 py-2 rounded-lg border text-xs font-semibold ${
+                    abMode === 'B'
+                      ? 'border-indigo-400/70 bg-indigo-900/20 text-indigo-200'
+                      : 'border-slate-700 bg-slate-950 text-slate-400'
+                  }`}
+                >
+                  B (Processed)
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-4 bg-slate-900 p-4 rounded-xl border border-slate-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                  Session Snapshots
+                </span>
+                <button
+                  type="button"
+                  onClick={handleSnapshotSave}
+                  className="px-2.5 py-1 rounded-md border border-indigo-500/60 text-[10px] text-indigo-300 bg-indigo-900/20"
+                >
+                  Save
+                </button>
+              </div>
+              {snapshots.length === 0 ? (
+                <p className="text-[10px] text-slate-500">
+                  Save a snapshot to recall your full mix + AI stack.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {snapshots.map((snapshot) => (
+                    <button
+                      key={snapshot.id}
+                      type="button"
+                      onClick={() => handleSnapshotApply(snapshot)}
+                      className="w-full flex items-center justify-between px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-xs text-slate-300 hover:border-indigo-400/60 hover:text-white"
+                    >
+                      <span>{snapshot.label}</span>
+                      <span className="text-[10px] text-slate-500">
+                        {snapshot.speakerPreset}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
 
             <button
               onClick={() => setIsSidebarOpen(false)}
@@ -2185,6 +2786,22 @@ if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
             <div className="hidden lg:flex absolute top-4 right-4 gap-2 z-10">
               <Badge active={features.denoise && !isBypassed} text="HYPER-GATE" />
               <Badge
+                active={features.voicePattern && !isBypassed}
+                text="VOICE CLEANSE"
+              />
+              <Badge
+                active={features.musicDucking && !isBypassed}
+                text="DUCKING"
+              />
+              <Badge
+                active={features.streamingSafe && !isBypassed}
+                text="STREAM SAFE"
+              />
+              <Badge
+                active={Boolean(selectedNoiseProfileId) && !isBypassed}
+                text="NOISE PROFILE"
+              />
+              <Badge
                 active={features.pastorIsolation && !isBypassed}
                 text="VOICE ISOLATION"
               />
@@ -2194,7 +2811,7 @@ if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
               />
               <Badge
                 active={features.mastering && !isBypassed}
-                text="MASTERING"
+                text="VOICE POLISH"
               />
             </div>
 
