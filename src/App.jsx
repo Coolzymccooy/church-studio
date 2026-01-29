@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Mic,
   Settings,
@@ -60,44 +60,248 @@ const TiwatonApp = () => {
 // --- LANDING PAGE ---
 const LandingPage = ({ onEnter }) => {
   return (
-    <div className="h-[100dvh] bg-slate-950 text-white flex flex-col items-center justify-center relative overflow-hidden font-sans selection:bg-indigo-500 selection:text-white">
-      <div className="absolute inset-0 z-0 opacity-20">
+    <div className="min-h-[100dvh] bg-slate-950 text-white relative overflow-hidden font-sans selection:bg-indigo-500 selection:text-white">
+      <div className="absolute inset-0 z-0 opacity-20 pointer-events-none">
         <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] bg-indigo-600 rounded-full blur-[120px] animate-pulse" />
         <div
-          className="absolute bottom-[-20%] right-[-10%] w-[500px] h-[500px] bg-purple-600 rounded-full blur-[120px]"
+          className="absolute bottom-[-25%] right-[-15%] w-[520px] h-[520px] bg-purple-600 rounded-full blur-[140px]"
           style={{ animationDuration: '4s' }}
         />
       </div>
 
-      <div className="z-10 text-center max-w-3xl px-6">
-        <div className="mb-8 flex justify-center">
-          <div className="w-20 h-20 bg-gradient-to-tr from-indigo-500 to-purple-500 rounded-2xl flex items-center justify-center shadow-[0_0_40px_rgba(99,102,241,0.6)] rotate-3 hover:rotate-6 transition-transform duration-500">
-            <Waves size={40} className="text-white" />
+      <header className="relative z-10">
+        <div className="mx-auto max-w-6xl px-6 pt-10 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-gradient-to-tr from-indigo-500 to-purple-500 rounded-xl flex items-center justify-center shadow-[0_0_24px_rgba(99,102,241,0.6)]">
+              <Waves size={22} className="text-white" />
+            </div>
+            <div className="text-sm uppercase tracking-[0.3em] text-slate-400">
+              Tiwaton AI Studio
+            </div>
           </div>
+          <button
+            onClick={onEnter}
+            className="hidden md:inline-flex items-center gap-2 px-5 py-2 text-sm font-semibold bg-white text-slate-950 rounded-full hover:bg-indigo-50 transition-colors"
+          >
+            Enter Studio <ArrowRight size={16} />
+          </button>
         </div>
+      </header>
 
-        <h1 className="text-5xl md:text-8xl font-black tracking-tighter mb-4 bg-clip-text text-transparent bg-gradient-to-r from-white via-indigo-200 to-slate-400">
-          TIWATON.
-        </h1>
+      <main className="relative z-10">
+        <section className="mx-auto max-w-6xl px-6 pt-14 pb-16 grid lg:grid-cols-[1.1fr_0.9fr] gap-12 items-center">
+          <div className="text-left">
+            <p className="text-sm uppercase tracking-[0.4em] text-indigo-300 mb-4">
+              Human-first audio automation
+            </p>
+            <h1 className="text-5xl md:text-7xl font-black tracking-tight leading-[1.05] mb-6 bg-clip-text text-transparent bg-gradient-to-r from-white via-indigo-100 to-slate-400">
+              The AI sound engineer that never misses a word.
+            </h1>
+            <p className="text-lg md:text-xl text-slate-300 leading-relaxed max-w-2xl mb-8">
+              TIWATON turns chaotic church audio into a warm, consistent stream.
+              Hyper-Gate keeps speech present, Echo/Reverb Cleaner controls room
+              wash, and Smart Auto-Mixing delivers a broadcast-ready level every
+              service.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-4">
+              <button
+                onClick={onEnter}
+                className="group relative px-8 py-4 bg-white text-slate-950 font-bold text-lg rounded-full overflow-hidden hover:scale-[1.02] transition-transform duration-300 shadow-[0_0_30px_rgba(255,255,255,0.25)]"
+              >
+                <div className="absolute inset-0 bg-gradient-to-r from-indigo-400 to-purple-400 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                <span className="relative z-10 flex items-center gap-3 group-hover:text-white transition-colors">
+                  Enter Studio <ArrowRight size={20} />
+                </span>
+              </button>
+              <button className="px-8 py-4 rounded-full border border-slate-700 text-slate-200 hover:border-indigo-400 hover:text-white transition-colors">
+                Watch how it works
+              </button>
+            </div>
+            <div className="mt-8 flex flex-wrap gap-6 text-sm text-slate-400">
+              <span className="flex items-center gap-2">
+                <CheckCircle2 size={16} className="text-emerald-400" />
+                Built for live + file processing
+              </span>
+              <span className="flex items-center gap-2">
+                <CheckCircle2 size={16} className="text-emerald-400" />
+                OBS + vMix ready
+              </span>
+              <span className="flex items-center gap-2">
+                <CheckCircle2 size={16} className="text-emerald-400" />
+                AI-guided controls
+              </span>
+            </div>
+          </div>
 
-        <p className="text-lg md:text-2xl text-slate-400 font-light mb-12 leading-relaxed">
-          The AI Sound Engineer your church actually needs.
-          <br />
-          <span className="text-indigo-400 font-medium">
-            True Noise Gating. Studio Clarity. Zero Excuses.
-          </span>
-        </p>
+          <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-6 shadow-[0_20px_70px_rgba(15,23,42,0.6)]">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <p className="text-sm text-slate-400">Live service snapshot</p>
+                <h2 className="text-2xl font-semibold">Audio clarity panel</h2>
+              </div>
+              <span className="px-3 py-1 text-xs rounded-full bg-emerald-500/20 text-emerald-200 border border-emerald-400/40">
+                Live
+              </span>
+            </div>
+            <div className="grid gap-4">
+              {[
+                {
+                  icon: <Mic size={18} />,
+                  title: 'Hyper-Gate',
+                  description: 'Voice-first gating keeps speech in front.',
+                },
+                {
+                  icon: <Waves size={18} />,
+                  title: 'Echo / Reverb Cleaner',
+                  description: 'Tames room wash and reflections instantly.',
+                },
+                {
+                  icon: <Headphones size={18} />,
+                  title: 'Pastor Voice Isolation',
+                  description: 'Focuses on the lead mic and removes bleed.',
+                },
+                {
+                  icon: <Speaker size={18} />,
+                  title: 'Sermon Warmth',
+                  description: 'Adds fullness without mud or rumble.',
+                },
+                {
+                  icon: <Sliders size={18} />,
+                  title: 'Smart Auto-Mixing',
+                  description: 'Smooths levels for a broadcast-ready mix.',
+                },
+                {
+                  icon: <Cpu size={18} />,
+                  title: 'AI Mastering',
+                  description: 'Consistent output every week, every device.',
+                },
+              ].map((item) => (
+                <div
+                  key={item.title}
+                  className="flex items-start gap-4 p-4 rounded-2xl bg-slate-950/60 border border-slate-800/80"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-200 flex items-center justify-center">
+                    {item.icon}
+                  </div>
+                  <div>
+                    <p className="text-base font-semibold text-white">
+                      {item.title}
+                    </p>
+                    <p className="text-sm text-slate-400 leading-relaxed">
+                      {item.description}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
 
-        <button
-          onClick={onEnter}
-          className="group relative px-8 py-5 bg-white text-slate-950 font-bold text-lg rounded-full overflow-hidden hover:scale-105 transition-transform duration-300 shadow-[0_0_30px_rgba(255,255,255,0.3)]"
-        >
-          <div className="absolute inset-0 bg-gradient-to-r from-indigo-400 to-purple-400 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-          <span className="relative z-10 flex items-center gap-3 group-hover:text-white transition-colors">
-            Enter Studio <ArrowRight size={20} />
-          </span>
-        </button>
-      </div>
+        <section className="mx-auto max-w-6xl px-6 pb-14 grid md:grid-cols-3 gap-6">
+          {[
+            {
+              title: 'Human-designed flow',
+              description:
+                'Clear steps and visible feedback. Every control is labeled with a reason so volunteers feel confident.',
+            },
+            {
+              title: 'AI that serves people',
+              description:
+                'Enhance the sermon, not the noise. TIWATON prioritizes speech intelligibility above everything.',
+            },
+            {
+              title: 'Massive impact, minimal setup',
+              description:
+                'Connect a mic, select a mode, and go live. Your mix locks in within seconds.',
+            },
+          ].map((card) => (
+            <div
+              key={card.title}
+              className="p-6 rounded-2xl bg-slate-900/70 border border-slate-800"
+            >
+              <h3 className="text-lg font-semibold text-white mb-2">
+                {card.title}
+              </h3>
+              <p className="text-sm text-slate-400 leading-relaxed">
+                {card.description}
+              </p>
+            </div>
+          ))}
+        </section>
+
+        <section className="mx-auto max-w-6xl px-6 pb-16">
+          <div className="rounded-3xl border border-slate-800 bg-gradient-to-r from-slate-900/80 via-slate-900/40 to-slate-900/80 p-10">
+            <div className="grid lg:grid-cols-[1.2fr_0.8fr] gap-10 items-center">
+              <div>
+                <p className="text-sm uppercase tracking-[0.3em] text-indigo-300 mb-3">
+                  How it works
+                </p>
+                <h2 className="text-3xl md:text-4xl font-semibold text-white mb-4">
+                  A clean, predictable path to broadcast-ready audio.
+                </h2>
+                <p className="text-base text-slate-300 leading-relaxed mb-6">
+                  TIWATON follows a human-centered workflow: capture, enhance,
+                  stabilize, and deliver. Every feature is stacked so speech
+                  feels natural and the mix stays balanced even when volunteers
+                  change week to week.
+                </p>
+                <div className="flex flex-wrap gap-6 text-sm text-slate-300">
+                  <span className="flex items-center gap-2">
+                    <Zap size={16} className="text-indigo-300" />
+                    Instant voice detection
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <Volume2 size={16} className="text-indigo-300" />
+                    Adaptive leveling
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <Radio size={16} className="text-indigo-300" />
+                    Stream-ready output
+                  </span>
+                </div>
+              </div>
+              <div className="space-y-4">
+                {[
+                  'Connect mic or mixer feed.',
+                  'Enable Hyper-Gate + AI processors.',
+                  'Watch voice clarity meters lock in.',
+                  'Send to OBS, Zoom, or your stream encoder.',
+                ].map((step, index) => (
+                  <div
+                    key={step}
+                    className="flex items-center gap-4 p-4 rounded-2xl bg-slate-950/60 border border-slate-800"
+                  >
+                    <div className="w-10 h-10 rounded-full bg-indigo-500/20 text-indigo-200 flex items-center justify-center font-semibold">
+                      {index + 1}
+                    </div>
+                    <p className="text-sm text-slate-300">{step}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="mx-auto max-w-6xl px-6 pb-20">
+          <div className="rounded-3xl bg-slate-900/70 border border-slate-800 p-10 flex flex-col lg:flex-row items-center justify-between gap-8">
+            <div>
+              <h3 className="text-3xl font-semibold text-white mb-2">
+                Ready to hear the difference?
+              </h3>
+              <p className="text-slate-400 max-w-xl">
+                Start a live session or upload your sermon. TIWATON will guide you
+                through the right settings and deliver a polished mix.
+              </p>
+            </div>
+            <button
+              onClick={onEnter}
+              className="px-8 py-4 rounded-full bg-indigo-500 hover:bg-indigo-400 text-white font-semibold shadow-[0_0_30px_rgba(99,102,241,0.4)]"
+            >
+              Launch Studio
+            </button>
+          </div>
+        </section>
+      </main>
     </div>
   );
 };
@@ -188,6 +392,8 @@ const AudioProcessor = ({ goHome }) => {
     autoGain: null, // Smart Gain Rider node
     eqWarmth: null,
     eqClarity: null,
+    reverbFilter: null,
+    reverbDucker: null,
     master: null,
     monitorGain: null,
     analyser: null,
@@ -239,16 +445,16 @@ const AudioProcessor = ({ goHome }) => {
     setOutputTarget(outputTargets[nextIndex].name);
   };
 
-  const resetDeviceState = () => {
+  const resetDeviceState = useCallback(() => {
     setAvailableDevices({ inputs: [], outputs: [] });
     setSelectedDevices({
       inputId: 'default',
       outputId: 'default',
       broadcastBus: 'Not set',
     });
-  };
+  }, []);
 
-  const getDevices = async () => {
+  const getDevices = useCallback(async () => {
     try {
       await navigator.mediaDevices.getUserMedia({ audio: true });
       const devices = await navigator.mediaDevices.enumerateDevices();
@@ -260,11 +466,11 @@ const AudioProcessor = ({ goHome }) => {
       console.warn('Permission needed', err);
       resetDeviceState();
     }
-  };
+  }, [resetDeviceState]);
 
   useEffect(() => {
     if (showSettings) getDevices();
-  }, [showSettings]);
+  }, [showSettings, getDevices]);
 
   useEffect(() => {
     settingsRef.current = {
@@ -283,12 +489,7 @@ const AudioProcessor = ({ goHome }) => {
   }
 }, [features.denoise, noiseFloorThreshold, isBypassed, audioContext]);
 
-  useEffect(() => {
-    return () => cleanupAudio();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const cleanupAudio = () => {
+  const cleanupAudio = useCallback(() => {
     if (contextRef.current) {
       try {
         contextRef.current.close();
@@ -313,20 +514,22 @@ const AudioProcessor = ({ goHome }) => {
       videoElRef.current.src = '';
     }
 
-    processingRefs.current = {
-      source: null,
-      inputGain: null,
-      lowCut: null,
-      gateGain: null,
-      deEsser: null,
-      compressor: null,
-      autoGain: null,
-      eqWarmth: null,
-      eqClarity: null,
-      master: null,
-      monitorGain: null,
-      analyser: null,
-    };
+      processingRefs.current = {
+        source: null,
+        inputGain: null,
+        lowCut: null,
+        gateGain: null,
+        deEsser: null,
+        compressor: null,
+        autoGain: null,
+        eqWarmth: null,
+        eqClarity: null,
+        reverbFilter: null,
+        reverbDucker: null,
+        master: null,
+        monitorGain: null,
+        analyser: null,
+      };
     destNodeRef.current = null;
 
     setAudioContext(null);
@@ -346,7 +549,11 @@ const AudioProcessor = ({ goHome }) => {
     if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
     setRecordingState('idle');
     setAudioEngineError(null);
-  };
+  }, []);
+
+  useEffect(() => {
+    return () => cleanupAudio();
+  }, [cleanupAudio]);
 
   const hardReset = () => {
     cleanupAudio();
@@ -475,6 +682,14 @@ const AudioProcessor = ({ goHome }) => {
       eqClarity.Q.value = 1;
       eqClarity.gain.value = 0;
 
+      const reverbFilter = ctx.createBiquadFilter();
+      reverbFilter.type = 'lowpass';
+      reverbFilter.frequency.value = 18000;
+      reverbFilter.Q.value = 0.7;
+
+      const reverbDucker = ctx.createGain();
+      reverbDucker.gain.value = 1.0;
+
       const master = ctx.createGain();
       master.gain.value = 1.0;
 
@@ -499,7 +714,9 @@ const AudioProcessor = ({ goHome }) => {
       autoGain.connect(eqWarmth);
 
       eqWarmth.connect(eqClarity);
-      eqClarity.connect(master);
+      eqClarity.connect(reverbFilter);
+      reverbFilter.connect(reverbDucker);
+      reverbDucker.connect(master);
       master.connect(ana);
       ana.connect(monitorGain);
       ana.connect(destNode);
@@ -524,6 +741,8 @@ const AudioProcessor = ({ goHome }) => {
         autoGain,
         eqWarmth,
         eqClarity,
+        reverbFilter,
+        reverbDucker,
         master,
         monitorGain,
         analyser: ana,
@@ -541,7 +760,9 @@ const AudioProcessor = ({ goHome }) => {
       if (contextRef.current) {
         try {
           contextRef.current.close();
-        } catch (_) {}
+        } catch (closeError) {
+          console.warn('Error closing audio context after failure', closeError);
+        }
         contextRef.current = null;
       }
       setAudioContext(null);
@@ -1027,7 +1248,8 @@ const AudioProcessor = ({ goHome }) => {
   // --- Parameter updates (EQ & compressor tweaks based on features) ---
   useEffect(() => {
     if (!audioContext || !processingRefs.current.compressor) return;
-    const { compressor, eqWarmth, eqClarity, master } = processingRefs.current;
+    const { compressor, eqWarmth, eqClarity, reverbFilter, reverbDucker, master } =
+      processingRefs.current;
     const now = audioContext.currentTime;
 
     const getTarget = (isActive, activeVal, passiveVal) =>
@@ -1037,26 +1259,51 @@ const AudioProcessor = ({ goHome }) => {
     const speechBoost = voiceActive ? 2 : 0;
 
     if (eqClarity) {
-      const baseClarity = getTarget(features.pastorIsolation, 8, 0);
+      const baseClarity = getTarget(features.pastorIsolation, 12, 0);
+      eqClarity.Q.value = getTarget(features.pastorIsolation, 1.2, 1);
       eqClarity.gain.linearRampToValueAtTime(baseClarity + speechBoost, now + 0.2);
     }
 
     if (eqWarmth) {
-      const baseWarmth = getTarget(features.sermonWarmth, 5, 0);
+      const baseWarmth = getTarget(features.sermonWarmth, 9, 0);
+      eqWarmth.Q.value = getTarget(features.sermonWarmth, 1.1, 1);
       eqWarmth.gain.linearRampToValueAtTime(
-        baseWarmth + speechBoost * 0.6,
+        baseWarmth + speechBoost * 0.8,
         now + 0.25,
       );
     }
 
+    if (reverbFilter) {
+      const targetFreq = getTarget(features.dereverb, 6200, 18000);
+      reverbFilter.frequency.linearRampToValueAtTime(targetFreq, now + 0.25);
+    }
+
+    if (reverbDucker) {
+      const targetGain =
+        features.dereverb && !isBypassed ? (voiceActive ? 1.0 : 0.55) : 1.0;
+      reverbDucker.gain.linearRampToValueAtTime(targetGain, now + 0.2);
+    }
+
     if (compressor) {
       compressor.ratio.linearRampToValueAtTime(
-        getTarget(features.smartMixing, 4, 1),
+        getTarget(features.smartMixing, 6.5, 1),
         now + 0.4,
       );
       compressor.threshold.linearRampToValueAtTime(
-        getTarget(features.smartMixing, -24, 0),
+        getTarget(features.smartMixing, -30, 0),
         now + 0.4,
+      );
+      compressor.knee.linearRampToValueAtTime(
+        getTarget(features.smartMixing, 20, 30),
+        now + 0.4,
+      );
+      compressor.attack.linearRampToValueAtTime(
+        getTarget(features.smartMixing, 0.002, 0.003),
+        now + 0.35,
+      );
+      compressor.release.linearRampToValueAtTime(
+        getTarget(features.smartMixing, 0.18, 0.25),
+        now + 0.35,
       );
     }
 
@@ -1080,6 +1327,8 @@ const AudioProcessor = ({ goHome }) => {
     let lastGateUpdate = 0;
     let lastVoiceUpdate = 0;
     let lastGainUpdate = 0;
+    let gateHoldUntil = 0;
+    let voiceHoldUntil = 0;
     const updateInterval = 100; // ms
     const gainUpdateInterval = 200; // ms;
 
@@ -1147,6 +1396,7 @@ const AudioProcessor = ({ goHome }) => {
 
       let gateClosed = false;
       let localVoiceActive = false;
+      let voiceCandidate = false;
 
       // Auto-calibrator
       if (calibrateRef.current.active) {
@@ -1171,32 +1421,66 @@ const AudioProcessor = ({ goHome }) => {
 
       // Gate decision + VAD
       if (gateGain && settingsRef.current.denoise && !settingsRef.current.isBypassed) {
-  const threshold = settingsRef.current.threshold;
-  const target = db < threshold ? 0.001 : 1.0; // closed vs open
+        const threshold = settingsRef.current.threshold;
+        const openThreshold = threshold + 3;
+        const closeThreshold = threshold - 4;
+        const minGateGain = 0.015;
 
-  const current = gateGain.gain.value;
-  const smoothing = target > current ? 0.2 : 0.05; // attack / release
-  gateGain.gain.value = current + (target - current) * smoothing;
+        voiceCandidate =
+          !highOnlyNoise &&
+          lowAvg > 18 &&
+          highBias < 2.4 &&
+          db > threshold - 12;
 
-  gateClosed = gateGain.gain.value < 0.1;
+        if (voiceCandidate) {
+          voiceHoldUntil = timestamp + 180;
+        }
+        localVoiceActive = voiceHoldUntil > timestamp;
 
-  if (timestamp - lastGateUpdate > updateInterval) {
-    setVisualizerGateStatus((prev) =>
-      prev !== gateClosed ? gateClosed : prev
-    );
-    lastGateUpdate = timestamp;
-  }
-} else if (gateGain) {
-  // Gate off or bypassed: fully open
-  gateGain.gain.value = 1.0;
-  gateClosed = false;
-  if (visualizerGateStatus !== false) {
-    setVisualizerGateStatus(false);
-  }
-}        
-        if (voiceActive !== false) {
-          setVoiceActive(false);
-        }      
+        let target = minGateGain;
+
+        if (db > openThreshold || localVoiceActive) {
+          target = 1.0;
+          gateHoldUntil = timestamp + 140;
+        } else if (timestamp < gateHoldUntil) {
+          target = 1.0;
+        } else if (db < closeThreshold) {
+          target = minGateGain;
+        } else {
+          const progress =
+            (db - closeThreshold) / (openThreshold - closeThreshold || 1);
+          target = minGateGain + Math.max(0, Math.min(1, progress)) * (1 - minGateGain);
+        }
+
+        if (localVoiceActive && db < threshold) {
+          const lift = Math.min(0.45, 0.2 + (threshold - db) * 0.02);
+          target = Math.max(target, lift);
+        }
+
+        const current = gateGain.gain.value;
+        const smoothing = target > current ? 0.25 : 0.06; // attack / release
+        gateGain.gain.value = current + (target - current) * smoothing;
+
+        gateClosed = gateGain.gain.value < 0.12;
+
+        if (timestamp - lastGateUpdate > updateInterval) {
+          setVisualizerGateStatus((prev) => (prev !== gateClosed ? gateClosed : prev));
+          lastGateUpdate = timestamp;
+        }
+      } else if (gateGain) {
+        // Gate off or bypassed: fully open
+        gateGain.gain.value = 1.0;
+        gateClosed = false;
+        if (visualizerGateStatus !== false) {
+          setVisualizerGateStatus(false);
+        }
+      }
+
+      if (timestamp - lastVoiceUpdate > updateInterval) {
+        const voiceNow = localVoiceActive && !highOnlyNoise;
+        setVoiceActive((prev) => (prev !== voiceNow ? voiceNow : prev));
+        lastVoiceUpdate = timestamp;
+      }
 
       // Core orb
       const coreRadius = h * 0.35;
@@ -1271,13 +1555,13 @@ if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
       const gainRiderEnabled =
         features.smartMixing && !settingsRef.current.isBypassed;
 
-      if (autoGainNode && gainRiderEnabled && !gateClosed) {
+      if (autoGainNode && gainRiderEnabled && (!gateClosed || localVoiceActive)) {
         const aggressiveMode =
           settingsRef.current.denoise && settingsRef.current.threshold > -40;
 
-        const targetSpeechDb = aggressiveMode ? -18 : -24;
-        const maxBoostDb = aggressiveMode ? 16 : 12;
-        const maxCutDb = -12;
+        const targetSpeechDb = aggressiveMode ? -16 : -22;
+        const maxBoostDb = aggressiveMode ? 20 : 16;
+        const maxCutDb = -16;
 
         let neededChange = targetSpeechDb - db;
         if (neededChange > maxBoostDb) neededChange = maxBoostDb;
@@ -1286,7 +1570,7 @@ if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
         const desiredLinear = Math.pow(10, neededChange / 20);
         const currentLinear = autoGainNode.gain.value || 1.0;
 
-        const smoothingRider = 0.02;
+        const smoothingRider = aggressiveMode ? 0.03 : 0.02;
         autoGainNode.gain.value =
           currentLinear + (desiredLinear - currentLinear) * smoothingRider;
 
