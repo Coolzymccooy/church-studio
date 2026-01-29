@@ -403,7 +403,6 @@ const AudioProcessor = ({ goHome }) => {
     eqClarity: null,
     reverbFilter: null,
     reverbDucker: null,
- codex/enhance-ai-processing-logic-peupob
     noiseNotch: null,
     voiceContour: null,
     noiseBlend: null,
@@ -414,8 +413,6 @@ const AudioProcessor = ({ goHome }) => {
     polishPresence: null,
     polishAir: null,
     limiter: null,
-=======
-    dev
     master: null,
     monitorGain: null,
     analyser: null,
@@ -458,13 +455,22 @@ const AudioProcessor = ({ goHome }) => {
   const [selectedNoiseProfileId, setSelectedNoiseProfileId] = useState('');
   const noiseProfileCounterRef = useRef(1);
   const latestSpectrumRef = useRef(null);
-
+  const featuresRef = useRef(features);
+  const gainRiderDbRef = useRef(gainRiderDb);
   const canvasRef = useRef(null);
   const animationRef = useRef(null);
 
   useEffect(() => {
     isMonitoringRef.current = isMonitoring;
   }, [isMonitoring]);
+
+  useEffect(() => {
+    featuresRef.current = features;
+  }, [features]);
+
+  useEffect(() => {
+    gainRiderDbRef.current = gainRiderDb;
+  }, [gainRiderDb]);
 
   const outputTargets = [
     { name: 'OBS Studio', icon: <Cpu size={20} /> },
@@ -561,7 +567,6 @@ const AudioProcessor = ({ goHome }) => {
         eqClarity: null,
         reverbFilter: null,
         reverbDucker: null,
-    codex/enhance-ai-processing-logic-peupob
         noiseNotch: null,
         voiceContour: null,
         noiseBlend: null,
@@ -572,8 +577,6 @@ const AudioProcessor = ({ goHome }) => {
         polishPresence: null,
         polishAir: null,
         limiter: null,
-=======
-    dev
         master: null,
         monitorGain: null,
         analyser: null,
@@ -777,8 +780,6 @@ const AudioProcessor = ({ goHome }) => {
 
       const reverbDucker = ctx.createGain();
       reverbDucker.gain.value = 1.0;
-
-    
       const duckGain = ctx.createGain();
       duckGain.gain.value = 1.0;
 
@@ -804,8 +805,6 @@ const AudioProcessor = ({ goHome }) => {
       limiter.ratio.value = 1;
       limiter.attack.value = 0.003;
       limiter.release.value = 0.2;
-
-
 
       const master = ctx.createGain();
       master.gain.value = 1.0;
@@ -838,7 +837,6 @@ const AudioProcessor = ({ goHome }) => {
       eqWarmth.connect(eqClarity);
       eqClarity.connect(reverbFilter);
       reverbFilter.connect(reverbDucker);
-
       reverbDucker.connect(duckGain);
       duckGain.connect(polishLow);
       polishLow.connect(polishPresence);
@@ -847,7 +845,6 @@ const AudioProcessor = ({ goHome }) => {
       limiter.connect(master);
 
       reverbDucker.connect(master);
-
       master.connect(ana);
       ana.connect(monitorGain);
       ana.connect(destNode);
@@ -1595,6 +1592,7 @@ const AudioProcessor = ({ goHome }) => {
     const { analyser, gateGain, noiseBlend, noiseNotch } = processingRefs.current;
     const canvas = canvasRef.current;
     if (!analyser || !canvas) return;
+    if (animationRef.current) cancelAnimationFrame(animationRef.current);
 
     const ctx = canvas.getContext('2d');
     const bufferLength = analyser.frequencyBinCount;
@@ -1664,7 +1662,7 @@ const AudioProcessor = ({ goHome }) => {
       const lowAvg = lowEnergy / (splitIndex || 1);
       const highAvg = highEnergy / (bufferLength - splitIndex || 1);
       const highBias = highAvg / (lowAvg + 1e-6);
-      const antiChildNoiseActive = features.denoise;
+      const antiChildNoiseActive = featuresRef.current.denoise;
       const highOnlyNoise = antiChildNoiseActive && highBias > 2.2 && lowAvg < 40;
 
       // Time-domain RMS
@@ -1771,6 +1769,8 @@ const AudioProcessor = ({ goHome }) => {
 
       if (
         timestamp - lastPatternUpdate > patternUpdateInterval &&
+        featuresRef.current.voicePattern &&
+
         features.voicePattern &&
         !isBypassed &&
         audioContext
@@ -1887,6 +1887,8 @@ if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
       // Smart Gain Rider
       const autoGainNode = processingRefs.current.autoGain;
       const gainRiderEnabled =
+        (featuresRef.current.smartMixing || featuresRef.current.voicePattern) &&
+
         (features.smartMixing || features.voicePattern) &&
         !settingsRef.current.isBypassed;
 
@@ -1923,7 +1925,10 @@ if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
         autoGainNode.gain.value =
           currentLinear + (targetLinear - currentLinear) * smoothingBack;
 
-        if (timestamp - lastGainUpdate > gainUpdateInterval && gainRiderDb !== 0) {
+        if (
+          timestamp - lastGainUpdate > gainUpdateInterval &&
+          gainRiderDbRef.current !== 0
+        ) {
           setGainRiderDb(0);
           lastGainUpdate = timestamp;
         }
