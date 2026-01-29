@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Mic,
   Settings,
@@ -43,7 +43,16 @@ import {
  */
 
 const TiwatonApp = () => {
-  const [view, setView] = useState('landing');
+  const [view, setView] = useState(() => {
+    if (typeof window === 'undefined') return 'landing';
+    const savedView = window.localStorage.getItem('tiwaton:view');
+    return savedView || 'landing';
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('tiwaton:view', view);
+  }, [view]);
 
   if (view === 'landing') {
     return <LandingPage onEnter={() => setView('studio')} />;
@@ -60,44 +69,248 @@ const TiwatonApp = () => {
 // --- LANDING PAGE ---
 const LandingPage = ({ onEnter }) => {
   return (
-    <div className="h-[100dvh] bg-slate-950 text-white flex flex-col items-center justify-center relative overflow-hidden font-sans selection:bg-indigo-500 selection:text-white">
-      <div className="absolute inset-0 z-0 opacity-20">
+    <div className="min-h-[100dvh] bg-slate-950 text-white relative overflow-hidden font-sans selection:bg-indigo-500 selection:text-white">
+      <div className="absolute inset-0 z-0 opacity-20 pointer-events-none">
         <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] bg-indigo-600 rounded-full blur-[120px] animate-pulse" />
         <div
-          className="absolute bottom-[-20%] right-[-10%] w-[500px] h-[500px] bg-purple-600 rounded-full blur-[120px]"
+          className="absolute bottom-[-25%] right-[-15%] w-[520px] h-[520px] bg-purple-600 rounded-full blur-[140px]"
           style={{ animationDuration: '4s' }}
         />
       </div>
 
-      <div className="z-10 text-center max-w-3xl px-6">
-        <div className="mb-8 flex justify-center">
-          <div className="w-20 h-20 bg-gradient-to-tr from-indigo-500 to-purple-500 rounded-2xl flex items-center justify-center shadow-[0_0_40px_rgba(99,102,241,0.6)] rotate-3 hover:rotate-6 transition-transform duration-500">
-            <Waves size={40} className="text-white" />
+      <header className="relative z-10">
+        <div className="mx-auto max-w-6xl px-6 pt-10 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-gradient-to-tr from-indigo-500 to-purple-500 rounded-xl flex items-center justify-center shadow-[0_0_24px_rgba(99,102,241,0.6)]">
+              <Waves size={22} className="text-white" />
+            </div>
+            <div className="text-sm uppercase tracking-[0.3em] text-slate-400">
+              Tiwaton AI Studio
+            </div>
           </div>
+          <button
+            onClick={onEnter}
+            className="hidden md:inline-flex items-center gap-2 px-5 py-2 text-sm font-semibold bg-white text-slate-950 rounded-full hover:bg-indigo-50 transition-colors"
+          >
+            Enter Studio <ArrowRight size={16} />
+          </button>
         </div>
+      </header>
 
-        <h1 className="text-5xl md:text-8xl font-black tracking-tighter mb-4 bg-clip-text text-transparent bg-gradient-to-r from-white via-indigo-200 to-slate-400">
-          TIWATON.
-        </h1>
+      <main className="relative z-10">
+        <section className="mx-auto max-w-6xl px-6 pt-14 pb-16 grid lg:grid-cols-[1.1fr_0.9fr] gap-12 items-center">
+          <div className="text-left">
+            <p className="text-sm uppercase tracking-[0.4em] text-indigo-300 mb-4">
+              Human-first audio automation
+            </p>
+            <h1 className="text-5xl md:text-7xl font-black tracking-tight leading-[1.05] mb-6 bg-clip-text text-transparent bg-gradient-to-r from-white via-indigo-100 to-slate-400">
+              The AI sound engineer that never misses a word.
+            </h1>
+            <p className="text-lg md:text-xl text-slate-300 leading-relaxed max-w-2xl mb-8">
+              TIWATON turns chaotic church audio into a warm, consistent stream.
+              Hyper-Gate keeps speech present, Echo/Reverb Cleaner controls room
+              wash, and Smart Auto-Mixing delivers a broadcast-ready level every
+              service.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-4">
+              <button
+                onClick={onEnter}
+                className="group relative px-8 py-4 bg-white text-slate-950 font-bold text-lg rounded-full overflow-hidden hover:scale-[1.02] transition-transform duration-300 shadow-[0_0_30px_rgba(255,255,255,0.25)]"
+              >
+                <div className="absolute inset-0 bg-gradient-to-r from-indigo-400 to-purple-400 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                <span className="relative z-10 flex items-center gap-3 group-hover:text-white transition-colors">
+                  Enter Studio <ArrowRight size={20} />
+                </span>
+              </button>
+              <button className="px-8 py-4 rounded-full border border-slate-700 text-slate-200 hover:border-indigo-400 hover:text-white transition-colors">
+                Watch how it works
+              </button>
+            </div>
+            <div className="mt-8 flex flex-wrap gap-6 text-sm text-slate-400">
+              <span className="flex items-center gap-2">
+                <CheckCircle2 size={16} className="text-emerald-400" />
+                Built for live + file processing
+              </span>
+              <span className="flex items-center gap-2">
+                <CheckCircle2 size={16} className="text-emerald-400" />
+                OBS + vMix ready
+              </span>
+              <span className="flex items-center gap-2">
+                <CheckCircle2 size={16} className="text-emerald-400" />
+                AI-guided controls
+              </span>
+            </div>
+          </div>
 
-        <p className="text-lg md:text-2xl text-slate-400 font-light mb-12 leading-relaxed">
-          The AI Sound Engineer your church actually needs.
-          <br />
-          <span className="text-indigo-400 font-medium">
-            True Noise Gating. Studio Clarity. Zero Excuses.
-          </span>
-        </p>
+          <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-6 shadow-[0_20px_70px_rgba(15,23,42,0.6)]">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <p className="text-sm text-slate-400">Live service snapshot</p>
+                <h2 className="text-2xl font-semibold">Audio clarity panel</h2>
+              </div>
+              <span className="px-3 py-1 text-xs rounded-full bg-emerald-500/20 text-emerald-200 border border-emerald-400/40">
+                Live
+              </span>
+            </div>
+            <div className="grid gap-4">
+              {[
+                {
+                  icon: <Mic size={18} />,
+                  title: 'Hyper-Gate',
+                  description: 'Voice-first gating keeps speech in front.',
+                },
+                {
+                  icon: <Waves size={18} />,
+                  title: 'Echo / Reverb Cleaner',
+                  description: 'Tames room wash and reflections instantly.',
+                },
+                {
+                  icon: <Headphones size={18} />,
+                  title: 'Pastor Voice Isolation',
+                  description: 'Focuses on the lead mic and removes bleed.',
+                },
+                {
+                  icon: <Speaker size={18} />,
+                  title: 'Sermon Warmth',
+                  description: 'Adds fullness without mud or rumble.',
+                },
+                {
+                  icon: <Sliders size={18} />,
+                  title: 'Smart Auto-Mixing',
+                  description: 'Smooths levels for a broadcast-ready mix.',
+                },
+                {
+                  icon: <Cpu size={18} />,
+                  title: 'AI Mastering',
+                  description: 'Consistent output every week, every device.',
+                },
+              ].map((item) => (
+                <div
+                  key={item.title}
+                  className="flex items-start gap-4 p-4 rounded-2xl bg-slate-950/60 border border-slate-800/80"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-200 flex items-center justify-center">
+                    {item.icon}
+                  </div>
+                  <div>
+                    <p className="text-base font-semibold text-white">
+                      {item.title}
+                    </p>
+                    <p className="text-sm text-slate-400 leading-relaxed">
+                      {item.description}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
 
-        <button
-          onClick={onEnter}
-          className="group relative px-8 py-5 bg-white text-slate-950 font-bold text-lg rounded-full overflow-hidden hover:scale-105 transition-transform duration-300 shadow-[0_0_30px_rgba(255,255,255,0.3)]"
-        >
-          <div className="absolute inset-0 bg-gradient-to-r from-indigo-400 to-purple-400 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-          <span className="relative z-10 flex items-center gap-3 group-hover:text-white transition-colors">
-            Enter Studio <ArrowRight size={20} />
-          </span>
-        </button>
-      </div>
+        <section className="mx-auto max-w-6xl px-6 pb-14 grid md:grid-cols-3 gap-6">
+          {[
+            {
+              title: 'Human-designed flow',
+              description:
+                'Clear steps and visible feedback. Every control is labeled with a reason so volunteers feel confident.',
+            },
+            {
+              title: 'AI that serves people',
+              description:
+                'Enhance the sermon, not the noise. TIWATON prioritizes speech intelligibility above everything.',
+            },
+            {
+              title: 'Massive impact, minimal setup',
+              description:
+                'Connect a mic, select a mode, and go live. Your mix locks in within seconds.',
+            },
+          ].map((card) => (
+            <div
+              key={card.title}
+              className="p-6 rounded-2xl bg-slate-900/70 border border-slate-800"
+            >
+              <h3 className="text-lg font-semibold text-white mb-2">
+                {card.title}
+              </h3>
+              <p className="text-sm text-slate-400 leading-relaxed">
+                {card.description}
+              </p>
+            </div>
+          ))}
+        </section>
+
+        <section className="mx-auto max-w-6xl px-6 pb-16">
+          <div className="rounded-3xl border border-slate-800 bg-gradient-to-r from-slate-900/80 via-slate-900/40 to-slate-900/80 p-10">
+            <div className="grid lg:grid-cols-[1.2fr_0.8fr] gap-10 items-center">
+              <div>
+                <p className="text-sm uppercase tracking-[0.3em] text-indigo-300 mb-3">
+                  How it works
+                </p>
+                <h2 className="text-3xl md:text-4xl font-semibold text-white mb-4">
+                  A clean, predictable path to broadcast-ready audio.
+                </h2>
+                <p className="text-base text-slate-300 leading-relaxed mb-6">
+                  TIWATON follows a human-centered workflow: capture, enhance,
+                  stabilize, and deliver. Every feature is stacked so speech
+                  feels natural and the mix stays balanced even when volunteers
+                  change week to week.
+                </p>
+                <div className="flex flex-wrap gap-6 text-sm text-slate-300">
+                  <span className="flex items-center gap-2">
+                    <Zap size={16} className="text-indigo-300" />
+                    Instant voice detection
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <Volume2 size={16} className="text-indigo-300" />
+                    Adaptive leveling
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <Radio size={16} className="text-indigo-300" />
+                    Stream-ready output
+                  </span>
+                </div>
+              </div>
+              <div className="space-y-4">
+                {[
+                  'Connect mic or mixer feed.',
+                  'Enable Hyper-Gate + AI processors.',
+                  'Watch voice clarity meters lock in.',
+                  'Send to OBS, Zoom, or your stream encoder.',
+                ].map((step, index) => (
+                  <div
+                    key={step}
+                    className="flex items-center gap-4 p-4 rounded-2xl bg-slate-950/60 border border-slate-800"
+                  >
+                    <div className="w-10 h-10 rounded-full bg-indigo-500/20 text-indigo-200 flex items-center justify-center font-semibold">
+                      {index + 1}
+                    </div>
+                    <p className="text-sm text-slate-300">{step}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="mx-auto max-w-6xl px-6 pb-20">
+          <div className="rounded-3xl bg-slate-900/70 border border-slate-800 p-10 flex flex-col lg:flex-row items-center justify-between gap-8">
+            <div>
+              <h3 className="text-3xl font-semibold text-white mb-2">
+                Ready to hear the difference?
+              </h3>
+              <p className="text-slate-400 max-w-xl">
+                Start a live session or upload your sermon. TIWATON will guide you
+                through the right settings and deliver a polished mix.
+              </p>
+            </div>
+            <button
+              onClick={onEnter}
+              className="px-8 py-4 rounded-full bg-indigo-500 hover:bg-indigo-400 text-white font-semibold shadow-[0_0_30px_rgba(99,102,241,0.4)]"
+            >
+              Launch Studio
+            </button>
+          </div>
+        </section>
+      </main>
     </div>
   );
 };
@@ -188,6 +401,18 @@ const AudioProcessor = ({ goHome }) => {
     autoGain: null, // Smart Gain Rider node
     eqWarmth: null,
     eqClarity: null,
+    reverbFilter: null,
+    reverbDucker: null,
+    noiseNotch: null,
+    voiceContour: null,
+    noiseBlend: null,
+    noiseLowShelf: null,
+    noiseHighShelf: null,
+    duckGain: null,
+    polishLow: null,
+    polishPresence: null,
+    polishAir: null,
+    limiter: null,
     master: null,
     monitorGain: null,
     analyser: null,
@@ -216,7 +441,22 @@ const AudioProcessor = ({ goHome }) => {
     sermonWarmth: false,
     smartMixing: false,
     mastering: false,
+    voicePattern: false,
+    musicDucking: false,
+    streamingSafe: false,
   });
+  const [speakerPreset, setSpeakerPreset] = useState('balanced');
+  const [loudnessDb, setLoudnessDb] = useState(null);
+  const [loudnessTarget, setLoudnessTarget] = useState(-14);
+  const [abMode, setAbMode] = useState('B');
+  const [snapshots, setSnapshots] = useState([]);
+  const snapshotCounterRef = useRef(1);
+  const [noiseProfiles, setNoiseProfiles] = useState([]);
+  const [selectedNoiseProfileId, setSelectedNoiseProfileId] = useState('');
+  const noiseProfileCounterRef = useRef(1);
+  const latestSpectrumRef = useRef(null);
+  const featuresRef = useRef(features);
+  const gainRiderDbRef = useRef(gainRiderDb);
 
   const canvasRef = useRef(null);
   const animationRef = useRef(null);
@@ -224,6 +464,14 @@ const AudioProcessor = ({ goHome }) => {
   useEffect(() => {
     isMonitoringRef.current = isMonitoring;
   }, [isMonitoring]);
+
+  useEffect(() => {
+    featuresRef.current = features;
+  }, [features]);
+
+  useEffect(() => {
+    gainRiderDbRef.current = gainRiderDb;
+  }, [gainRiderDb]);
 
   const outputTargets = [
     { name: 'OBS Studio', icon: <Cpu size={20} /> },
@@ -239,16 +487,16 @@ const AudioProcessor = ({ goHome }) => {
     setOutputTarget(outputTargets[nextIndex].name);
   };
 
-  const resetDeviceState = () => {
+  const resetDeviceState = useCallback(() => {
     setAvailableDevices({ inputs: [], outputs: [] });
     setSelectedDevices({
       inputId: 'default',
       outputId: 'default',
       broadcastBus: 'Not set',
     });
-  };
+  }, []);
 
-  const getDevices = async () => {
+  const getDevices = useCallback(async () => {
     try {
       await navigator.mediaDevices.getUserMedia({ audio: true });
       const devices = await navigator.mediaDevices.enumerateDevices();
@@ -260,11 +508,11 @@ const AudioProcessor = ({ goHome }) => {
       console.warn('Permission needed', err);
       resetDeviceState();
     }
-  };
+  }, [resetDeviceState]);
 
   useEffect(() => {
     if (showSettings) getDevices();
-  }, [showSettings]);
+  }, [showSettings, getDevices]);
 
   useEffect(() => {
     settingsRef.current = {
@@ -283,12 +531,7 @@ const AudioProcessor = ({ goHome }) => {
   }
 }, [features.denoise, noiseFloorThreshold, isBypassed, audioContext]);
 
-  useEffect(() => {
-    return () => cleanupAudio();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const cleanupAudio = () => {
+  const cleanupAudio = useCallback(() => {
     if (contextRef.current) {
       try {
         contextRef.current.close();
@@ -313,20 +556,32 @@ const AudioProcessor = ({ goHome }) => {
       videoElRef.current.src = '';
     }
 
-    processingRefs.current = {
-      source: null,
-      inputGain: null,
-      lowCut: null,
-      gateGain: null,
-      deEsser: null,
-      compressor: null,
-      autoGain: null,
-      eqWarmth: null,
-      eqClarity: null,
-      master: null,
-      monitorGain: null,
-      analyser: null,
-    };
+      processingRefs.current = {
+        source: null,
+        inputGain: null,
+        lowCut: null,
+        gateGain: null,
+        deEsser: null,
+        compressor: null,
+        autoGain: null,
+        eqWarmth: null,
+        eqClarity: null,
+        reverbFilter: null,
+        reverbDucker: null,
+        noiseNotch: null,
+        voiceContour: null,
+        noiseBlend: null,
+        noiseLowShelf: null,
+        noiseHighShelf: null,
+        duckGain: null,
+        polishLow: null,
+        polishPresence: null,
+        polishAir: null,
+        limiter: null,
+        master: null,
+        monitorGain: null,
+        analyser: null,
+      };
     destNodeRef.current = null;
 
     setAudioContext(null);
@@ -346,7 +601,11 @@ const AudioProcessor = ({ goHome }) => {
     if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
     setRecordingState('idle');
     setAudioEngineError(null);
-  };
+  }, []);
+
+  useEffect(() => {
+    return () => cleanupAudio();
+  }, [cleanupAudio]);
 
   const hardReset = () => {
     cleanupAudio();
@@ -361,7 +620,19 @@ const AudioProcessor = ({ goHome }) => {
       sermonWarmth: false,
       smartMixing: false,
       mastering: false,
+      voicePattern: false,
+      musicDucking: false,
+      streamingSafe: false,
     });
+    setSpeakerPreset('balanced');
+    setLoudnessDb(null);
+    setLoudnessTarget(-14);
+    setAbMode('B');
+    setSnapshots([]);
+    snapshotCounterRef.current = 1;
+    setNoiseProfiles([]);
+    setSelectedNoiseProfileId('');
+    noiseProfileCounterRef.current = 1;
 
     setNoiseFloorThreshold(-50);
     setGainRiderDb(0);
@@ -385,6 +656,10 @@ const AudioProcessor = ({ goHome }) => {
       fileInputRef.current.value = '';
     }
   };
+
+  useEffect(() => {
+    setAbMode(isBypassed ? 'A' : 'B');
+  }, [isBypassed]);
 
   const startAudioEngine = async (inputStream = null, mediaElement = null) => {
     try {
@@ -447,6 +722,30 @@ const AudioProcessor = ({ goHome }) => {
       const gateGain = ctx.createGain();
       gateGain.gain.value = 1.0;
 
+      const noiseNotch = ctx.createBiquadFilter();
+      noiseNotch.type = 'notch';
+      noiseNotch.frequency.value = 80;
+      noiseNotch.Q.value = 1;
+
+      const voiceContour = ctx.createBiquadFilter();
+      voiceContour.type = 'peaking';
+      voiceContour.frequency.value = 1500;
+      voiceContour.Q.value = 0.7;
+      voiceContour.gain.value = 0;
+
+      const noiseBlend = ctx.createGain();
+      noiseBlend.gain.value = 1.0;
+
+      const noiseLowShelf = ctx.createBiquadFilter();
+      noiseLowShelf.type = 'lowshelf';
+      noiseLowShelf.frequency.value = 180;
+      noiseLowShelf.gain.value = 0;
+
+      const noiseHighShelf = ctx.createBiquadFilter();
+      noiseHighShelf.type = 'highshelf';
+      noiseHighShelf.frequency.value = 7500;
+      noiseHighShelf.gain.value = 0;
+
       const deEsser = ctx.createBiquadFilter();
       deEsser.type = 'peaking';
       deEsser.frequency.value = 7000;
@@ -475,6 +774,40 @@ const AudioProcessor = ({ goHome }) => {
       eqClarity.Q.value = 1;
       eqClarity.gain.value = 0;
 
+      const reverbFilter = ctx.createBiquadFilter();
+      reverbFilter.type = 'lowpass';
+      reverbFilter.frequency.value = 18000;
+      reverbFilter.Q.value = 0.7;
+
+      const reverbDucker = ctx.createGain();
+      reverbDucker.gain.value = 1.0;
+
+      const duckGain = ctx.createGain();
+      duckGain.gain.value = 1.0;
+
+      const polishLow = ctx.createBiquadFilter();
+      polishLow.type = 'lowshelf';
+      polishLow.frequency.value = 180;
+      polishLow.gain.value = 0;
+
+      const polishPresence = ctx.createBiquadFilter();
+      polishPresence.type = 'peaking';
+      polishPresence.frequency.value = 3200;
+      polishPresence.Q.value = 0.9;
+      polishPresence.gain.value = 0;
+
+      const polishAir = ctx.createBiquadFilter();
+      polishAir.type = 'highshelf';
+      polishAir.frequency.value = 9000;
+      polishAir.gain.value = 0;
+
+      const limiter = ctx.createDynamicsCompressor();
+      limiter.threshold.value = 0;
+      limiter.knee.value = 30;
+      limiter.ratio.value = 1;
+      limiter.attack.value = 0.003;
+      limiter.release.value = 0.2;
+
       const master = ctx.createGain();
       master.gain.value = 1.0;
 
@@ -492,14 +825,26 @@ const AudioProcessor = ({ goHome }) => {
       inputGain.connect(lowCut);
       lowCut.connect(gateGain);
 
-      gateGain.connect(deEsser);
+      gateGain.connect(noiseNotch);
+      noiseNotch.connect(voiceContour);
+      voiceContour.connect(noiseBlend);
+      noiseBlend.connect(noiseLowShelf);
+      noiseLowShelf.connect(noiseHighShelf);
+      noiseHighShelf.connect(deEsser);
       deEsser.connect(compressor);
 
       compressor.connect(autoGain);
       autoGain.connect(eqWarmth);
 
       eqWarmth.connect(eqClarity);
-      eqClarity.connect(master);
+      eqClarity.connect(reverbFilter);
+      reverbFilter.connect(reverbDucker);
+      reverbDucker.connect(duckGain);
+      duckGain.connect(polishLow);
+      polishLow.connect(polishPresence);
+      polishPresence.connect(polishAir);
+      polishAir.connect(limiter);
+      limiter.connect(master);
       master.connect(ana);
       ana.connect(monitorGain);
       ana.connect(destNode);
@@ -519,11 +864,23 @@ const AudioProcessor = ({ goHome }) => {
         inputGain,
         lowCut,
         gateGain,
+        noiseNotch,
+        voiceContour,
+        noiseBlend,
+        noiseLowShelf,
+        noiseHighShelf,
         deEsser,
         compressor,
         autoGain,
         eqWarmth,
         eqClarity,
+        reverbFilter,
+        reverbDucker,
+        duckGain,
+        polishLow,
+        polishPresence,
+        polishAir,
+        limiter,
         master,
         monitorGain,
         analyser: ana,
@@ -541,7 +898,9 @@ const AudioProcessor = ({ goHome }) => {
       if (contextRef.current) {
         try {
           contextRef.current.close();
-        } catch (_) {}
+        } catch (closeError) {
+          console.warn('Error closing audio context after failure', closeError);
+        }
         contextRef.current = null;
       }
       setAudioContext(null);
@@ -1027,50 +1386,213 @@ const AudioProcessor = ({ goHome }) => {
   // --- Parameter updates (EQ & compressor tweaks based on features) ---
   useEffect(() => {
     if (!audioContext || !processingRefs.current.compressor) return;
-    const { compressor, eqWarmth, eqClarity, master } = processingRefs.current;
+    const {
+      compressor,
+      eqWarmth,
+      eqClarity,
+      reverbFilter,
+      reverbDucker,
+      noiseNotch,
+      voiceContour,
+      noiseBlend,
+      noiseLowShelf,
+      noiseHighShelf,
+      duckGain,
+      polishLow,
+      polishPresence,
+      polishAir,
+      limiter,
+      master,
+      deEsser,
+    } = processingRefs.current;
     const now = audioContext.currentTime;
 
     const getTarget = (isActive, activeVal, passiveVal) =>
       isActive && !isBypassed ? activeVal : passiveVal;
 
+    const mixActive = features.smartMixing || features.voicePattern;
+    const masterActive = features.mastering || features.voicePattern;
+
+    const speakerPresets = {
+      balanced: {
+        warmth: 0,
+        clarity: 0,
+        deEsser: 0,
+      },
+      pastor: {
+        warmth: 3.5,
+        clarity: 4,
+        deEsser: -3,
+      },
+      guest: {
+        warmth: 2,
+        clarity: 2.5,
+        deEsser: -1.5,
+      },
+      choir: {
+        warmth: 1.5,
+        clarity: 5,
+        deEsser: -4,
+      },
+    };
+    const preset = speakerPresets[speakerPreset] || speakerPresets.balanced;
+    const activeNoiseProfile = noiseProfiles.find(
+      (profile) => profile.id === selectedNoiseProfileId,
+    );
+
     // Small dynamic boost when voice is active
     const speechBoost = voiceActive ? 2 : 0;
 
     if (eqClarity) {
-      const baseClarity = getTarget(features.pastorIsolation, 8, 0);
+      const baseClarity = preset.clarity + getTarget(features.pastorIsolation, 12, 0);
+      eqClarity.Q.value = getTarget(features.pastorIsolation, 1.2, 1);
       eqClarity.gain.linearRampToValueAtTime(baseClarity + speechBoost, now + 0.2);
     }
 
     if (eqWarmth) {
-      const baseWarmth = getTarget(features.sermonWarmth, 5, 0);
+      const baseWarmth = preset.warmth + getTarget(features.sermonWarmth, 9, 0);
+      eqWarmth.Q.value = getTarget(features.sermonWarmth, 1.1, 1);
       eqWarmth.gain.linearRampToValueAtTime(
-        baseWarmth + speechBoost * 0.6,
+        baseWarmth + speechBoost * 0.8,
         now + 0.25,
       );
     }
 
+    if (deEsser) {
+      const targetDeEsser = preset.deEsser + getTarget(features.pastorIsolation, -4, 0);
+      deEsser.gain.linearRampToValueAtTime(targetDeEsser, now + 0.2);
+    }
+
+    if (reverbFilter) {
+      const targetFreq = getTarget(features.dereverb, 6200, 18000);
+      reverbFilter.frequency.linearRampToValueAtTime(targetFreq, now + 0.25);
+    }
+
+    if (reverbDucker) {
+      const targetGain =
+        features.dereverb && !isBypassed ? (voiceActive ? 1.0 : 0.55) : 1.0;
+      reverbDucker.gain.linearRampToValueAtTime(targetGain, now + 0.2);
+    }
+
+    if (noiseNotch) {
+      const targetQ = getTarget(features.voicePattern, 5, 1);
+      noiseNotch.Q.value = targetQ;
+    }
+
+    if (voiceContour) {
+      const targetGain = getTarget(features.voicePattern, 3.5, 0);
+      voiceContour.gain.linearRampToValueAtTime(targetGain, now + 0.2);
+    }
+
+    if (noiseBlend) {
+      const targetGain = getTarget(features.voicePattern, 0.92, 1.0);
+      noiseBlend.gain.linearRampToValueAtTime(targetGain, now + 0.2);
+    }
+
+    if (noiseLowShelf) {
+      const targetGain = activeNoiseProfile ? activeNoiseProfile.lowReduction : 0;
+      noiseLowShelf.gain.linearRampToValueAtTime(targetGain, now + 0.2);
+    }
+
+    if (noiseHighShelf) {
+      const targetGain = activeNoiseProfile ? activeNoiseProfile.highReduction : 0;
+      noiseHighShelf.gain.linearRampToValueAtTime(targetGain, now + 0.2);
+    }
+
+    if (duckGain) {
+      const duckTarget =
+        features.musicDucking && voiceActive && !isBypassed ? 0.72 : 1.0;
+      duckGain.gain.setTargetAtTime(duckTarget, now, 0.12);
+    }
+
     if (compressor) {
       compressor.ratio.linearRampToValueAtTime(
-        getTarget(features.smartMixing, 4, 1),
+        getTarget(mixActive, 6.5, 1),
         now + 0.4,
       );
       compressor.threshold.linearRampToValueAtTime(
-        getTarget(features.smartMixing, -24, 0),
+        getTarget(mixActive, -30, 0),
         now + 0.4,
+      );
+      compressor.knee.linearRampToValueAtTime(
+        getTarget(mixActive, 20, 30),
+        now + 0.4,
+      );
+      compressor.attack.linearRampToValueAtTime(
+        getTarget(mixActive, 0.002, 0.003),
+        now + 0.35,
+      );
+      compressor.release.linearRampToValueAtTime(
+        getTarget(mixActive, 0.18, 0.25),
+        now + 0.35,
+      );
+    }
+
+    if (polishLow) {
+      const targetGain = getTarget(masterActive, 3.2, 0);
+      polishLow.gain.linearRampToValueAtTime(targetGain, now + 0.2);
+    }
+
+    if (polishPresence) {
+      const targetGain = getTarget(masterActive, 4.5, 0);
+      polishPresence.gain.linearRampToValueAtTime(targetGain, now + 0.2);
+    }
+
+    if (polishAir) {
+      const targetGain = getTarget(masterActive, 3.8, 0);
+      polishAir.gain.linearRampToValueAtTime(targetGain, now + 0.2);
+    }
+
+    if (limiter) {
+      limiter.threshold.linearRampToValueAtTime(
+        getTarget(masterActive, -6, 0),
+        now + 0.2,
+      );
+      limiter.knee.linearRampToValueAtTime(
+        getTarget(masterActive, 10, 30),
+        now + 0.2,
+      );
+      limiter.ratio.linearRampToValueAtTime(
+        getTarget(masterActive, 10, 1),
+        now + 0.2,
+      );
+      limiter.attack.linearRampToValueAtTime(
+        getTarget(masterActive, 0.002, 0.003),
+        now + 0.2,
+      );
+      limiter.release.linearRampToValueAtTime(
+        getTarget(masterActive, 0.12, 0.2),
+        now + 0.2,
       );
     }
 
     if (master) {
-      const targetGain = isBypassed ? 1.0 : 1.0 + speechBoost * 0.08;
+      const loudnessGuard =
+        features.streamingSafe && typeof loudnessDb === 'number'
+          ? Math.max(0.7, 1 - Math.max(0, loudnessDb - loudnessTarget) * 0.05)
+          : 1.0;
+      const targetGain =
+        (isBypassed ? 1.0 : 1.0 + speechBoost * 0.08) * loudnessGuard;
       master.gain.linearRampToValueAtTime(targetGain, now + 0.15);
     }
-  }, [features, audioContext, isBypassed, voiceActive]);
+  }, [
+    features,
+    audioContext,
+    isBypassed,
+    voiceActive,
+    loudnessDb,
+    loudnessTarget,
+    speakerPreset,
+    noiseProfiles,
+    selectedNoiseProfileId,
+  ]);
 
   // --- Visualizer + Gate + Smart Gain Rider ---
   const visualizeAndGate = () => {
-    const { analyser, gateGain } = processingRefs.current;
+    const { analyser, gateGain, noiseBlend, noiseNotch } = processingRefs.current;
     const canvas = canvasRef.current;
     if (!analyser || !canvas) return;
+    if (animationRef.current) cancelAnimationFrame(animationRef.current);
 
     const ctx = canvas.getContext('2d');
     const bufferLength = analyser.frequencyBinCount;
@@ -1080,14 +1602,21 @@ const AudioProcessor = ({ goHome }) => {
     let lastGateUpdate = 0;
     let lastVoiceUpdate = 0;
     let lastGainUpdate = 0;
+    let lastPatternUpdate = 0;
+    let lastLoudnessUpdate = 0;
+    let gateHoldUntil = 0;
+    let voiceHoldUntil = 0;
     const updateInterval = 100; // ms
     const gainUpdateInterval = 200; // ms;
+    const patternUpdateInterval = 120; // ms
+    const loudnessUpdateInterval = 250; // ms
 
     const draw = (timestamp) => {
       animationRef.current = requestAnimationFrame(draw);
 
       analyser.getByteFrequencyData(freqData);
       analyser.getByteTimeDomainData(timeData);
+      latestSpectrumRef.current = freqData.slice(0);
 
       const w = canvas.width;
       const h = canvas.height;
@@ -1133,7 +1662,7 @@ const AudioProcessor = ({ goHome }) => {
       const lowAvg = lowEnergy / (splitIndex || 1);
       const highAvg = highEnergy / (bufferLength - splitIndex || 1);
       const highBias = highAvg / (lowAvg + 1e-6);
-      const antiChildNoiseActive = features.denoise;
+      const antiChildNoiseActive = featuresRef.current.denoise;
       const highOnlyNoise = antiChildNoiseActive && highBias > 2.2 && lowAvg < 40;
 
       // Time-domain RMS
@@ -1147,6 +1676,7 @@ const AudioProcessor = ({ goHome }) => {
 
       let gateClosed = false;
       let localVoiceActive = false;
+      let voiceCandidate = false;
 
       // Auto-calibrator
       if (calibrateRef.current.active) {
@@ -1171,32 +1701,118 @@ const AudioProcessor = ({ goHome }) => {
 
       // Gate decision + VAD
       if (gateGain && settingsRef.current.denoise && !settingsRef.current.isBypassed) {
-  const threshold = settingsRef.current.threshold;
-  const target = db < threshold ? 0.001 : 1.0; // closed vs open
+        const threshold = settingsRef.current.threshold;
+        const openThreshold = threshold + 3;
+        const closeThreshold = threshold - 4;
+        const minGateGain = 0.015;
 
-  const current = gateGain.gain.value;
-  const smoothing = target > current ? 0.2 : 0.05; // attack / release
-  gateGain.gain.value = current + (target - current) * smoothing;
+        voiceCandidate =
+          !highOnlyNoise &&
+          lowAvg > 18 &&
+          highBias < 2.4 &&
+          db > threshold - 12;
 
-  gateClosed = gateGain.gain.value < 0.1;
+        if (voiceCandidate) {
+          voiceHoldUntil = timestamp + 180;
+        }
+        localVoiceActive = voiceHoldUntil > timestamp;
 
-  if (timestamp - lastGateUpdate > updateInterval) {
-    setVisualizerGateStatus((prev) =>
-      prev !== gateClosed ? gateClosed : prev
-    );
-    lastGateUpdate = timestamp;
-  }
-} else if (gateGain) {
-  // Gate off or bypassed: fully open
-  gateGain.gain.value = 1.0;
-  gateClosed = false;
-  if (visualizerGateStatus !== false) {
-    setVisualizerGateStatus(false);
-  }
-}        
-        if (voiceActive !== false) {
-          setVoiceActive(false);
-        }      
+        let target = minGateGain;
+
+        if (db > openThreshold || localVoiceActive) {
+          target = 1.0;
+          gateHoldUntil = timestamp + 140;
+        } else if (timestamp < gateHoldUntil) {
+          target = 1.0;
+        } else if (db < closeThreshold) {
+          target = minGateGain;
+        } else {
+          const progress =
+            (db - closeThreshold) / (openThreshold - closeThreshold || 1);
+          target = minGateGain + Math.max(0, Math.min(1, progress)) * (1 - minGateGain);
+        }
+
+        if (localVoiceActive && db < threshold) {
+          const lift = Math.min(0.45, 0.2 + (threshold - db) * 0.02);
+          target = Math.max(target, lift);
+        }
+
+        const current = gateGain.gain.value;
+        const smoothing = target > current ? 0.25 : 0.06; // attack / release
+        gateGain.gain.value = current + (target - current) * smoothing;
+
+        gateClosed = gateGain.gain.value < 0.12;
+
+        if (timestamp - lastGateUpdate > updateInterval) {
+          setVisualizerGateStatus((prev) => (prev !== gateClosed ? gateClosed : prev));
+          lastGateUpdate = timestamp;
+        }
+      } else if (gateGain) {
+        // Gate off or bypassed: fully open
+        gateGain.gain.value = 1.0;
+        gateClosed = false;
+        if (visualizerGateStatus !== false) {
+          setVisualizerGateStatus(false);
+        }
+      }
+
+      if (timestamp - lastVoiceUpdate > updateInterval) {
+        const voiceNow = localVoiceActive && !highOnlyNoise;
+        setVoiceActive((prev) => (prev !== voiceNow ? voiceNow : prev));
+        lastVoiceUpdate = timestamp;
+      }
+
+      if (timestamp - lastLoudnessUpdate > loudnessUpdateInterval) {
+        setLoudnessDb(parseFloat(db.toFixed(1)));
+        lastLoudnessUpdate = timestamp;
+      }
+
+      if (
+        timestamp - lastPatternUpdate > patternUpdateInterval &&
+        featuresRef.current.voicePattern &&
+        !isBypassed &&
+        audioContext
+      ) {
+        lastPatternUpdate = timestamp;
+        const sampleRate = audioContext.sampleRate || 48000;
+        const binHz = sampleRate / 2 / bufferLength;
+        const bandAverage = (startHz, endHz) => {
+          const startBin = Math.max(0, Math.floor(startHz / binHz));
+          const endBin = Math.min(bufferLength - 1, Math.ceil(endHz / binHz));
+          if (endBin <= startBin) return 0;
+          let sum = 0;
+          let count = 0;
+          for (let i = startBin; i <= endBin; i += 1) {
+            sum += freqData[i];
+            count += 1;
+          }
+          return count ? sum / count : 0;
+        };
+
+        const voiceEnergy = bandAverage(300, 3400);
+        const lowNoise = bandAverage(40, 160);
+        const highNoise = bandAverage(6000, 12000);
+        const noiseEnergy = (lowNoise + highNoise) / 2;
+        const ratio = (voiceEnergy + 1) / (noiseEnergy + 1);
+        const blendTarget = Math.min(1, Math.max(0.35, ratio / 2));
+        const notchTarget = lowNoise > highNoise ? 90 : 120;
+
+        if (noiseBlend) {
+          noiseBlend.gain.setTargetAtTime(
+            blendTarget,
+            audioContext.currentTime,
+            0.15,
+          );
+        }
+
+        if (noiseNotch) {
+          noiseNotch.frequency.setTargetAtTime(
+            notchTarget,
+            audioContext.currentTime,
+            0.2,
+          );
+        }
+      }
 
       // Core orb
       const coreRadius = h * 0.35;
@@ -1269,15 +1885,16 @@ if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
       // Smart Gain Rider
       const autoGainNode = processingRefs.current.autoGain;
       const gainRiderEnabled =
-        features.smartMixing && !settingsRef.current.isBypassed;
+        (featuresRef.current.smartMixing || featuresRef.current.voicePattern) &&
+        !settingsRef.current.isBypassed;
 
-      if (autoGainNode && gainRiderEnabled && !gateClosed) {
+      if (autoGainNode && gainRiderEnabled && (!gateClosed || localVoiceActive)) {
         const aggressiveMode =
           settingsRef.current.denoise && settingsRef.current.threshold > -40;
 
-        const targetSpeechDb = aggressiveMode ? -18 : -24;
-        const maxBoostDb = aggressiveMode ? 16 : 12;
-        const maxCutDb = -12;
+        const targetSpeechDb = aggressiveMode ? -16 : -22;
+        const maxBoostDb = aggressiveMode ? 20 : 16;
+        const maxCutDb = -16;
 
         let neededChange = targetSpeechDb - db;
         if (neededChange > maxBoostDb) neededChange = maxBoostDb;
@@ -1286,7 +1903,7 @@ if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
         const desiredLinear = Math.pow(10, neededChange / 20);
         const currentLinear = autoGainNode.gain.value || 1.0;
 
-        const smoothingRider = 0.02;
+        const smoothingRider = aggressiveMode ? 0.03 : 0.02;
         autoGainNode.gain.value =
           currentLinear + (desiredLinear - currentLinear) * smoothingRider;
 
@@ -1304,7 +1921,10 @@ if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
         autoGainNode.gain.value =
           currentLinear + (targetLinear - currentLinear) * smoothingBack;
 
-        if (timestamp - lastGainUpdate > gainUpdateInterval && gainRiderDb !== 0) {
+        if (
+          timestamp - lastGainUpdate > gainUpdateInterval &&
+          gainRiderDbRef.current !== 0
+        ) {
           setGainRiderDb(0);
           lastGainUpdate = timestamp;
         }
@@ -1340,6 +1960,72 @@ if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
     selectedDevices.broadcastBus === 'Same as monitor'
       ? monitorLabel
       : selectedDevices.broadcastBus || 'Not set';
+
+  const handleSnapshotSave = () => {
+    const nextId = snapshotCounterRef.current;
+    snapshotCounterRef.current += 1;
+    const label = `Snapshot ${nextId}`;
+    setSnapshots((prev) => [
+      ...prev,
+      {
+        id: nextId,
+        label,
+        features: { ...features },
+        speakerPreset,
+        selectedNoiseProfileId,
+        noiseFloorThreshold,
+        inputGainValue,
+      },
+    ]);
+  };
+
+  const handleSnapshotApply = (snapshot) => {
+    setFeatures({ ...snapshot.features });
+    setSpeakerPreset(snapshot.speakerPreset);
+    setSelectedNoiseProfileId(snapshot.selectedNoiseProfileId || '');
+    setNoiseFloorThreshold(snapshot.noiseFloorThreshold);
+    setInputGainValue(snapshot.inputGainValue);
+  };
+
+  const handleNoiseProfileCapture = () => {
+    const spectrum = latestSpectrumRef.current;
+    if (!spectrum || spectrum.length === 0) return;
+    const sampleRate = audioContext?.sampleRate || 48000;
+    const binHz = sampleRate / 2 / spectrum.length;
+    const bandAverage = (startHz, endHz) => {
+      const startBin = Math.max(0, Math.floor(startHz / binHz));
+      const endBin = Math.min(spectrum.length - 1, Math.ceil(endHz / binHz));
+      if (endBin <= startBin) return 0;
+      let sum = 0;
+      let count = 0;
+      for (let i = startBin; i <= endBin; i += 1) {
+        sum += spectrum[i];
+        count += 1;
+      }
+      return count ? sum / count : 0;
+    };
+
+    const lowEnergy = bandAverage(40, 200);
+    const highEnergy = bandAverage(6000, 12000);
+    const normalize = (val, min, max) =>
+      Math.max(min, Math.min(max, val));
+    const lowReduction = -normalize(lowEnergy / 18, 3, 12);
+    const highReduction = -normalize(highEnergy / 16, 3, 14);
+    const profileId = `profile-${noiseProfileCounterRef.current}`;
+    const label = `Noise Profile ${noiseProfileCounterRef.current}`;
+    noiseProfileCounterRef.current += 1;
+
+    setNoiseProfiles((prev) => [
+      ...prev,
+      {
+        id: profileId,
+        label,
+        lowReduction,
+        highReduction,
+      },
+    ]);
+    setSelectedNoiseProfileId(profileId);
+  };
 
   // --- RENDER ---
   return (
@@ -1628,6 +2314,111 @@ if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
                 AI Processing
               </h2>
 
+              <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-slate-400">
+                    Room Noise Profile
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleNoiseProfileCapture}
+                    disabled={!latestSpectrumRef.current}
+                    className={`px-2 py-1 rounded-md border text-[10px] ${
+                      latestSpectrumRef.current
+                        ? 'border-indigo-500/60 text-indigo-300 bg-indigo-900/20'
+                        : 'border-slate-700 text-slate-500 bg-slate-950'
+                    }`}
+                  >
+                    Capture
+                  </button>
+                </div>
+                <select
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm"
+                  value={selectedNoiseProfileId}
+                  onChange={(e) => setSelectedNoiseProfileId(e.target.value)}
+                >
+                  <option value="">No profile</option>
+                  {noiseProfiles.map((profile) => (
+                    <option key={profile.id} value={profile.id}>
+                      {profile.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-slate-500">
+                  Capture a noise print when the room is loud, then apply it to
+                  reduce steady fan and HVAC noise.
+                </p>
+              </div>
+
+              <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-medium text-slate-400">
+                    Loudness Target
+                  </span>
+                  <span className="text-[10px] text-indigo-300 font-semibold">
+                    {typeof loudnessDb === 'number' ? `${loudnessDb} dB` : '--'}
+                  </span>
+                </div>
+                <select
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm"
+                  value={loudnessTarget}
+                  onChange={(e) => setLoudnessTarget(Number(e.target.value))}
+                >
+                  <option value={-14}>YouTube Live (-14 LUFS)</option>
+                  <option value={-16}>Facebook Live (-16 LUFS)</option>
+                  <option value={-20}>Zoom / Teams (-20 LUFS)</option>
+                </select>
+                <div className="mt-3 flex items-center justify-between text-[10px] text-slate-500">
+                  <span>Streaming Safe</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setFeatures({
+                        ...features,
+                        streamingSafe: !features.streamingSafe,
+                      })
+                    }
+                    className={`px-2 py-1 rounded-md border ${
+                      features.streamingSafe
+                        ? 'border-emerald-400/70 text-emerald-300 bg-emerald-900/20'
+                        : 'border-slate-700 text-slate-400 bg-slate-950'
+                    }`}
+                  >
+                    {features.streamingSafe ? 'ON' : 'OFF'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-medium text-slate-400">
+                    Speaker Profile
+                  </span>
+                  <span className="text-[10px] text-indigo-300 font-semibold">
+                    {speakerPreset === 'balanced'
+                      ? 'Balanced'
+                      : speakerPreset === 'pastor'
+                      ? 'Pastor'
+                      : speakerPreset === 'guest'
+                      ? 'Guest Speaker'
+                      : 'Choir Lead'}
+                  </span>
+                </div>
+                <select
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm"
+                  value={speakerPreset}
+                  onChange={(e) => setSpeakerPreset(e.target.value)}
+                >
+                  <option value="balanced">Balanced</option>
+                  <option value="pastor">Pastor</option>
+                  <option value="guest">Guest Speaker</option>
+                  <option value="choir">Choir Lead</option>
+                </select>
+                <p className="text-[10px] text-slate-500 mt-2">
+                  Tunes clarity, warmth, and de-essing for each voice type.
+                </p>
+              </div>
+
               <FeatureToggle
                 icon={<Activity size={18} />}
                 label="Hyper-Gate Reduction"
@@ -1715,6 +2506,30 @@ if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
                 }
               />
               <FeatureToggle
+                icon={<Waves size={18} />}
+                label="Voice Pattern Cleanse"
+                desc="Learns voice shape, removes noise, blends clean output"
+                active={features.voicePattern}
+                onClick={() =>
+                  setFeatures({
+                    ...features,
+                    voicePattern: !features.voicePattern,
+                  })
+                }
+              />
+              <FeatureToggle
+                icon={<Volume2 size={18} />}
+                label="Auto Music Ducking"
+                desc="Drops background beds when speech is active"
+                active={features.musicDucking}
+                onClick={() =>
+                  setFeatures({
+                    ...features,
+                    musicDucking: !features.musicDucking,
+                  })
+                }
+              />
+              <FeatureToggle
                 icon={<Mic size={18} />}
                 label="Pastor Voice Isolation"
                 desc="Pushes speech forward in the mix"
@@ -1754,8 +2569,8 @@ if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
 
             <FeatureToggle
               icon={<Volume2 size={18} />}
-              label="Broadcast Limit"
-              desc="-14 LUFS-style output guard"
+              label="Audacity Voice Polish"
+              desc="Bold end-to-end vocal sheen & loudness"
               active={features.mastering}
               onClick={() =>
                 setFeatures({
@@ -1764,6 +2579,77 @@ if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
                 })
               }
             />
+
+            <div className="mt-6 bg-slate-900 p-4 rounded-xl border border-slate-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                  A/B Compare
+                </span>
+                <span className="text-[10px] text-indigo-300 font-semibold">
+                  {abMode === 'A' ? 'A (Raw)' : 'B (Processed)'}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsBypassed(true)}
+                  className={`px-3 py-2 rounded-lg border text-xs font-semibold ${
+                    abMode === 'A'
+                      ? 'border-amber-400/70 bg-amber-900/20 text-amber-300'
+                      : 'border-slate-700 bg-slate-950 text-slate-400'
+                  }`}
+                >
+                  A (Raw)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsBypassed(false)}
+                  className={`px-3 py-2 rounded-lg border text-xs font-semibold ${
+                    abMode === 'B'
+                      ? 'border-indigo-400/70 bg-indigo-900/20 text-indigo-200'
+                      : 'border-slate-700 bg-slate-950 text-slate-400'
+                  }`}
+                >
+                  B (Processed)
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-4 bg-slate-900 p-4 rounded-xl border border-slate-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                  Session Snapshots
+                </span>
+                <button
+                  type="button"
+                  onClick={handleSnapshotSave}
+                  className="px-2.5 py-1 rounded-md border border-indigo-500/60 text-[10px] text-indigo-300 bg-indigo-900/20"
+                >
+                  Save
+                </button>
+              </div>
+              {snapshots.length === 0 ? (
+                <p className="text-[10px] text-slate-500">
+                  Save a snapshot to recall your full mix + AI stack.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {snapshots.map((snapshot) => (
+                    <button
+                      key={snapshot.id}
+                      type="button"
+                      onClick={() => handleSnapshotApply(snapshot)}
+                      className="w-full flex items-center justify-between px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-xs text-slate-300 hover:border-indigo-400/60 hover:text-white"
+                    >
+                      <span>{snapshot.label}</span>
+                      <span className="text-[10px] text-slate-500">
+                        {snapshot.speakerPreset}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
 
             <button
               onClick={() => setIsSidebarOpen(false)}
@@ -1901,6 +2787,22 @@ if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
             <div className="hidden lg:flex absolute top-4 right-4 gap-2 z-10">
               <Badge active={features.denoise && !isBypassed} text="HYPER-GATE" />
               <Badge
+                active={features.voicePattern && !isBypassed}
+                text="VOICE CLEANSE"
+              />
+              <Badge
+                active={features.musicDucking && !isBypassed}
+                text="DUCKING"
+              />
+              <Badge
+                active={features.streamingSafe && !isBypassed}
+                text="STREAM SAFE"
+              />
+              <Badge
+                active={Boolean(selectedNoiseProfileId) && !isBypassed}
+                text="NOISE PROFILE"
+              />
+              <Badge
                 active={features.pastorIsolation && !isBypassed}
                 text="VOICE ISOLATION"
               />
@@ -1910,7 +2812,7 @@ if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
               />
               <Badge
                 active={features.mastering && !isBypassed}
-                text="MASTERING"
+                text="VOICE POLISH"
               />
             </div>
 
