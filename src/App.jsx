@@ -334,6 +334,8 @@ const AudioProcessor = ({ goHome }) => {
   const [voiceActive, setVoiceActive] = useState(false);
   const [isAutoCalibrating, setIsAutoCalibrating] = useState(false);
   const [audioEngineError, setAudioEngineError] = useState(null);
+  const [controlTab, setControlTab] = useState('core');
+  const [gateMode, setGateMode] = useState('balanced'); // balanced | speech-only
 
   const [noiseFloorThreshold, setNoiseFloorThreshold] = useState(-50);
   const [visualizerGateStatus, setVisualizerGateStatus] = useState(false);
@@ -456,6 +458,9 @@ const AudioProcessor = ({ goHome }) => {
   const noiseProfileCounterRef = useRef(1);
   const latestSpectrumRef = useRef(null);
   const featuresRef = useRef(features);
+  const gateModeRef = useRef(gateMode);
+  const noiseProfilesRef = useRef(noiseProfiles);
+  const selectedNoiseProfileIdRef = useRef(selectedNoiseProfileId);
   const gainRiderDbRef = useRef(gainRiderDb);
   const canvasRef = useRef(null);
   const animationRef = useRef(null);
@@ -467,6 +472,18 @@ const AudioProcessor = ({ goHome }) => {
   useEffect(() => {
     featuresRef.current = features;
   }, [features]);
+
+  useEffect(() => {
+    gateModeRef.current = gateMode;
+  }, [gateMode]);
+
+  useEffect(() => {
+    noiseProfilesRef.current = noiseProfiles;
+  }, [noiseProfiles]);
+
+  useEffect(() => {
+    selectedNoiseProfileIdRef.current = selectedNoiseProfileId;
+  }, [selectedNoiseProfileId]);
 
   useEffect(() => {
     gainRiderDbRef.current = gainRiderDb;
@@ -599,6 +616,9 @@ const AudioProcessor = ({ goHome }) => {
 
     if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
     setRecordingState('idle');
+    setVoiceActive(false);
+    setVisualizerGateStatus(false);
+    setGainRiderDb(0);
     setAudioEngineError(null);
   }, []);
 
@@ -821,7 +841,8 @@ const AudioProcessor = ({ goHome }) => {
       // Chain connections
       source.connect(inputGain);
       inputGain.connect(lowCut);
-      lowCut.connect(gateGain);
+      lowCut.connect(ana);
+      ana.connect(gateGain);
 
       gateGain.connect(noiseNotch);
       noiseNotch.connect(voiceContour);
@@ -845,9 +866,8 @@ const AudioProcessor = ({ goHome }) => {
       limiter.connect(master);
 
       reverbDucker.connect(master);
-      master.connect(ana);
-      ana.connect(monitorGain);
-      ana.connect(destNode);
+      master.connect(monitorGain);
+      master.connect(destNode);
 
       // MONITORING OUTPUT DEVICE (AirPods / speakers)
       if (ctx.destination.setSinkId && selectedDevices.outputId !== 'default') {
@@ -1603,12 +1623,14 @@ const AudioProcessor = ({ goHome }) => {
     let lastVoiceUpdate = 0;
     let lastGainUpdate = 0;
     let lastPatternUpdate = 0;
+    let lastNoiseUpdate = 0;
     let lastLoudnessUpdate = 0;
     let gateHoldUntil = 0;
     let voiceHoldUntil = 0;
     const updateInterval = 100; // ms
     const gainUpdateInterval = 200; // ms;
     const patternUpdateInterval = 120; // ms
+    const noiseUpdateInterval = 140; // ms
     const loudnessUpdateInterval = 250; // ms
 
     const draw = (timestamp) => {
@@ -1664,6 +1686,46 @@ const AudioProcessor = ({ goHome }) => {
       const highBias = highAvg / (lowAvg + 1e-6);
       const antiChildNoiseActive = featuresRef.current.denoise;
       const highOnlyNoise = antiChildNoiseActive && highBias > 2.2 && lowAvg < 40;
+      const harshHighNoise = highBias > 2.0 && lowAvg < 45;
+      const stackActive =
+        featuresRef.current.dereverb ||
+        featuresRef.current.voicePattern ||
+        featuresRef.current.musicDucking ||
+        featuresRef.current.pastorIsolation ||
+        featuresRef.current.sermonWarmth ||
+        featuresRef.current.smartMixing ||
+        featuresRef.current.mastering;
+      let bandMetricsReady = false;
+      let voiceEnergy = 0;
+      let lowNoise = 0;
+      let highNoise = 0;
+      let noiseEnergy = 0;
+      let voiceRatio = 0;
+
+      const ensureBandMetrics = () => {
+        if (bandMetricsReady || !audioContext) return;
+        const sampleRate = audioContext.sampleRate || 48000;
+        const binHz = sampleRate / 2 / bufferLength;
+        const bandAverage = (startHz, endHz) => {
+          const startBin = Math.max(0, Math.floor(startHz / binHz));
+          const endBin = Math.min(bufferLength - 1, Math.ceil(endHz / binHz));
+          if (endBin <= startBin) return 0;
+          let sum = 0;
+          let count = 0;
+          for (let i = startBin; i <= endBin; i += 1) {
+            sum += freqData[i];
+            count += 1;
+          }
+          return count ? sum / count : 0;
+        };
+
+        voiceEnergy = bandAverage(300, 3400);
+        lowNoise = bandAverage(40, 180);
+        highNoise = bandAverage(6000, 12000);
+        noiseEnergy = (lowNoise + highNoise) / 2;
+        voiceRatio = (voiceEnergy + 1) / (noiseEnergy + 1);
+        bandMetricsReady = true;
+      };
 
       // Time-domain RMS
       let sumSq = 0;
@@ -1706,11 +1768,17 @@ const AudioProcessor = ({ goHome }) => {
         const closeThreshold = threshold - 4;
         const minGateGain = 0.015;
 
-        voiceCandidate =
+      voiceCandidate =
           !highOnlyNoise &&
           lowAvg > 18 &&
           highBias < 2.4 &&
           db > threshold - 12;
+
+      if (stackActive || featuresRef.current.voicePattern) {
+        ensureBandMetrics();
+        const ratioGate = voiceRatio > 1.3 && voiceEnergy > 20;
+        voiceCandidate = voiceCandidate && ratioGate;
+      }
 
         if (voiceCandidate) {
           voiceHoldUntil = timestamp + 180;
@@ -1719,7 +1787,19 @@ const AudioProcessor = ({ goHome }) => {
 
         let target = minGateGain;
 
-        if (db > openThreshold || localVoiceActive) {
+        const speechOnlyMode = gateModeRef.current === 'speech';
+        const strictSpeechGate =
+          speechOnlyMode ||
+          ((stackActive || featuresRef.current.voicePattern || settingsRef.current.denoise) &&
+            (harshHighNoise || voiceRatio < 1.2));
+        const canOpenForLevel =
+          db > openThreshold &&
+          (!stackActive || voiceRatio > 1.2) &&
+          (!strictSpeechGate ||
+            (voiceRatio > (speechOnlyMode ? 1.5 : 1.35) &&
+              voiceEnergy > (speechOnlyMode ? 24 : 20)));
+
+        if (canOpenForLevel || localVoiceActive) {
           target = 1.0;
           gateHoldUntil = timestamp + 140;
         } else if (timestamp < gateHoldUntil) {
@@ -1730,6 +1810,10 @@ const AudioProcessor = ({ goHome }) => {
           const progress =
             (db - closeThreshold) / (openThreshold - closeThreshold || 1);
           target = minGateGain + Math.max(0, Math.min(1, progress)) * (1 - minGateGain);
+        }
+
+        if (strictSpeechGate && !localVoiceActive) {
+          target = Math.min(target, speechOnlyMode ? 0.05 : 0.12);
         }
 
         if (localVoiceActive && db < threshold) {
@@ -1770,31 +1854,11 @@ const AudioProcessor = ({ goHome }) => {
       if (
         timestamp - lastPatternUpdate > patternUpdateInterval &&
         featuresRef.current.voicePattern &&
-
-        features.voicePattern &&
         !isBypassed &&
         audioContext
       ) {
         lastPatternUpdate = timestamp;
-        const sampleRate = audioContext.sampleRate || 48000;
-        const binHz = sampleRate / 2 / bufferLength;
-        const bandAverage = (startHz, endHz) => {
-          const startBin = Math.max(0, Math.floor(startHz / binHz));
-          const endBin = Math.min(bufferLength - 1, Math.ceil(endHz / binHz));
-          if (endBin <= startBin) return 0;
-          let sum = 0;
-          let count = 0;
-          for (let i = startBin; i <= endBin; i += 1) {
-            sum += freqData[i];
-            count += 1;
-          }
-          return count ? sum / count : 0;
-        };
-
-        const voiceEnergy = bandAverage(300, 3400);
-        const lowNoise = bandAverage(40, 160);
-        const highNoise = bandAverage(6000, 12000);
-        const noiseEnergy = (lowNoise + highNoise) / 2;
+        ensureBandMetrics();
         const ratio = (voiceEnergy + 1) / (noiseEnergy + 1);
         const blendTarget = Math.min(1, Math.max(0.35, ratio / 2));
         const notchTarget = lowNoise > highNoise ? 90 : 120;
@@ -1810,6 +1874,48 @@ const AudioProcessor = ({ goHome }) => {
         if (noiseNotch) {
           noiseNotch.frequency.setTargetAtTime(
             notchTarget,
+            audioContext.currentTime,
+            0.2,
+          );
+        }
+      }
+
+      if (
+        timestamp - lastNoiseUpdate > noiseUpdateInterval &&
+        (settingsRef.current.denoise || featuresRef.current.voicePattern) &&
+        !settingsRef.current.isBypassed &&
+        audioContext
+      ) {
+        lastNoiseUpdate = timestamp;
+        ensureBandMetrics();
+        const noiseRatio = (lowNoise + highNoise + 1) / (voiceEnergy + 1);
+        const activityBoost = localVoiceActive ? 1 : 0.6;
+        const patternBoost = featuresRef.current.voicePattern ? 1.2 : 1.0;
+        const dynamicLowCut = -Math.min(
+          10,
+          Math.max(2.0, noiseRatio * 2.8 * activityBoost * patternBoost),
+        );
+        const dynamicHighCut = -Math.min(
+          12,
+          Math.max(2.8, noiseRatio * 3.2 * activityBoost * patternBoost),
+        );
+        const activeProfile = noiseProfilesRef.current.find(
+          (profile) => profile.id === selectedNoiseProfileIdRef.current,
+        );
+        const baseLow = activeProfile ? activeProfile.lowReduction : 0;
+        const baseHigh = activeProfile ? activeProfile.highReduction : 0;
+
+        if (noiseLowShelf) {
+          noiseLowShelf.gain.setTargetAtTime(
+            baseLow + dynamicLowCut,
+            audioContext.currentTime,
+            0.18,
+          );
+        }
+
+        if (noiseHighShelf) {
+          noiseHighShelf.gain.setTargetAtTime(
+            baseHigh + dynamicHighCut,
             audioContext.currentTime,
             0.2,
           );
@@ -1888,11 +1994,9 @@ if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
       const autoGainNode = processingRefs.current.autoGain;
       const gainRiderEnabled =
         (featuresRef.current.smartMixing || featuresRef.current.voicePattern) &&
-
-        (features.smartMixing || features.voicePattern) &&
         !settingsRef.current.isBypassed;
 
-      if (autoGainNode && gainRiderEnabled && (!gateClosed || localVoiceActive)) {
+      if (autoGainNode && gainRiderEnabled && localVoiceActive) {
         const aggressiveMode =
           settingsRef.current.denoise && settingsRef.current.threshold > -40;
 
@@ -2287,374 +2391,451 @@ if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
             flex flex-col h-full lg:h-auto overflow-hidden
           `}
         >
-          <div className="flex-1 overflow-y-auto p-6 pb-20 lg:pb-6">
-            <div className="mb-6">
-              <h2 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">
-                Input &amp; Pre-Gain
-              </h2>
-              <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-sm font-medium text-slate-300">
-                    Level Input
-                  </span>
-                  <span className="text-xs text-indigo-400 font-mono">
-                    {(Math.log10(inputGainValue) * 20).toFixed(1)} dB
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="4"
-                  step="0.1"
-                  value={inputGainValue}
-                  onChange={handleInputGainChange}
-                  className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer"
-                />
+          <div className="flex-1 overflow-y-auto p-5 pb-20 lg:pb-6 space-y-5">
+            <div className="sticky top-0 z-10 bg-slate-950/95 pb-4 backdrop-blur">
+              <div className="grid grid-cols-4 gap-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                {[
+                  { id: 'core', label: 'Core' },
+                  { id: 'stack', label: 'AI Stack' },
+                  { id: 'profiles', label: 'Profiles' },
+                  { id: 'session', label: 'Session' },
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setControlTab(tab.id)}
+                    className={`rounded-lg border px-2 py-2 transition-colors ${
+                      controlTab === tab.id
+                        ? 'border-indigo-500/70 bg-indigo-900/30 text-indigo-200'
+                        : 'border-slate-800 bg-slate-900 text-slate-500 hover:text-slate-300'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
               </div>
             </div>
 
-            <div className="mb-8 space-y-3">
-              <h2 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">
-                AI Processing
-              </h2>
-
-              <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-slate-400">
-                    Room Noise Profile
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleNoiseProfileCapture}
-                    disabled={!latestSpectrumRef.current}
-                    className={`px-2 py-1 rounded-md border text-[10px] ${
-                      latestSpectrumRef.current
-                        ? 'border-indigo-500/60 text-indigo-300 bg-indigo-900/20'
-                        : 'border-slate-700 text-slate-500 bg-slate-950'
-                    }`}
-                  >
-                    Capture
-                  </button>
+            {controlTab === 'core' && (
+              <div className="space-y-4">
+                <div>
+                  <h2 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">
+                    Input &amp; Pre-Gain
+                  </h2>
+                  <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-sm font-medium text-slate-300">
+                        Level Input
+                      </span>
+                      <span className="text-xs text-indigo-400 font-mono">
+                        {(Math.log10(inputGainValue) * 20).toFixed(1)} dB
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="4"
+                      step="0.1"
+                      value={inputGainValue}
+                      onChange={handleInputGainChange}
+                      className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer"
+                    />
+                  </div>
                 </div>
-                <select
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm"
-                  value={selectedNoiseProfileId}
-                  onChange={(e) => setSelectedNoiseProfileId(e.target.value)}
-                >
-                  <option value="">No profile</option>
-                  {noiseProfiles.map((profile) => (
-                    <option key={profile.id} value={profile.id}>
-                      {profile.label}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-[10px] text-slate-500">
-                  Capture a noise print when the room is loud, then apply it to
-                  reduce steady fan and HVAC noise.
-                </p>
-              </div>
 
-              <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-medium text-slate-400">
-                    Loudness Target
-                  </span>
-                  <span className="text-[10px] text-indigo-300 font-semibold">
-                    {typeof loudnessDb === 'number' ? `${loudnessDb} dB` : '--'}
-                  </span>
-                </div>
-                <select
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm"
-                  value={loudnessTarget}
-                  onChange={(e) => setLoudnessTarget(Number(e.target.value))}
-                >
-                  <option value={-14}>YouTube Live (-14 LUFS)</option>
-                  <option value={-16}>Facebook Live (-16 LUFS)</option>
-                  <option value={-20}>Zoom / Teams (-20 LUFS)</option>
-                </select>
-                <div className="mt-3 flex items-center justify-between text-[10px] text-slate-500">
-                  <span>Streaming Safe</span>
-                  <button
-                    type="button"
+                <div className="space-y-3">
+                  <h2 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                    Hyper-Gate
+                  </h2>
+                  <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold text-slate-200">
+                        Gate Mode
+                      </p>
+                      <p className="text-[10px] text-slate-500">
+                        Speech Only blocks background voices and TV bleed.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 text-[10px] font-semibold">
+                      <button
+                        type="button"
+                        onClick={() => setGateMode('balanced')}
+                        className={`px-2.5 py-1 rounded-md border ${
+                          gateMode === 'balanced'
+                            ? 'border-indigo-500/70 bg-indigo-900/30 text-indigo-200'
+                            : 'border-slate-700 bg-slate-950 text-slate-400'
+                        }`}
+                      >
+                        Balanced
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setGateMode('speech')}
+                        className={`px-2.5 py-1 rounded-md border ${
+                          gateMode === 'speech'
+                            ? 'border-amber-400/70 bg-amber-900/30 text-amber-200'
+                            : 'border-slate-700 bg-slate-950 text-slate-400'
+                        }`}
+                      >
+                        Speech Only
+                      </button>
+                    </div>
+                  </div>
+                  <FeatureToggle
+                    icon={<Activity size={18} />}
+                    label="Hyper-Gate Reduction"
+                    desc="Kills room noise when nobody speaks"
+                    active={features.denoise}
                     onClick={() =>
                       setFeatures({
                         ...features,
-                        streamingSafe: !features.streamingSafe,
+                        denoise: !features.denoise,
                       })
                     }
-                    className={`px-2 py-1 rounded-md border ${
-                      features.streamingSafe
-                        ? 'border-emerald-400/70 text-emerald-300 bg-emerald-900/20'
-                        : 'border-slate-700 text-slate-400 bg-slate-950'
-                    }`}
-                  >
-                    {features.streamingSafe ? 'ON' : 'OFF'}
-                  </button>
-                </div>
-              </div>
-
-              <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-medium text-slate-400">
-                    Speaker Profile
-                  </span>
-                  <span className="text-[10px] text-indigo-300 font-semibold">
-                    {speakerPreset === 'balanced'
-                      ? 'Balanced'
-                      : speakerPreset === 'pastor'
-                      ? 'Pastor'
-                      : speakerPreset === 'guest'
-                      ? 'Guest Speaker'
-                      : 'Choir Lead'}
-                  </span>
-                </div>
-                <select
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm"
-                  value={speakerPreset}
-                  onChange={(e) => setSpeakerPreset(e.target.value)}
-                >
-                  <option value="balanced">Balanced</option>
-                  <option value="pastor">Pastor</option>
-                  <option value="guest">Guest Speaker</option>
-                  <option value="choir">Choir Lead</option>
-                </select>
-                <p className="text-[10px] text-slate-500 mt-2">
-                  Tunes clarity, warmth, and de-essing for each voice type.
-                </p>
-              </div>
-
-              <FeatureToggle
-                icon={<Activity size={18} />}
-                label="Hyper-Gate Reduction"
-                desc="Kills room noise when nobody speaks"
-                active={features.denoise}
-                onClick={() =>
-                  setFeatures({
-                    ...features,
-                    denoise: !features.denoise,
-                  })
-                }
-              />
-
-              {features.denoise && (
-                <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 mt-3 -mb-3 transition-opacity duration-300 animate-in fade-in slide-in-from-top-2">
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="text-xs font-medium text-slate-400">
-                      Noise Threshold
-                    </span>
-                    <div className="flex items-center gap-2">
-                      {visualizerGateStatus ? (
-                        <span className="text-[9px] font-bold text-red-500 tracking-wider animate-pulse">
-                          GATE CLOSED
-                        </span>
-                      ) : (
-                        <span className="text-[9px] font-bold text-green-500 tracking-wider">
-                          GATE OPEN
-                        </span>
-                      )}
-                      <span
-                        className={`text-xs font-mono ${
-                          noiseFloorThreshold > -40
-                            ? 'text-red-400'
-                            : 'text-indigo-400'
-                        }`}
-                      >
-                        {noiseFloorThreshold} dB
-                      </span>
-                    </div>
-                  </div>
-
-                  <input
-                    type="range"
-                    min="-100"
-                    max="-20"
-                    step="1"
-                    value={noiseFloorThreshold}
-                    onChange={(e) =>
-                      setNoiseFloorThreshold(parseFloat(e.target.value))
-                    }
-                    className="w-full h-1 bg-indigo-700 rounded-lg appearance-none cursor-pointer"
                   />
 
-                  <div className="mt-3 flex items-center justify-between gap-2">
+                  {features.denoise && (
+                    <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 transition-opacity duration-300 animate-in fade-in slide-in-from-top-2">
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-xs font-medium text-slate-400">
+                          Noise Threshold
+                        </span>
+                        <div className="flex items-center gap-2">
+                          {visualizerGateStatus ? (
+                            <span className="text-[9px] font-bold text-red-500 tracking-wider animate-pulse">
+                              GATE CLOSED
+                            </span>
+                          ) : (
+                            <span className="text-[9px] font-bold text-green-500 tracking-wider">
+                              GATE OPEN
+                            </span>
+                          )}
+                          <span
+                            className={`text-xs font-mono ${
+                              noiseFloorThreshold > -40
+                                ? 'text-red-400'
+                                : 'text-indigo-400'
+                            }`}
+                          >
+                            {noiseFloorThreshold} dB
+                          </span>
+                        </div>
+                      </div>
+
+                      <input
+                        type="range"
+                        min="-100"
+                        max="-20"
+                        step="1"
+                        value={noiseFloorThreshold}
+                        onChange={(e) =>
+                          setNoiseFloorThreshold(parseFloat(e.target.value))
+                        }
+                        className="w-full h-1 bg-indigo-700 rounded-lg appearance-none cursor-pointer"
+                      />
+
+                      <div className="mt-3 flex items-center justify-between gap-2">
+                        <button
+                          type="button"
+                          onClick={startAutoCalibrate}
+                          disabled={isAutoCalibrating}
+                          className={`text-[10px] px-3 py-1.5 rounded-lg border ${
+                            isAutoCalibrating
+                              ? 'border-indigo-500/60 bg-indigo-900/30 text-indigo-300 cursor-wait'
+                              : 'border-slate-700 bg-slate-950 text-slate-300 hover:bg-slate-900'
+                          }`}
+                        >
+                          {isAutoCalibrating
+                            ? 'Listening to room...'
+                            : 'Auto-calibrate gate'}
+                        </button>
+                        <span className="text-[9px] text-slate-500 text-right">
+                          Tip: Run auto-calibrate when the room is normally noisy.
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {controlTab === 'stack' && (
+              <div className="space-y-4">
+                <h2 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  AI Processing Stack
+                </h2>
+                <div className="grid grid-cols-2 gap-3">
+                  <FeatureToggle
+                    icon={<Radio size={18} />}
+                    label="Echo / Reverb Cleaner"
+                    desc="Dries up big room reflections"
+                    active={features.dereverb}
+                    onClick={() =>
+                      setFeatures({
+                        ...features,
+                        dereverb: !features.dereverb,
+                      })
+                    }
+                  />
+                  <FeatureToggle
+                    icon={<Waves size={18} />}
+                    label="Voice Pattern Cleanse"
+                    desc="Learns voice shape, removes noise, blends clean output"
+                    active={features.voicePattern}
+                    onClick={() =>
+                      setFeatures({
+                        ...features,
+                        voicePattern: !features.voicePattern,
+                      })
+                    }
+                  />
+                  <FeatureToggle
+                    icon={<Volume2 size={18} />}
+                    label="Auto Music Ducking"
+                    desc="Drops background beds when speech is active"
+                    active={features.musicDucking}
+                    onClick={() =>
+                      setFeatures({
+                        ...features,
+                        musicDucking: !features.musicDucking,
+                      })
+                    }
+                  />
+                  <FeatureToggle
+                    icon={<Mic size={18} />}
+                    label="Pastor Voice Isolation"
+                    desc="Pushes speech forward in the mix"
+                    active={features.pastorIsolation}
+                    onClick={() =>
+                      setFeatures({
+                        ...features,
+                        pastorIsolation: !features.pastorIsolation,
+                      })
+                    }
+                  />
+                  <FeatureToggle
+                    icon={<Speaker size={18} />}
+                    label="Sermon Warmth"
+                    desc="Adds low-mid body like a podcast"
+                    active={features.sermonWarmth}
+                    onClick={() =>
+                      setFeatures({
+                        ...features,
+                        sermonWarmth: !features.sermonWarmth,
+                      })
+                    }
+                  />
+                  <FeatureToggle
+                    icon={<Sliders size={18} />}
+                    label="Smart Auto-Mixing"
+                    desc="Balances levels & gently rides speech"
+                    active={features.smartMixing}
+                    onClick={() =>
+                      setFeatures({
+                        ...features,
+                        smartMixing: !features.smartMixing,
+                      })
+                    }
+                  />
+                  <FeatureToggle
+                    icon={<Volume2 size={18} />}
+                    label="Audacity Voice Polish"
+                    desc="Bold end-to-end vocal sheen & loudness"
+                    active={features.mastering}
+                    onClick={() =>
+                      setFeatures({
+                        ...features,
+                        mastering: !features.mastering,
+                      })
+                    }
+                  />
+                </div>
+              </div>
+            )}
+
+            {controlTab === 'profiles' && (
+              <div className="space-y-4">
+                <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-slate-400">
+                      Room Noise Profile
+                    </span>
                     <button
                       type="button"
-                      onClick={startAutoCalibrate}
-                      disabled={isAutoCalibrating}
-                      className={`text-[10px] px-3 py-1.5 rounded-lg border ${
-                        isAutoCalibrating
-                          ? 'border-indigo-500/60 bg-indigo-900/30 text-indigo-300 cursor-wait'
-                          : 'border-slate-700 bg-slate-950 text-slate-300 hover:bg-slate-900'
+                      onClick={handleNoiseProfileCapture}
+                      disabled={!latestSpectrumRef.current}
+                      className={`px-2 py-1 rounded-md border text-[10px] ${
+                        latestSpectrumRef.current
+                          ? 'border-indigo-500/60 text-indigo-300 bg-indigo-900/20'
+                          : 'border-slate-700 text-slate-500 bg-slate-950'
                       }`}
                     >
-                      {isAutoCalibrating ? 'Listening to room…' : 'Auto-calibrate gate'}
+                      Capture
                     </button>
-                    <span className="text-[9px] text-slate-500 text-right">
-                      Tip: Run auto-calibrate when the room is “normally noisy” (fans,
-                      kids, AC, etc).
+                  </div>
+                  <select
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm"
+                    value={selectedNoiseProfileId}
+                    onChange={(e) => setSelectedNoiseProfileId(e.target.value)}
+                  >
+                    <option value="">No profile</option>
+                    {noiseProfiles.map((profile) => (
+                      <option key={profile.id} value={profile.id}>
+                        {profile.label}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-slate-500">
+                    Capture a noise print when the room is loud, then apply it to
+                    reduce steady fan and HVAC noise.
+                  </p>
+                </div>
+
+                <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-medium text-slate-400">
+                      Speaker Profile
+                    </span>
+                    <span className="text-[10px] text-indigo-300 font-semibold">
+                      {speakerPreset === 'balanced'
+                        ? 'Balanced'
+                        : speakerPreset === 'pastor'
+                        ? 'Pastor'
+                        : speakerPreset === 'guest'
+                        ? 'Guest Speaker'
+                        : 'Choir Lead'}
                     </span>
                   </div>
+                  <select
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm"
+                    value={speakerPreset}
+                    onChange={(e) => setSpeakerPreset(e.target.value)}
+                  >
+                    <option value="balanced">Balanced</option>
+                    <option value="pastor">Pastor</option>
+                    <option value="guest">Guest Speaker</option>
+                    <option value="choir">Choir Lead</option>
+                  </select>
+                  <p className="text-[10px] text-slate-500 mt-2">
+                    Tunes clarity, warmth, and de-essing for each voice type.
+                  </p>
                 </div>
-              )}
 
-              <FeatureToggle
-                icon={<Radio size={18} />}
-                label="Echo / Reverb Cleaner"
-                desc="Dries up big room reflections"
-                active={features.dereverb}
-                onClick={() =>
-                  setFeatures({
-                    ...features,
-                    dereverb: !features.dereverb,
-                  })
-                }
-              />
-              <FeatureToggle
-                icon={<Waves size={18} />}
-                label="Voice Pattern Cleanse"
-                desc="Learns voice shape, removes noise, blends clean output"
-                active={features.voicePattern}
-                onClick={() =>
-                  setFeatures({
-                    ...features,
-                    voicePattern: !features.voicePattern,
-                  })
-                }
-              />
-              <FeatureToggle
-                icon={<Volume2 size={18} />}
-                label="Auto Music Ducking"
-                desc="Drops background beds when speech is active"
-                active={features.musicDucking}
-                onClick={() =>
-                  setFeatures({
-                    ...features,
-                    musicDucking: !features.musicDucking,
-                  })
-                }
-              />
-              <FeatureToggle
-                icon={<Mic size={18} />}
-                label="Pastor Voice Isolation"
-                desc="Pushes speech forward in the mix"
-                active={features.pastorIsolation}
-                onClick={() =>
-                  setFeatures({
-                    ...features,
-                    pastorIsolation: !features.pastorIsolation,
-                  })
-                }
-              />
-              <FeatureToggle
-                icon={<Speaker size={18} />}
-                label="Sermon Warmth"
-                desc="Adds low-mid body like a podcast"
-                active={features.sermonWarmth}
-                onClick={() =>
-                  setFeatures({
-                    ...features,
-                    sermonWarmth: !features.sermonWarmth,
-                  })
-                }
-              />
-              <FeatureToggle  
-                icon={<Sliders size={18} />}
-                label="Smart Auto-Mixing"
-                desc="Balances levels & gently rides speech"
-                active={features.smartMixing}
-                onClick={() =>
-                  setFeatures({
-                    ...features,
-                    smartMixing: !features.smartMixing,
-                  })
-                }
-              />
-            </div>
-
-            <FeatureToggle
-              icon={<Volume2 size={18} />}
-              label="Audacity Voice Polish"
-              desc="Bold end-to-end vocal sheen & loudness"
-              active={features.mastering}
-              onClick={() =>
-                setFeatures({
-                  ...features,
-                  mastering: !features.mastering,
-                })
-              }
-            />
-
-            <div className="mt-6 bg-slate-900 p-4 rounded-xl border border-slate-800 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                  A/B Compare
-                </span>
-                <span className="text-[10px] text-indigo-300 font-semibold">
-                  {abMode === 'A' ? 'A (Raw)' : 'B (Processed)'}
-                </span>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsBypassed(true)}
-                  className={`px-3 py-2 rounded-lg border text-xs font-semibold ${
-                    abMode === 'A'
-                      ? 'border-amber-400/70 bg-amber-900/20 text-amber-300'
-                      : 'border-slate-700 bg-slate-950 text-slate-400'
-                  }`}
-                >
-                  A (Raw)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsBypassed(false)}
-                  className={`px-3 py-2 rounded-lg border text-xs font-semibold ${
-                    abMode === 'B'
-                      ? 'border-indigo-400/70 bg-indigo-900/20 text-indigo-200'
-                      : 'border-slate-700 bg-slate-950 text-slate-400'
-                  }`}
-                >
-                  B (Processed)
-                </button>
-              </div>
-            </div>
-
-            <div className="mt-4 bg-slate-900 p-4 rounded-xl border border-slate-800 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                  Session Snapshots
-                </span>
-                <button
-                  type="button"
-                  onClick={handleSnapshotSave}
-                  className="px-2.5 py-1 rounded-md border border-indigo-500/60 text-[10px] text-indigo-300 bg-indigo-900/20"
-                >
-                  Save
-                </button>
-              </div>
-              {snapshots.length === 0 ? (
-                <p className="text-[10px] text-slate-500">
-                  Save a snapshot to recall your full mix + AI stack.
-                </p>
-              ) : (
-                <div className="space-y-2">
-                  {snapshots.map((snapshot) => (
+                <div className="bg-slate-900 p-4 rounded-xl border border-slate-800">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-medium text-slate-400">
+                      Loudness Target
+                    </span>
+                    <span className="text-[10px] text-indigo-300 font-semibold">
+                      {typeof loudnessDb === 'number' ? `${loudnessDb} dB` : '--'}
+                    </span>
+                  </div>
+                  <select
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm"
+                    value={loudnessTarget}
+                    onChange={(e) => setLoudnessTarget(Number(e.target.value))}
+                  >
+                    <option value={-14}>YouTube Live (-14 LUFS)</option>
+                    <option value={-16}>Facebook Live (-16 LUFS)</option>
+                    <option value={-20}>Zoom / Teams (-20 LUFS)</option>
+                  </select>
+                  <div className="mt-3 flex items-center justify-between text-[10px] text-slate-500">
+                    <span>Streaming Safe</span>
                     <button
-                      key={snapshot.id}
                       type="button"
-                      onClick={() => handleSnapshotApply(snapshot)}
-                      className="w-full flex items-center justify-between px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-xs text-slate-300 hover:border-indigo-400/60 hover:text-white"
+                      onClick={() =>
+                        setFeatures({
+                          ...features,
+                          streamingSafe: !features.streamingSafe,
+                        })
+                      }
+                      className={`px-2 py-1 rounded-md border ${
+                        features.streamingSafe
+                          ? 'border-emerald-400/70 text-emerald-300 bg-emerald-900/20'
+                          : 'border-slate-700 text-slate-400 bg-slate-950'
+                      }`}
                     >
-                      <span>{snapshot.label}</span>
-                      <span className="text-[10px] text-slate-500">
-                        {snapshot.speakerPreset}
-                      </span>
+                      {features.streamingSafe ? 'ON' : 'OFF'}
                     </button>
-                  ))}
+                  </div>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
 
+            {controlTab === 'session' && (
+              <div className="space-y-4">
+                <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                      A/B Compare
+                    </span>
+                    <span className="text-[10px] text-indigo-300 font-semibold">
+                      {abMode === 'A' ? 'A (Raw)' : 'B (Processed)'}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsBypassed(true)}
+                      className={`px-3 py-2 rounded-lg border text-xs font-semibold ${
+                        abMode === 'A'
+                          ? 'border-amber-400/70 bg-amber-900/20 text-amber-300'
+                          : 'border-slate-700 bg-slate-950 text-slate-400'
+                      }`}
+                    >
+                      A (Raw)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsBypassed(false)}
+                      className={`px-3 py-2 rounded-lg border text-xs font-semibold ${
+                        abMode === 'B'
+                          ? 'border-indigo-400/70 bg-indigo-900/20 text-indigo-200'
+                          : 'border-slate-700 bg-slate-950 text-slate-400'
+                      }`}
+                    >
+                      B (Processed)
+                    </button>
+                  </div>
+                </div>
+
+                <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                      Session Snapshots
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleSnapshotSave}
+                      className="px-2.5 py-1 rounded-md border border-indigo-500/60 text-[10px] text-indigo-300 bg-indigo-900/20"
+                    >
+                      Save
+                    </button>
+                  </div>
+                  {snapshots.length === 0 ? (
+                    <p className="text-[10px] text-slate-500">
+                      Save a snapshot to recall your full mix + AI stack.
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      {snapshots.map((snapshot) => (
+                        <button
+                          key={snapshot.id}
+                          type="button"
+                          onClick={() => handleSnapshotApply(snapshot)}
+                          className="w-full flex items-center justify-between px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-xs text-slate-300 hover:border-indigo-400/60 hover:text-white"
+                        >
+                          <span>{snapshot.label}</span>
+                          <span className="text-[10px] text-slate-500">
+                            {snapshot.speakerPreset}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
             <button
               onClick={() => setIsSidebarOpen(false)}
               className="mt-8 w-full py-4 bg-slate-800 text-slate-400 rounded-xl lg:hidden font-bold border border-slate-700 active:bg-slate-700"
