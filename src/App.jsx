@@ -457,7 +457,6 @@ const AudioProcessor = ({ goHome }) => {
   const latestSpectrumRef = useRef(null);
   const featuresRef = useRef(features);
   const gainRiderDbRef = useRef(gainRiderDb);
-
   const canvasRef = useRef(null);
   const animationRef = useRef(null);
 
@@ -781,7 +780,6 @@ const AudioProcessor = ({ goHome }) => {
 
       const reverbDucker = ctx.createGain();
       reverbDucker.gain.value = 1.0;
-
       const duckGain = ctx.createGain();
       duckGain.gain.value = 1.0;
 
@@ -845,6 +843,8 @@ const AudioProcessor = ({ goHome }) => {
       polishPresence.connect(polishAir);
       polishAir.connect(limiter);
       limiter.connect(master);
+
+      reverbDucker.connect(master);
       master.connect(ana);
       ana.connect(monitorGain);
       ana.connect(destNode);
@@ -1770,6 +1770,8 @@ const AudioProcessor = ({ goHome }) => {
       if (
         timestamp - lastPatternUpdate > patternUpdateInterval &&
         featuresRef.current.voicePattern &&
+
+        features.voicePattern &&
         !isBypassed &&
         audioContext
       ) {
@@ -1886,6 +1888,8 @@ if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
       const autoGainNode = processingRefs.current.autoGain;
       const gainRiderEnabled =
         (featuresRef.current.smartMixing || featuresRef.current.voicePattern) &&
+
+        (features.smartMixing || features.voicePattern) &&
         !settingsRef.current.isBypassed;
 
       if (autoGainNode && gainRiderEnabled && (!gateClosed || localVoiceActive)) {
