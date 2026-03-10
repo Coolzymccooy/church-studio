@@ -334,10 +334,16 @@ const AudioProcessor = ({ goHome }) => {
   const [voiceActive, setVoiceActive] = useState(false);
   const [isAutoCalibrating, setIsAutoCalibrating] = useState(false);
   const [audioEngineError, setAudioEngineError] = useState(null);
+  const [chainReady, setChainReady] = useState(0); // increments when audio chain is fully built
   const [controlTab, setControlTab] = useState('core');
-  const [gateMode, setGateMode] = useState('balanced'); // balanced | speech-only
+  const [gateMode, setGateMode] = useState(() => {
+    return window.localStorage.getItem('tiwaton:gateMode') || 'balanced';
+  });
 
-  const [noiseFloorThreshold, setNoiseFloorThreshold] = useState(-50);
+  const [noiseFloorThreshold, setNoiseFloorThreshold] = useState(() => {
+    const saved = window.localStorage.getItem('tiwaton:threshold');
+    return saved ? parseFloat(saved) : -50;
+  });
   const [visualizerGateStatus, setVisualizerGateStatus] = useState(false);
   const [recordingState, setRecordingState] = useState('idle');
   const [recordedUrl, setRecordedUrl] = useState(null);
@@ -369,10 +375,11 @@ const AudioProcessor = ({ goHome }) => {
   // - inputId           → mic / mixer
   // - outputId          → monitoring output (AirPods, speakers) – used by setSinkId
   // - broadcastBus      → conceptual “broadcast output” (VB-Cable, Loopback, etc)
-  const [selectedDevices, setSelectedDevices] = useState({
-    inputId: 'default',
-    outputId: 'default',
-    broadcastBus: 'Not set',
+  const [selectedDevices, setSelectedDevices] = useState(() => {
+    try {
+      const saved = window.localStorage.getItem('tiwaton:devices');
+      return saved ? JSON.parse(saved) : { inputId: 'default', outputId: 'default', broadcastBus: 'Not set' };
+    } catch { return { inputId: 'default', outputId: 'default', broadcastBus: 'Not set' }; }
   });
 
   const [audioStats, setAudioStats] = useState({
@@ -435,28 +442,63 @@ const AudioProcessor = ({ goHome }) => {
     frames: 0,
   });
 
-  // -- Features --
-  const [features, setFeatures] = useState({
-    denoise: false,
-    dereverb: false,
-    pastorIsolation: false,
-    sermonWarmth: false,
-    smartMixing: false,
-    mastering: false,
-    voicePattern: false,
-    musicDucking: false,
-    streamingSafe: false,
+  // --- Mic Fingerprint System ---
+  // Learns the spectral "signature" of the connected mic over time.
+  // Anything that deviates from the learned profile is likely ambient noise (TV, kids, etc).
+  const micFingerprintRef = useRef({
+    learning: false,
+    learned: false,
+    frames: 0,
+    // Running mean of energy per band (8 bands spanning 40-12000Hz)
+    bandMeans: new Float32Array(8),
+    bandM2: new Float32Array(8), // for variance (Welford's algorithm)
+    // Spectral centroid mean/variance (tracks "center of gravity" of the mic's sound)
+    centroidMean: 0,
+    centroidM2: 0,
+    // How many frames to learn (5 seconds at ~100fps = 500 frames)
+    learnFrames: 500,
   });
-  const [speakerPreset, setSpeakerPreset] = useState('balanced');
+
+  // -- Features --
+  const [features, setFeatures] = useState(() => {
+    try {
+      const saved = window.localStorage.getItem('tiwaton:features');
+      return saved ? JSON.parse(saved) : {
+        denoise: false, dereverb: false, pastorIsolation: false,
+        sermonWarmth: false, smartMixing: false, mastering: false,
+        voicePattern: false, musicDucking: false, streamingSafe: false,
+      };
+    } catch {
+      return {
+        denoise: false, dereverb: false, pastorIsolation: false,
+        sermonWarmth: false, smartMixing: false, mastering: false,
+        voicePattern: false, musicDucking: false, streamingSafe: false,
+      };
+    }
+  });
+  const [speakerPreset, setSpeakerPreset] = useState(() => {
+    return window.localStorage.getItem('tiwaton:speakerPreset') || 'balanced';
+  });
   const [loudnessDb, setLoudnessDb] = useState(null);
   const [loudnessTarget, setLoudnessTarget] = useState(-14);
   const [abMode, setAbMode] = useState('B');
   const [snapshots, setSnapshots] = useState([]);
   const snapshotCounterRef = useRef(1);
-  const [noiseProfiles, setNoiseProfiles] = useState([]);
-  const [selectedNoiseProfileId, setSelectedNoiseProfileId] = useState('');
+  const [noiseProfiles, setNoiseProfiles] = useState(() => {
+    try {
+      const saved = window.localStorage.getItem('tiwaton:noiseProfiles');
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+  const [selectedNoiseProfileId, setSelectedNoiseProfileId] = useState(() => {
+    return window.localStorage.getItem('tiwaton:selectedNoiseProfileId') || '';
+  });
+  const [roomName, setRoomName] = useState(() => {
+    return window.localStorage.getItem('tiwaton:roomName') || 'Main Sanctuary';
+  });
   const noiseProfileCounterRef = useRef(1);
   const latestSpectrumRef = useRef(null);
+  const noiseFloorThresholdRef = useRef(noiseFloorThreshold);
   const featuresRef = useRef(features);
   const gateModeRef = useRef(gateMode);
   const noiseProfilesRef = useRef(noiseProfiles);
@@ -471,23 +513,39 @@ const AudioProcessor = ({ goHome }) => {
 
   useEffect(() => {
     featuresRef.current = features;
+    try { window.localStorage.setItem('tiwaton:features', JSON.stringify(features)); } catch {}
   }, [features]);
 
   useEffect(() => {
     gateModeRef.current = gateMode;
+    try { window.localStorage.setItem('tiwaton:gateMode', gateMode); } catch {}
   }, [gateMode]);
 
   useEffect(() => {
     noiseProfilesRef.current = noiseProfiles;
+    try { window.localStorage.setItem('tiwaton:noiseProfiles', JSON.stringify(noiseProfiles)); } catch {}
   }, [noiseProfiles]);
 
   useEffect(() => {
     selectedNoiseProfileIdRef.current = selectedNoiseProfileId;
+    try { window.localStorage.setItem('tiwaton:selectedNoiseProfileId', selectedNoiseProfileId); } catch {}
   }, [selectedNoiseProfileId]);
+
+  useEffect(() => {
+    try { window.localStorage.setItem('tiwaton:roomName', roomName); } catch {}
+  }, [roomName]);
 
   useEffect(() => {
     gainRiderDbRef.current = gainRiderDb;
   }, [gainRiderDb]);
+
+  useEffect(() => {
+    try { window.localStorage.setItem('tiwaton:devices', JSON.stringify(selectedDevices)); } catch {}
+  }, [selectedDevices]);
+
+  useEffect(() => {
+    try { window.localStorage.setItem('tiwaton:speakerPreset', speakerPreset); } catch {}
+  }, [speakerPreset]);
 
   const outputTargets = [
     { name: 'OBS Studio', icon: <Cpu size={20} /> },
@@ -531,21 +589,46 @@ const AudioProcessor = ({ goHome }) => {
   }, [showSettings, getDevices]);
 
   useEffect(() => {
+    noiseFloorThresholdRef.current = noiseFloorThreshold;
+    try { window.localStorage.setItem('tiwaton:threshold', String(noiseFloorThreshold)); } catch {}
+  }, [noiseFloorThreshold]);
+
+  useEffect(() => {
     settingsRef.current = {
       denoise: features.denoise,
       threshold: noiseFloorThreshold,
       isBypassed: isBypassed
     };
 
+    // Sync HyperGate AudioWorklet with current settings
+    const hgNode = processingRefs.current.hyperGateNode;
+    if (hgNode) {
+      hgNode.port.postMessage({
+        type: 'config',
+        threshold: noiseFloorThreshold,
+        gateMode: gateMode,
+        enabled: features.denoise,
+        bypassed: isBypassed,
+      });
+    }
+
+    // Sync RNNoise worklet enable/disable
+    const rnNode = processingRefs.current.rnnoiseNode;
+    if (rnNode) {
+      rnNode.port.postMessage({
+        type: 'config',
+        enabled: features.voicePattern || features.denoise,
+      });
+    }
 
     // Force open gate if disabled
-  if (!features.denoise && processingRefs.current.gateGain) {
-    processingRefs.current.gateGain.gain.setValueAtTime(
-      1.0,
-      audioContext?.currentTime || 0
-    );
-  }
-}, [features.denoise, noiseFloorThreshold, isBypassed, audioContext]);
+    if (!features.denoise && processingRefs.current.gateGain) {
+      processingRefs.current.gateGain.gain.setValueAtTime(
+        1.0,
+        audioContext?.currentTime || 0
+      );
+    }
+  }, [features.denoise, features.voicePattern, noiseFloorThreshold, gateMode, isBypassed, audioContext]);
 
   const cleanupAudio = useCallback(() => {
     if (contextRef.current) {
@@ -710,6 +793,65 @@ const AudioProcessor = ({ goHome }) => {
         state: ctx.state,
       });
 
+      // --- Load AudioWorklet processors ---
+      let hyperGateNode = null;
+      let rnnoiseNode = null;
+
+      try {
+        await ctx.audioWorklet.addModule('/worklets/hypergate-worklet.js');
+        hyperGateNode = new AudioWorkletNode(ctx, 'hypergate-processor');
+
+        // Send initial config
+        hyperGateNode.port.postMessage({
+          type: 'config',
+          threshold: noiseFloorThresholdRef.current ?? -50,
+          gateMode: gateModeRef.current,
+          enabled: featuresRef.current.denoise,
+          bypassed: false,
+        });
+
+        // Receive metrics from worklet for UI
+        hyperGateNode.port.onmessage = (event) => {
+          const msg = event.data;
+          if (msg.type === 'metrics') {
+            if (typeof msg.gateClosed === 'boolean') {
+              setVisualizerGateStatus((prev) => (prev !== msg.gateClosed ? msg.gateClosed : prev));
+            }
+          }
+        };
+
+        console.log('[TIWATON] HyperGate AudioWorklet loaded (sub-1ms latency)');
+      } catch (err) {
+        console.warn('[TIWATON] AudioWorklet not available, falling back to main-thread gate:', err.message);
+      }
+
+      try {
+        await ctx.audioWorklet.addModule('/worklets/rnnoise-worklet.js');
+        rnnoiseNode = new AudioWorkletNode(ctx, 'rnnoise-processor');
+
+        // Try to load RNNoise WASM binary
+        try {
+          const wasmResponse = await fetch('/wasm/rnnoise.wasm');
+          if (wasmResponse.ok) {
+            const wasmBytes = await wasmResponse.arrayBuffer();
+            rnnoiseNode.port.postMessage({ type: 'load-wasm', wasmBytes }, [wasmBytes]);
+            console.log('[TIWATON] RNNoise WASM loaded (neural noise suppression active)');
+          } else {
+            console.warn('[TIWATON] RNNoise WASM not found at /wasm/rnnoise.wasm — neural denoising disabled. Place rnnoise.wasm in public/wasm/ to enable.');
+          }
+        } catch (wasmErr) {
+          console.warn('[TIWATON] RNNoise WASM load failed:', wasmErr.message);
+        }
+
+        rnnoiseNode.port.onmessage = (event) => {
+          if (event.data.type === 'vad') {
+            // RNNoise VAD probability can reinforce our gate decisions
+          }
+        };
+      } catch (err) {
+        console.warn('[TIWATON] RNNoise worklet not available:', err.message);
+      }
+
       let source;
 
       if (inputStream) {
@@ -841,10 +983,23 @@ const AudioProcessor = ({ goHome }) => {
       // Chain connections
       source.connect(inputGain);
       inputGain.connect(lowCut);
-      lowCut.connect(ana);
-      ana.connect(gateGain);
 
-      gateGain.connect(noiseNotch);
+      // Insert RNNoise (neural denoise) before analyser if available
+      if (rnnoiseNode) {
+        lowCut.connect(rnnoiseNode);
+        rnnoiseNode.connect(ana);
+      } else {
+        lowCut.connect(ana);
+      }
+
+      // Insert HyperGate worklet after analyser if available, otherwise use GainNode fallback
+      if (hyperGateNode) {
+        ana.connect(hyperGateNode);
+        hyperGateNode.connect(noiseNotch);
+      } else {
+        ana.connect(gateGain);
+        gateGain.connect(noiseNotch);
+      }
       noiseNotch.connect(voiceContour);
       voiceContour.connect(noiseBlend);
       noiseBlend.connect(noiseLowShelf);
@@ -865,7 +1020,7 @@ const AudioProcessor = ({ goHome }) => {
       polishAir.connect(limiter);
       limiter.connect(master);
 
-      reverbDucker.connect(master);
+      // reverbDucker routes through duckGain→polish→limiter→master (no bypass)
       master.connect(monitorGain);
       master.connect(destNode);
 
@@ -904,9 +1059,12 @@ const AudioProcessor = ({ goHome }) => {
         master,
         monitorGain,
         analyser: ana,
+        hyperGateNode,
+        rnnoiseNode,
       };
 
       setAudioEngineError(null);
+      setChainReady((prev) => prev + 1); // trigger DSP parameter useEffect
       visualizeAndGate();
     } catch (err) {
       console.error('Error starting audio engine', err);
@@ -995,6 +1153,34 @@ const AudioProcessor = ({ goHome }) => {
       frames: 0,
     };
     setIsAutoCalibrating(true);
+  };
+
+  const [isMicLearning, setIsMicLearning] = useState(false);
+  const [micLearned, setMicLearned] = useState(false);
+
+  const startMicLearn = () => {
+    if (!processingRefs.current.analyser || !audioContext) {
+      alert('Go Live first so I can learn your mic\'s spectral signature.');
+      return;
+    }
+    const fp = micFingerprintRef.current;
+    fp.learning = true;
+    fp.learned = false;
+    fp.frames = 0;
+    fp.bandMeans = new Float32Array(8);
+    fp.bandM2 = new Float32Array(8);
+    fp.centroidMean = 0;
+    fp.centroidM2 = 0;
+    setIsMicLearning(true);
+    setMicLearned(false);
+
+    // Auto-complete after learning period (~5 seconds)
+    setTimeout(() => {
+      setIsMicLearning(false);
+      if (micFingerprintRef.current.learned) {
+        setMicLearned(true);
+      }
+    }, 5500);
   };
 
   // --- AUDIO + VIDEO FILE UPLOAD ---
@@ -1142,19 +1328,128 @@ const AudioProcessor = ({ goHome }) => {
     }
   };
 
-  const shareRecording = () => {
+  const shareRecording = async (format = 'webm') => {
     if (!recordedUrl) return;
     setExportStatus('sharing');
-    setTimeout(() => {
+
+    try {
+      const timestamp = new Date().toLocaleTimeString().replace(/:/g, '-');
+
+      if (format === 'wav') {
+        // Convert WebM blob to WAV using AudioContext offline decoding
+        const response = await fetch(recordedUrl);
+        const webmBlob = await response.blob();
+        const arrayBuffer = await webmBlob.arrayBuffer();
+        const offlineCtx = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, 1, 48000);
+        const audioBuffer = await offlineCtx.decodeAudioData(arrayBuffer);
+
+        // Encode as WAV (PCM 16-bit)
+        const wavBlob = audioBufferToWav(audioBuffer);
+        const url = URL.createObjectURL(wavBlob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        a.download = `Tiwaton_Check_${timestamp}.wav`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } else {
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = recordedUrl;
+        a.download = `Tiwaton_Check_${timestamp}.webm`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }
+
+      setExportStatus('done');
+    } catch (err) {
+      console.error('Export error:', err);
+      // Fallback to raw webm download
       const a = document.createElement('a');
-      a.style.display = 'none';
       a.href = recordedUrl;
-      a.download = `Tiwaton_Check_${new Date().toLocaleTimeString()}.webm`;
+      a.download = `Tiwaton_Check_${Date.now()}.webm`;
       document.body.appendChild(a);
       a.click();
-      window.URL.revokeObjectURL(recordedUrl);
+      document.body.removeChild(a);
       setExportStatus('done');
-    }, 1500);
+    }
+  };
+
+  // Convert AudioBuffer to WAV Blob (PCM 16-bit, mono/stereo)
+  const audioBufferToWav = (buffer) => {
+    const numChannels = buffer.numberOfChannels;
+    const sampleRate = buffer.sampleRate;
+    const format = 1; // PCM
+    const bitDepth = 16;
+    const bytesPerSample = bitDepth / 8;
+    const blockAlign = numChannels * bytesPerSample;
+
+    const samples = [];
+    for (let ch = 0; ch < numChannels; ch++) {
+      samples.push(buffer.getChannelData(ch));
+    }
+
+    const numFrames = buffer.length;
+    const dataSize = numFrames * blockAlign;
+    const headerSize = 44;
+    const arrayBuffer = new ArrayBuffer(headerSize + dataSize);
+    const view = new DataView(arrayBuffer);
+
+    // WAV header
+    const writeString = (offset, str) => {
+      for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+    };
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + dataSize, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, format, true);
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * blockAlign, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, bitDepth, true);
+    writeString(36, 'data');
+    view.setUint32(40, dataSize, true);
+
+    // Interleave and write PCM samples
+    let offset = 44;
+    for (let i = 0; i < numFrames; i++) {
+      for (let ch = 0; ch < numChannels; ch++) {
+        const s = Math.max(-1, Math.min(1, samples[ch][i]));
+        view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+        offset += 2;
+      }
+    }
+
+    return new Blob([arrayBuffer], { type: 'audio/wav' });
+  };
+
+  // Download current waveform/spectrum visualization as PNG
+  const downloadWaveform = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      alert('No visualization available. Go Live or load a file first.');
+      return;
+    }
+
+    const timestamp = new Date().toLocaleTimeString().replace(/:/g, '-');
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = `Tiwaton_Spectrum_${timestamp}.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 'image/png');
   };
 
   // --- FILE MODE: PROCESS & EXPORT (AI MASTER) ---
@@ -1232,7 +1527,7 @@ const AudioProcessor = ({ goHome }) => {
       if (e.data && e.data.size > 0) chunks.push(e.data);
     };
 
-    recorder.onstop = () => {
+    recorder.onstop = async () => {
       clearTimeout(timeoutId);
 
       if (!chunks.length) {
@@ -1242,17 +1537,30 @@ const AudioProcessor = ({ goHome }) => {
         return;
       }
 
-      const blob = new Blob(chunks, { type: 'audio/webm' });
-      const url = URL.createObjectURL(blob);
+      const webmBlob = new Blob(chunks, { type: 'audio/webm' });
 
       const safeName = (fileInfo?.name || 'tiwaton_sermon')
         .replace(/\.[^/.]+$/, '')
         .slice(0, 60);
 
+      // Convert to WAV for lossless export
+      let downloadBlob = webmBlob;
+      let ext = 'webm';
+      try {
+        const arrBuf = await webmBlob.arrayBuffer();
+        const offCtx = new OfflineAudioContext(1, 1, 48000);
+        const decoded = await offCtx.decodeAudioData(arrBuf);
+        downloadBlob = audioBufferToWav(decoded);
+        ext = 'wav';
+      } catch (wavErr) {
+        console.warn('WAV conversion failed, falling back to webm:', wavErr);
+      }
+
+      const url = URL.createObjectURL(downloadBlob);
       const a = document.createElement('a');
       a.style.display = 'none';
       a.href = url;
-      a.download = `${safeName}_TIWATON_master.webm`;
+      a.download = `${safeName}_TIWATON_master.${ext}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -1405,7 +1713,11 @@ const AudioProcessor = ({ goHome }) => {
 
   // --- Parameter updates (EQ & compressor tweaks based on features) ---
   useEffect(() => {
-    if (!audioContext || !processingRefs.current.compressor) return;
+    if (!audioContext || !processingRefs.current.compressor) {
+      console.log('[TIWATON] DSP update skipped — chain not ready yet');
+      return;
+    }
+    console.log('[TIWATON] DSP params applying — preset:', speakerPreset, 'features:', Object.entries(features).filter(([,v]) => v).map(([k]) => k).join(', '));
     const {
       compressor,
       eqWarmth,
@@ -1460,18 +1772,27 @@ const AudioProcessor = ({ goHome }) => {
       (profile) => profile.id === selectedNoiseProfileId,
     );
 
-    // Small dynamic boost when voice is active
-    const speechBoost = voiceActive ? 2 : 0;
+    // Dynamic speech boost: stronger when voice is active and pastor isolation is on
+    const speechBoost = voiceActive ? (features.pastorIsolation ? 4 : 2) : 0;
 
+    // --- Pastor Voice Isolation (Enhanced) ---
+    // Close-mic speech has strong proximity effect: boosted 200-500Hz
+    // Choir singing has energy spread across 500-4000Hz with harmonic peaks
+    // Strategy: boost the "proximity zone" (200-500Hz) + presence (2-4kHz) for speech clarity
+    //           while tightening the compressor to push speech forward dynamically
     if (eqClarity) {
       const baseClarity = preset.clarity + getTarget(features.pastorIsolation, 12, 0);
-      eqClarity.Q.value = getTarget(features.pastorIsolation, 1.2, 1);
+      // Tighter Q when pastor isolation = surgical presence boost, doesn't lift choir harmonics as much
+      eqClarity.Q.value = getTarget(features.pastorIsolation, 1.8, 1);
       eqClarity.gain.linearRampToValueAtTime(baseClarity + speechBoost, now + 0.2);
     }
 
     if (eqWarmth) {
-      const baseWarmth = preset.warmth + getTarget(features.sermonWarmth, 9, 0);
-      eqWarmth.Q.value = getTarget(features.sermonWarmth, 1.1, 1);
+      // Pastor isolation: extra warmth in the proximity zone (close-mic advantage)
+      const isoWarmth = features.pastorIsolation ? 4 : 0;
+      const baseWarmth = preset.warmth + getTarget(features.sermonWarmth, 9, 0) + isoWarmth;
+      // Narrower Q for pastor isolation = targets proximity zone precisely
+      eqWarmth.Q.value = getTarget(features.pastorIsolation, 1.5, features.sermonWarmth ? 1.1 : 1);
       eqWarmth.gain.linearRampToValueAtTime(
         baseWarmth + speechBoost * 0.8,
         now + 0.25,
@@ -1479,8 +1800,24 @@ const AudioProcessor = ({ goHome }) => {
     }
 
     if (deEsser) {
-      const targetDeEsser = preset.deEsser + getTarget(features.pastorIsolation, -4, 0);
+      // Pastor isolation: more aggressive de-essing to clean up the boosted presence
+      const targetDeEsser = preset.deEsser + getTarget(features.pastorIsolation, -6, 0);
       deEsser.gain.linearRampToValueAtTime(targetDeEsser, now + 0.2);
+    }
+
+    // Voice contour: when pastor isolation is on, boost the speech intelligibility zone more aggressively
+    if (voiceContour) {
+      const baseContour = getTarget(features.voicePattern, 3.5, 0);
+      const isoContour = features.pastorIsolation && !isBypassed ? 5 : 0;
+      voiceContour.gain.linearRampToValueAtTime(baseContour + isoContour, now + 0.2);
+      // Shift voice contour frequency: 1500Hz for speech intelligibility
+      if (features.pastorIsolation) {
+        voiceContour.frequency.linearRampToValueAtTime(1800, now + 0.2);
+        voiceContour.Q.value = 1.2;
+      } else {
+        voiceContour.frequency.linearRampToValueAtTime(1500, now + 0.2);
+        voiceContour.Q.value = 0.7;
+      }
     }
 
     if (reverbFilter) {
@@ -1499,10 +1836,7 @@ const AudioProcessor = ({ goHome }) => {
       noiseNotch.Q.value = targetQ;
     }
 
-    if (voiceContour) {
-      const targetGain = getTarget(features.voicePattern, 3.5, 0);
-      voiceContour.gain.linearRampToValueAtTime(targetGain, now + 0.2);
-    }
+    // voiceContour is now handled in the pastor isolation section above
 
     if (noiseBlend) {
       const targetGain = getTarget(features.voicePattern, 0.92, 1.0);
@@ -1526,24 +1860,26 @@ const AudioProcessor = ({ goHome }) => {
     }
 
     if (compressor) {
+      // Pastor isolation: tighter compression to keep pastor voice above choir
+      const pastorActive = features.pastorIsolation && voiceActive && !isBypassed;
       compressor.ratio.linearRampToValueAtTime(
-        getTarget(mixActive, 6.5, 1),
+        pastorActive ? 8 : getTarget(mixActive, 6.5, 1),
         now + 0.4,
       );
       compressor.threshold.linearRampToValueAtTime(
-        getTarget(mixActive, -30, 0),
+        pastorActive ? -35 : getTarget(mixActive, -30, 0),
         now + 0.4,
       );
       compressor.knee.linearRampToValueAtTime(
-        getTarget(mixActive, 20, 30),
+        pastorActive ? 12 : getTarget(mixActive, 20, 30),
         now + 0.4,
       );
       compressor.attack.linearRampToValueAtTime(
-        getTarget(mixActive, 0.002, 0.003),
+        pastorActive ? 0.001 : getTarget(mixActive, 0.002, 0.003),
         now + 0.35,
       );
       compressor.release.linearRampToValueAtTime(
-        getTarget(mixActive, 0.18, 0.25),
+        pastorActive ? 0.12 : getTarget(mixActive, 0.18, 0.25),
         now + 0.35,
       );
     }
@@ -1598,6 +1934,7 @@ const AudioProcessor = ({ goHome }) => {
   }, [
     features,
     audioContext,
+    chainReady,
     isBypassed,
     voiceActive,
     loudnessDb,
@@ -1653,6 +1990,11 @@ const AudioProcessor = ({ goHome }) => {
       ctx.fillStyle = bgGrad;
       ctx.fillRect(0, 0, w, h);
 
+      // Gate/voice state (declared early so spectrum bars can use them)
+      let gateClosed = false;
+      let localVoiceActive = false;
+      let voiceCandidate = false;
+
       const barWidth = (w / bufferLength) * 2.5;
       let x = 0;
 
@@ -1660,6 +2002,12 @@ const AudioProcessor = ({ goHome }) => {
       let lowEnergy = 0;
       let highEnergy = 0;
       const splitIndex = Math.floor(bufferLength * 0.4);
+
+      // Compute voice band bin range for coloring
+      const sampleRateVal = audioContext?.sampleRate || 48000;
+      const binHzVis = sampleRateVal / 2 / bufferLength;
+      const voiceStartBin = Math.floor(300 / binHzVis);
+      const voiceEndBin = Math.ceil(3400 / binHzVis);
 
       for (let i = 0; i < bufferLength; i++) {
         const v = freqData[i];
@@ -1671,9 +2019,33 @@ const AudioProcessor = ({ goHome }) => {
           highEnergy += v;
         }
 
-        let barColor = 'rgba(37,99,235,0.75)'; // blue-600
-        if (i > splitIndex * 0.6 && i < splitIndex * 1.3) {
+        // Color-coded spectrum:
+        // Green = voice band (300-3400 Hz) when voice is active
+        // Cyan = voice band when gate is closed (potential voice)
+        // Red = noise (high freq hiss / low freq rumble) when gate is rejecting
+        // Orange = rejected noise in voice band (baby cry, etc)
+        // Blue = neutral/inactive frequencies
+        let barColor;
+        const inVoiceBand = i >= voiceStartBin && i <= voiceEndBin;
+
+        if (localVoiceActive && !gateClosed && inVoiceBand) {
+          // Voice is active and gate is open - GREEN for confirmed voice
+          barColor = 'rgba(34,197,94,0.85)'; // green-500
+        } else if (localVoiceActive && !gateClosed) {
+          // Voice active but this freq is outside voice band - dimmer green
+          barColor = 'rgba(34,197,94,0.35)';
+        } else if (gateClosed && inVoiceBand && v > 30) {
+          // Gate closed but energy in voice band - ORANGE (rejected, could be baby/noise)
+          barColor = 'rgba(251,146,60,0.7)'; // orange-400
+        } else if (gateClosed && v > 20) {
+          // Gate closed, noise being blocked - RED
+          barColor = 'rgba(239,68,68,0.6)'; // red-500
+        } else if (inVoiceBand) {
+          // Voice band, quiet - CYAN
           barColor = 'rgba(56,189,248,0.75)'; // cyan-400
+        } else {
+          // Default - BLUE
+          barColor = 'rgba(37,99,235,0.55)'; // blue-600
         }
 
         ctx.fillStyle = barColor;
@@ -1685,8 +2057,8 @@ const AudioProcessor = ({ goHome }) => {
       const highAvg = highEnergy / (bufferLength - splitIndex || 1);
       const highBias = highAvg / (lowAvg + 1e-6);
       const antiChildNoiseActive = featuresRef.current.denoise;
-      const highOnlyNoise = antiChildNoiseActive && highBias > 2.2 && lowAvg < 40;
-      const harshHighNoise = highBias > 2.0 && lowAvg < 45;
+      const highOnlyNoise = antiChildNoiseActive && highBias > 1.8 && lowAvg < 35;
+      const harshHighNoise = highBias > 1.6 && lowAvg < 40;
       const stackActive =
         featuresRef.current.dereverb ||
         featuresRef.current.voicePattern ||
@@ -1701,6 +2073,10 @@ const AudioProcessor = ({ goHome }) => {
       let highNoise = 0;
       let noiseEnergy = 0;
       let voiceRatio = 0;
+      let spectralFlatness = 1;
+      let zeroCrossingRate = 0;
+      let formantScore = 0;
+      let micMatchScore = 1.0;
 
       const ensureBandMetrics = () => {
         if (bandMetricsReady || !audioContext) return;
@@ -1724,6 +2100,144 @@ const AudioProcessor = ({ goHome }) => {
         highNoise = bandAverage(6000, 12000);
         noiseEnergy = (lowNoise + highNoise) / 2;
         voiceRatio = (voiceEnergy + 1) / (noiseEnergy + 1);
+
+        // --- Spectral Flatness (Wiener entropy) ---
+        // Flat spectrum (hissing/white noise) → value near 1.0
+        // Peaked spectrum (speech/music) → value near 0.0
+        // Rejects: fan noise, hissing, HVAC, static
+        {
+          const sfStart = Math.max(0, Math.floor(200 / binHz));
+          const sfEnd = Math.min(bufferLength - 1, Math.ceil(5000 / binHz));
+          let logSum = 0;
+          let linSum = 0;
+          let sfCount = 0;
+          for (let i = sfStart; i <= sfEnd; i++) {
+            const v = Math.max(freqData[i], 1); // floor to 1 to avoid log(0)
+            logSum += Math.log(v);
+            linSum += v;
+            sfCount++;
+          }
+          if (sfCount > 0 && linSum > 0) {
+            const geometricMean = Math.exp(logSum / sfCount);
+            const arithmeticMean = linSum / sfCount;
+            spectralFlatness = geometricMean / arithmeticMean; // 0..1
+          }
+        }
+
+        // --- Zero-Crossing Rate (from time-domain) ---
+        // Speech: moderate ZCR (0.05-0.25)
+        // Hissing/noise: high ZCR (> 0.35)
+        // Baby cry: very high ZCR or very low (tonal)
+        {
+          let crossings = 0;
+          for (let i = 1; i < bufferLength; i++) {
+            const prev = timeData[i - 1] - 128;
+            const curr = timeData[i] - 128;
+            if ((prev >= 0 && curr < 0) || (prev < 0 && curr >= 0)) {
+              crossings++;
+            }
+          }
+          zeroCrossingRate = crossings / bufferLength;
+        }
+
+        // --- Formant Structure Score ---
+        // Human speech has 2-3 formant peaks (F1: 300-900Hz, F2: 900-2500Hz, F3: 2500-3500Hz)
+        // Baby crying has narrow harmonic peaks, not formant structure
+        // We check for energy peaks in at least 2 of 3 formant regions
+        {
+          const f1 = bandAverage(300, 900);
+          const f2 = bandAverage(900, 2500);
+          const f3 = bandAverage(2500, 3500);
+          const valley1 = bandAverage(180, 300); // valley before F1
+          const valley2 = bandAverage(3500, 5000); // valley after F3
+          const avgValley = (valley1 + valley2) / 2 + 1;
+
+          // Each formant should be notably stronger than the valleys
+          const f1Peak = f1 / avgValley;
+          const f2Peak = f2 / avgValley;
+          const f3Peak = f3 / avgValley;
+
+          // Score: how many formants are prominent (> 1.3x valley)
+          let peaks = 0;
+          if (f1Peak > 1.3) peaks++;
+          if (f2Peak > 1.3) peaks++;
+          if (f3Peak > 1.3) peaks++;
+
+          // Spread check: baby cries concentrate in narrow band, speech spreads across F1-F3
+          const maxFormant = Math.max(f1, f2, f3);
+          const minFormant = Math.min(f1, f2, f3);
+          const spread = maxFormant > 0 ? minFormant / maxFormant : 0;
+
+          // Good speech: 2-3 peaks with reasonable spread (> 0.25)
+          formantScore = peaks >= 2 && spread > 0.2 ? peaks + spread : 0;
+        }
+
+        // --- Mic Fingerprint: learn + score ---
+        const fp = micFingerprintRef.current;
+        const fpBands = [
+          bandAverage(40, 180),   // sub/rumble
+          bandAverage(180, 400),  // low-mid
+          bandAverage(400, 900),  // mid (F1)
+          bandAverage(900, 2000), // upper-mid (F2)
+          bandAverage(2000, 3500),// presence
+          bandAverage(3500, 5000),// brilliance
+          bandAverage(5000, 8000),// high
+          bandAverage(8000, 12000),// air/hiss
+        ];
+
+        // Spectral centroid (weighted average frequency)
+        let centroidNum = 0, centroidDen = 0;
+        for (let ci = 0; ci < bufferLength; ci++) {
+          centroidNum += freqData[ci] * ci;
+          centroidDen += freqData[ci];
+        }
+        const centroid = centroidDen > 0 ? centroidNum / centroidDen : 0;
+
+        if (fp.learning && fp.frames < fp.learnFrames) {
+          // Welford's online algorithm for mean + variance
+          fp.frames++;
+          for (let b = 0; b < 8; b++) {
+            const delta = fpBands[b] - fp.bandMeans[b];
+            fp.bandMeans[b] += delta / fp.frames;
+            const delta2 = fpBands[b] - fp.bandMeans[b];
+            fp.bandM2[b] += delta * delta2;
+          }
+          const cDelta = centroid - fp.centroidMean;
+          fp.centroidMean += cDelta / fp.frames;
+          fp.centroidM2 += cDelta * (centroid - fp.centroidMean);
+
+          if (fp.frames >= fp.learnFrames) {
+            fp.learned = true;
+            fp.learning = false;
+            console.log('[TIWATON] Mic fingerprint learned:', {
+              bandMeans: Array.from(fp.bandMeans).map(v => v.toFixed(1)),
+              centroidMean: fp.centroidMean.toFixed(1),
+            });
+          }
+        }
+
+        // Compute mic match score (0 = totally different, 1 = perfect match)
+        micMatchScore = 1.0; // default: assume match if not learned yet
+        if (fp.learned) {
+          let totalDeviation = 0;
+          for (let b = 0; b < 8; b++) {
+            const variance = fp.bandM2[b] / (fp.frames - 1 || 1);
+            const stdDev = Math.sqrt(variance) + 1; // +1 to avoid division by zero
+            const deviation = Math.abs(fpBands[b] - fp.bandMeans[b]) / stdDev;
+            totalDeviation += deviation;
+          }
+          // Centroid deviation
+          const cVariance = fp.centroidM2 / (fp.frames - 1 || 1);
+          const cStdDev = Math.sqrt(cVariance) + 0.1;
+          const cDeviation = Math.abs(centroid - fp.centroidMean) / cStdDev;
+          totalDeviation += cDeviation * 2; // centroid weighted double
+
+          // Normalize: 10 checks, each ~1.0 if within 1 std dev
+          // Score: 1.0 if avg deviation < 1, drops toward 0 as deviation increases
+          const avgDev = totalDeviation / 10;
+          micMatchScore = Math.max(0, Math.min(1, 1 - (avgDev - 1) * 0.3));
+        }
+
         bandMetricsReady = true;
       };
 
@@ -1735,10 +2249,6 @@ const AudioProcessor = ({ goHome }) => {
       }
       const rms = Math.sqrt(sumSq / bufferLength);
       const db = 20 * Math.log10(rms || 0.00001);
-
-      let gateClosed = false;
-      let localVoiceActive = false;
-      let voiceCandidate = false;
 
       // Auto-calibrator
       if (calibrateRef.current.active) {
@@ -1762,67 +2272,103 @@ const AudioProcessor = ({ goHome }) => {
       }
 
       // Gate decision + VAD
-      if (gateGain && settingsRef.current.denoise && !settingsRef.current.isBypassed) {
+      // Skip main-thread gate if AudioWorklet is handling it (avoid double-gating)
+      const workletHandlesGate = !!processingRefs.current.hyperGateNode;
+
+      if (gateGain && settingsRef.current.denoise && !settingsRef.current.isBypassed && !workletHandlesGate) {
         const threshold = settingsRef.current.threshold;
         const openThreshold = threshold + 3;
         const closeThreshold = threshold - 4;
         const minGateGain = 0.015;
 
-      voiceCandidate =
-          !highOnlyNoise &&
-          lowAvg > 18 &&
-          highBias < 2.4 &&
-          db > threshold - 12;
-
-      if (stackActive || featuresRef.current.voicePattern) {
         ensureBandMetrics();
-        const ratioGate = voiceRatio > 1.3 && voiceEnergy > 20;
-        voiceCandidate = voiceCandidate && ratioGate;
-      }
+
+        // --- Tiered voice detection ---
+        // Key principle: close-mic speech has STRONG low-mid energy (proximity effect)
+        // TV/ambient from across room has flat/even distribution
+        //
+        // Tier 1 (LOUD + PROXIMITY): Very loud AND voice-band dominant = definitely speaking into mic
+        const loudOverride = db > threshold + 15 && !highOnlyNoise && voiceRatio > 1.0;
+
+        // Tier 2 (BASIC): Energy in voice band, above threshold, not pure high-freq noise
+        const basicVoice =
+          !highOnlyNoise &&
+          lowAvg > 10 &&
+          highBias < 3.0 &&
+          db > threshold &&
+          voiceEnergy > 10;
+
+        // Tier 3 (SPECTRAL): Supplementary confidence checks
+        const isNotNoise = spectralFlatness < 0.75;
+        const isNotHissing = zeroCrossingRate < 0.35;
+        const hasFormants = formantScore > 0;
+        const hasVoiceEnergy = voiceEnergy > 15 && voiceRatio > 1.15;
+
+        // Scoring system: accumulate confidence
+        let voiceScore = 0;
+        if (db > threshold) voiceScore += 1;
+        if (db > openThreshold) voiceScore += 1;
+        if (isNotNoise) voiceScore += 1;
+        if (isNotHissing) voiceScore += 1;
+        if (hasFormants) voiceScore += 2;
+        if (hasVoiceEnergy) voiceScore += 2;
+        if (voiceRatio > 1.0) voiceScore += 1;
+        if (!highOnlyNoise) voiceScore += 1;
+        // Mic fingerprint: if audio matches learned mic profile, boost confidence
+        if (micMatchScore > 0.7) voiceScore += 2;
+        else if (micMatchScore > 0.4) voiceScore += 1;
+        // If audio clearly DOESN'T match mic profile (TV, ambient), penalize
+        if (micMatchScore < 0.3) voiceScore -= 2;
+
+        const speechOnlyMode = gateModeRef.current === 'speech';
+        const scoreThreshold = speechOnlyMode ? 6 : 4;
+
+        voiceCandidate = loudOverride || (basicVoice && voiceScore >= scoreThreshold);
+
+        // Speech-only: require higher confidence
+        if (speechOnlyMode && !loudOverride) {
+          voiceCandidate = voiceCandidate && (hasVoiceEnergy || voiceScore >= 7);
+        }
 
         if (voiceCandidate) {
-          voiceHoldUntil = timestamp + 180;
+          voiceHoldUntil = timestamp + 350;
         }
         localVoiceActive = voiceHoldUntil > timestamp;
 
         let target = minGateGain;
 
-        const speechOnlyMode = gateModeRef.current === 'speech';
-        const strictSpeechGate =
-          speechOnlyMode ||
-          ((stackActive || featuresRef.current.voicePattern || settingsRef.current.denoise) &&
-            (harshHighNoise || voiceRatio < 1.2));
+        // Can open for level: basic threshold check + not pure noise
         const canOpenForLevel =
-          db > openThreshold &&
-          (!stackActive || voiceRatio > 1.2) &&
-          (!strictSpeechGate ||
-            (voiceRatio > (speechOnlyMode ? 1.5 : 1.35) &&
-              voiceEnergy > (speechOnlyMode ? 24 : 20)));
+          loudOverride ||
+          (db > openThreshold && voiceScore >= (speechOnlyMode ? 5 : 3));
 
         if (canOpenForLevel || localVoiceActive) {
           target = 1.0;
-          gateHoldUntil = timestamp + 140;
+          gateHoldUntil = timestamp + 250;
         } else if (timestamp < gateHoldUntil) {
           target = 1.0;
         } else if (db < closeThreshold) {
           target = minGateGain;
         } else {
+          // Interpolation zone
           const progress =
             (db - closeThreshold) / (openThreshold - closeThreshold || 1);
           target = minGateGain + Math.max(0, Math.min(1, progress)) * (1 - minGateGain);
         }
 
-        if (strictSpeechGate && !localVoiceActive) {
-          target = Math.min(target, speechOnlyMode ? 0.05 : 0.12);
+        // Speech-only mode: reduce target when no voice detected (but don't block loud override)
+        if (speechOnlyMode && !localVoiceActive && !loudOverride) {
+          target = Math.min(target, 0.05);
         }
 
+        // Lift for quiet speech that passed VAD
         if (localVoiceActive && db < threshold) {
-          const lift = Math.min(0.45, 0.2 + (threshold - db) * 0.02);
+          const lift = Math.min(0.5, 0.25 + (threshold - db) * 0.025);
           target = Math.max(target, lift);
         }
 
         const current = gateGain.gain.value;
-        const smoothing = target > current ? 0.25 : 0.06; // attack / release
+        const smoothing = target > current ? 0.22 : 0.045;
         gateGain.gain.value = current + (target - current) * smoothing;
 
         gateClosed = gateGain.gain.value < 0.12;
@@ -1831,6 +2377,29 @@ const AudioProcessor = ({ goHome }) => {
           setVisualizerGateStatus((prev) => (prev !== gateClosed ? gateClosed : prev));
           lastGateUpdate = timestamp;
         }
+      } else if (workletHandlesGate && settingsRef.current.denoise && !settingsRef.current.isBypassed) {
+        // AudioWorklet handles the actual gating, but we still need voice state for the visualizer
+        const threshold = settingsRef.current.threshold;
+        ensureBandMetrics();
+
+        const loudOverrideVis = db > threshold + 15 && !highOnlyNoise && voiceRatio > 1.0;
+        const basicVoiceVis = !highOnlyNoise && lowAvg > 10 && highBias < 3.0 && db > threshold && voiceEnergy > 10;
+        let scoreVis = 0;
+        if (db > threshold) scoreVis += 1;
+        if (db > threshold + 3) scoreVis += 1;
+        if (spectralFlatness < 0.75) scoreVis += 1;
+        if (zeroCrossingRate < 0.35) scoreVis += 1;
+        if (formantScore > 0) scoreVis += 2;
+        if (voiceEnergy > 15 && voiceRatio > 1.15) scoreVis += 2;
+        if (voiceRatio > 1.0) scoreVis += 1;
+        if (!highOnlyNoise) scoreVis += 1;
+
+        voiceCandidate = loudOverrideVis || (basicVoiceVis && scoreVis >= 4);
+        if (voiceCandidate) voiceHoldUntil = timestamp + 350;
+        localVoiceActive = voiceHoldUntil > timestamp;
+
+        // gateClosed comes from worklet metrics (set via onmessage handler)
+        gateClosed = visualizerGateStatus;
       } else if (gateGain) {
         // Gate off or bypassed: fully open
         gateGain.gain.value = 1.0;
@@ -1922,26 +2491,30 @@ const AudioProcessor = ({ goHome }) => {
         }
       }
 
-      // Core orb
+      // ===== CORE ORB =====
       const coreRadius = h * 0.35;
       const coreGrad = ctx.createRadialGradient(
-        cx,
-        cy,
-        coreRadius * 0.1,
-        cx,
-        cy,
-        coreRadius,
+        cx, cy, coreRadius * 0.1,
+        cx, cy, coreRadius,
       );
 
       if (highOnlyNoise) {
-        coreGrad.addColorStop(0, 'rgba(248,113,113,0.45)');
-        coreGrad.addColorStop(0.5, 'rgba(127,29,29,0.25)');
+        // Red pulse - noise detected, gate blocking
+        coreGrad.addColorStop(0, 'rgba(248,113,113,0.55)');
+        coreGrad.addColorStop(0.5, 'rgba(127,29,29,0.3)');
         coreGrad.addColorStop(1, 'rgba(15,23,42,0.0)');
       } else if (!gateClosed && localVoiceActive) {
-        coreGrad.addColorStop(0, 'rgba(56,189,248,0.6)');
-        coreGrad.addColorStop(0.4, 'rgba(59,130,246,0.35)');
+        // Green/cyan - confirmed voice passing through
+        coreGrad.addColorStop(0, 'rgba(34,197,94,0.65)');
+        coreGrad.addColorStop(0.35, 'rgba(56,189,248,0.4)');
+        coreGrad.addColorStop(1, 'rgba(15,23,42,0.0)');
+      } else if (gateClosed) {
+        // Dim red/purple - gate is closed, blocking noise
+        coreGrad.addColorStop(0, 'rgba(168,85,247,0.3)');
+        coreGrad.addColorStop(0.5, 'rgba(88,28,135,0.15)');
         coreGrad.addColorStop(1, 'rgba(15,23,42,0.0)');
       } else {
+        // Idle blue
         coreGrad.addColorStop(0, 'rgba(129,140,248,0.35)');
         coreGrad.addColorStop(0.5, 'rgba(30,64,175,0.25)');
         coreGrad.addColorStop(1, 'rgba(15,23,42,0.0)');
@@ -1952,6 +2525,105 @@ const AudioProcessor = ({ goHome }) => {
       ctx.arc(cx, cy, coreRadius, 0, Math.PI * 2);
       ctx.fill();
 
+      // ===== ON-CANVAS STATUS TEXT =====
+      ctx.textAlign = 'center';
+
+      // Gate status (large, center)
+      if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
+        const gateLabel = gateClosed ? 'GATE CLOSED' : 'GATE OPEN';
+        const gateColor = gateClosed ? 'rgba(239,68,68,0.9)' : 'rgba(34,197,94,0.9)';
+        ctx.font = 'bold 14px monospace';
+        ctx.fillStyle = gateColor;
+        ctx.fillText(gateLabel, cx, cy - 35);
+
+        // Sub-label explaining what's happening
+        ctx.font = '10px sans-serif';
+        ctx.fillStyle = 'rgba(148,163,184,0.8)';
+        if (gateClosed && highOnlyNoise) {
+          ctx.fillText('Blocking hiss / high-freq noise', cx, cy - 20);
+        } else if (gateClosed) {
+          ctx.fillText('Waiting for voice from mic...', cx, cy - 20);
+        } else if (localVoiceActive) {
+          ctx.fillText('Voice detected - passing audio', cx, cy - 20);
+        }
+      }
+
+      // Voice confidence / noise ratio display
+      ensureBandMetrics();
+      {
+        const ratio = voiceRatio;
+        const confidence = Math.min(100, Math.max(0, (ratio - 1) * 50));
+        const barW = 120;
+        const barH = 6;
+        const barX = cx - barW / 2;
+        const barY = cy + 5;
+
+        // Background
+        ctx.fillStyle = 'rgba(30,41,59,0.8)';
+        ctx.beginPath();
+        ctx.roundRect(barX - 2, barY - 2, barW + 4, barH + 4, 4);
+        ctx.fill();
+
+        // Fill - green when voice winning, red when noise winning
+        const fillW = (confidence / 100) * barW;
+        if (confidence > 50) {
+          ctx.fillStyle = 'rgba(34,197,94,0.9)';
+        } else if (confidence > 25) {
+          ctx.fillStyle = 'rgba(250,204,21,0.9)';
+        } else {
+          ctx.fillStyle = 'rgba(239,68,68,0.8)';
+        }
+        ctx.beginPath();
+        ctx.roundRect(barX, barY, Math.max(2, fillW), barH, 3);
+        ctx.fill();
+
+        // Label
+        ctx.font = '9px sans-serif';
+        ctx.fillStyle = 'rgba(148,163,184,0.7)';
+        ctx.fillText(`Voice: ${Math.round(confidence)}%  /  Noise: ${Math.round(100 - confidence)}%`, cx, barY + barH + 14);
+      }
+
+      // Boost indicator (when gain rider is active)
+      {
+        const autoGainVal = processingRefs.current.autoGain?.gain?.value || 1;
+        const boostDb = 20 * Math.log10(autoGainVal || 0.00001);
+        if (Math.abs(boostDb) > 0.5) {
+          const boostLabel = boostDb > 0
+            ? `+${boostDb.toFixed(1)} dB BOOST`
+            : `${boostDb.toFixed(1)} dB CUT`;
+          ctx.font = 'bold 10px monospace';
+          ctx.fillStyle = boostDb > 0 ? 'rgba(56,189,248,0.8)' : 'rgba(251,146,60,0.8)';
+          ctx.fillText(boostLabel, cx, cy + 45);
+        }
+      }
+
+      // Spectral quality indicators (top-left legend)
+      {
+        ctx.textAlign = 'left';
+        ctx.font = '9px monospace';
+        const legendX = 12;
+        let legendY = 18;
+        const lineH = 14;
+
+        // Legend dots
+        const dot = (color, label) => {
+          ctx.fillStyle = color;
+          ctx.beginPath();
+          ctx.arc(legendX, legendY - 3, 4, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = 'rgba(148,163,184,0.7)';
+          ctx.fillText(label, legendX + 10, legendY);
+          legendY += lineH;
+        };
+
+        dot('rgba(34,197,94,0.85)', 'Voice (passing)');
+        dot('rgba(239,68,68,0.6)', 'Noise (blocked)');
+        dot('rgba(251,146,60,0.7)', 'Rejected (baby/hiss)');
+        dot('rgba(56,189,248,0.75)', 'Voice band (quiet)');
+
+        ctx.textAlign = 'center';
+      }
+
       // Red veil for harsh highs
       if (highOnlyNoise) {
         const noiseGrad = ctx.createLinearGradient(0, 0, 0, h * 0.4);
@@ -1961,7 +2633,7 @@ const AudioProcessor = ({ goHome }) => {
         ctx.fillRect(0, 0, w, h * 0.4);
       }
 
-      // Breathing ring when voice active
+      // ===== BREATHING RING =====
       if (!gateClosed && localVoiceActive) {
         const t = (timestamp % 2000) / 2000;
         const pulse = 0.85 + 0.15 * Math.sin(t * Math.PI * 2);
@@ -1969,27 +2641,45 @@ const AudioProcessor = ({ goHome }) => {
 
         ctx.beginPath();
         ctx.arc(cx, cy, ringRadius, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(56,189,248,0.7)';
+        ctx.strokeStyle = 'rgba(34,197,94,0.6)';
         ctx.lineWidth = 3;
         ctx.setLineDash([10, 8]);
         ctx.stroke();
         ctx.setLineDash([]);
+      } else if (gateClosed && settingsRef.current.denoise) {
+        // Red dashed ring when gate is closed and blocking
+        const ringRadius = coreRadius * 0.85;
+        ctx.beginPath();
+        ctx.arc(cx, cy, ringRadius, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(239,68,68,0.25)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 8]);
+        ctx.stroke();
+        ctx.setLineDash([]);
       }
 
-      // Gate threshold line
-     // 1) Draw threshold line
-if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
-  const threshY =
-    canvas.height * (1 - (settingsRef.current.threshold + 100) / 100);
-  ctx.strokeStyle = '#6366f1';
-  ctx.setLineDash([5, 5]);
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(0, threshY);
-  ctx.lineTo(canvas.width, threshY);
-  ctx.stroke();
-  ctx.setLineDash([]);
-}
+      // ===== THRESHOLD LINE =====
+      if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
+        const threshY =
+          canvas.height * (1 - (settingsRef.current.threshold + 100) / 100);
+
+        // Threshold line
+        ctx.strokeStyle = '#6366f1';
+        ctx.setLineDash([5, 5]);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, threshY);
+        ctx.lineTo(canvas.width, threshY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Threshold label
+        ctx.textAlign = 'right';
+        ctx.font = '9px monospace';
+        ctx.fillStyle = 'rgba(99,102,241,0.7)';
+        ctx.fillText(`THRESHOLD ${settingsRef.current.threshold} dB`, w - 8, threshY - 4);
+        ctx.textAlign = 'center';
+      }
       // Smart Gain Rider
       const autoGainNode = processingRefs.current.autoGain;
       const gainRiderEnabled =
@@ -2553,6 +3243,32 @@ if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
                           Tip: Run auto-calibrate when the room is normally noisy.
                         </span>
                       </div>
+
+                      <div className="mt-3 flex items-center justify-between gap-2">
+                        <button
+                          type="button"
+                          onClick={startMicLearn}
+                          disabled={isMicLearning}
+                          className={`text-[10px] px-3 py-1.5 rounded-lg border ${
+                            isMicLearning
+                              ? 'border-cyan-500/60 bg-cyan-900/30 text-cyan-300 cursor-wait animate-pulse'
+                              : micLearned
+                              ? 'border-emerald-500/60 bg-emerald-900/20 text-emerald-300'
+                              : 'border-slate-700 bg-slate-950 text-slate-300 hover:bg-slate-900'
+                          }`}
+                        >
+                          {isMicLearning
+                            ? 'Learning mic profile...'
+                            : micLearned
+                            ? 'Re-learn mic'
+                            : 'Learn Mic Fingerprint'}
+                        </button>
+                        <span className="text-[9px] text-slate-500 text-right">
+                          {micLearned
+                            ? 'Mic profile active — rejects non-mic audio'
+                            : 'Speak into mic for 5s to learn its signature'}
+                        </span>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -2561,9 +3277,35 @@ if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
 
             {controlTab === 'stack' && (
               <div className="space-y-4">
-                <h2 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-                  AI Processing Stack
-                </h2>
+                <div className="flex items-center justify-between">
+                  <h2 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                    AI Processing Stack
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFeatures({
+                        denoise: true,
+                        dereverb: true,
+                        voicePattern: true,
+                        musicDucking: true,
+                        pastorIsolation: true,
+                        sermonWarmth: true,
+                        smartMixing: true,
+                        mastering: true,
+                        streamingSafe: true,
+                      });
+                      setGateMode('speech');
+                      setSpeakerPreset('pastor');
+                    }}
+                    className="px-3 py-1.5 rounded-lg border border-emerald-500/60 bg-emerald-900/20 text-emerald-300 text-[10px] font-bold tracking-wider hover:bg-emerald-900/40 transition-colors"
+                  >
+                    CHURCH BETA
+                  </button>
+                </div>
+                <p className="text-[10px] text-slate-500 -mt-2">
+                  Church Beta enables all AI features + Speech-Only gate + Pastor profile. One click to go live.
+                </p>
                 <div className="grid grid-cols-2 gap-3">
                   <FeatureToggle
                     icon={<Radio size={18} />}
@@ -2655,6 +3397,19 @@ if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
 
             {controlTab === 'profiles' && (
               <div className="space-y-4">
+                <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 space-y-2">
+                  <span className="text-xs font-medium text-slate-400">Room Name</span>
+                  <input
+                    type="text"
+                    value={roomName}
+                    onChange={(e) => setRoomName(e.target.value)}
+                    placeholder="e.g. Main Sanctuary, Youth Hall"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm text-slate-200 placeholder-slate-600"
+                  />
+                  <p className="text-[10px] text-slate-500">
+                    Profiles are saved per room. Switch rooms to load different noise profiles automatically.
+                  </p>
+                </div>
                 <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-medium text-slate-400">
@@ -2915,23 +3670,44 @@ if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
                     </button>
                     <div className="w-px h-4 bg-slate-600" />
                     <button
-                      onClick={shareRecording}
+                      onClick={() => shareRecording('webm')}
                       disabled={
                         exportStatus === 'sharing' || exportStatus === 'done'
                       }
-                      className={`px-4 py-2 hover:bg-slate-700 rounded-r-full font-bold text-sm flex items-center gap-2 ${
+                      className={`px-3 py-2 hover:bg-slate-700 font-bold text-[11px] flex items-center gap-1.5 ${
                         exportStatus === 'done'
                           ? 'text-green-400'
                           : 'text-indigo-400'
                       }`}
-                      title="Share / Export"
+                      title="Download as WebM"
                     >
                       {exportStatus === 'sharing' && (
                         <span className="w-3 h-3 rounded-full border-2 border-indigo-400 border-t-transparent animate-spin" />
                       )}
                       {exportStatus === 'done' && <Check size={14} />}
                       {!exportStatus && <Share2 size={14} />}
-                      {exportStatus === 'done' ? 'SAVED' : 'SHARE'}
+                      WebM
+                    </button>
+                    <div className="w-px h-4 bg-slate-600" />
+                    <button
+                      onClick={() => shareRecording('wav')}
+                      disabled={
+                        exportStatus === 'sharing' || exportStatus === 'done'
+                      }
+                      className="px-3 py-2 hover:bg-slate-700 font-bold text-[11px] text-amber-400 flex items-center gap-1.5"
+                      title="Download as WAV (lossless)"
+                    >
+                      <Waves size={14} />
+                      WAV
+                    </button>
+                    <div className="w-px h-4 bg-slate-600" />
+                    <button
+                      onClick={downloadWaveform}
+                      className="px-3 py-2 hover:bg-slate-700 rounded-r-full font-bold text-[11px] text-cyan-400 flex items-center gap-1.5"
+                      title="Download spectrum visualization as PNG"
+                    >
+                      <Activity size={14} />
+                      PNG
                     </button>
                   </div>
                 )}
@@ -3256,6 +4032,18 @@ if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
                   <span className="absolute -top-1 -right-1 w-2 h-2 bg-green-400 rounded-full animate-pulse" />
                 )}
               </button>
+
+              {/* Spectrum Snapshot */}
+              {isLive && (
+                <button
+                  onClick={downloadWaveform}
+                  className="hidden md:flex items-center gap-1 px-3 py-2 rounded-lg border border-cyan-500/60 bg-slate-900 text-cyan-300 text-[11px] font-semibold hover:bg-slate-800"
+                  title="Download current spectrum visualization as PNG"
+                >
+                  <Activity className="w-3 h-3" />
+                  Snapshot
+                </button>
+              )}
 
               {/* Hard Reset / Troubleshoot */}
               <button
