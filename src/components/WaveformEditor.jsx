@@ -10,16 +10,16 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 const COLORS = {
   bg: '#050A1C',
   panel: '#0D1428',
-  wave: '#4F7BFF',
+  wave: '#F59E0B',
   waveActive: '#00E676',
-  selection: 'rgba(79, 123, 255, 0.25)',
-  selectionBorder: '#4F7BFF',
+  selection: 'rgba(245, 158, 11, 0.25)',
+  selectionBorder: '#F59E0B',
   playhead: '#FF5252',
   grid: 'rgba(255,255,255,0.06)',
   text: '#94a3b8',
   textBright: '#e2e8f0',
   noiseProfile: '#FF5252',
-  fadeOverlay: 'rgba(79, 123, 255, 0.15)',
+  fadeOverlay: 'rgba(245, 158, 11, 0.15)',
 };
 
 // Resample AudioBuffer channel data to fit pixel width
@@ -874,10 +874,10 @@ export default function WaveformEditor({ audioContext, onExport }) {
         <div className="w-px h-5 bg-slate-700 mx-1" />
 
         {/* Effects */}
-        <button onClick={fadeIn} disabled={!audioBuffer} className="px-2 py-1 rounded bg-indigo-900/40 hover:bg-indigo-800/50 text-indigo-300 disabled:opacity-30">Fade In</button>
-        <button onClick={fadeOut} disabled={!audioBuffer} className="px-2 py-1 rounded bg-indigo-900/40 hover:bg-indigo-800/50 text-indigo-300 disabled:opacity-30">Fade Out</button>
-        <button onClick={normalize} disabled={!audioBuffer} className="px-2 py-1 rounded bg-indigo-900/40 hover:bg-indigo-800/50 text-indigo-300 disabled:opacity-30">Normalize</button>
-        <button onClick={trimSilence} disabled={!audioBuffer} className="px-2 py-1 rounded bg-indigo-900/40 hover:bg-indigo-800/50 text-indigo-300 disabled:opacity-30">Trim Silence</button>
+        <button onClick={fadeIn} disabled={!audioBuffer} className="px-2 py-1 rounded bg-amber-900/40 hover:bg-amber-800/50 text-amber-300 disabled:opacity-30">Fade In</button>
+        <button onClick={fadeOut} disabled={!audioBuffer} className="px-2 py-1 rounded bg-amber-900/40 hover:bg-amber-800/50 text-amber-300 disabled:opacity-30">Fade Out</button>
+        <button onClick={normalize} disabled={!audioBuffer} className="px-2 py-1 rounded bg-amber-900/40 hover:bg-amber-800/50 text-amber-300 disabled:opacity-30">Normalize</button>
+        <button onClick={trimSilence} disabled={!audioBuffer} className="px-2 py-1 rounded bg-amber-900/40 hover:bg-amber-800/50 text-amber-300 disabled:opacity-30">Trim Silence</button>
         <div className="w-px h-5 bg-slate-700 mx-1" />
 
         {/* Noise Removal */}
@@ -915,7 +915,7 @@ export default function WaveformEditor({ audioContext, onExport }) {
       {tracks.length > 1 && (
         <div className="flex gap-1 px-3 py-1 bg-[#0A0F20] border-b border-slate-800 text-[10px] overflow-x-auto">
           {tracks.map((t, idx) => (
-            <div key={idx} className={`flex items-center gap-1 px-2 py-0.5 rounded ${idx === activeTrackIdx ? 'bg-indigo-900/40 border border-indigo-500/50' : 'bg-slate-800/50'}`}>
+            <div key={idx} className={`flex items-center gap-1 px-2 py-0.5 rounded ${idx === activeTrackIdx ? 'bg-amber-900/40 border border-amber-500/50' : 'bg-slate-800/50'}`}>
               <button onClick={() => { setActiveTrackIdx(idx); setAudioBuffer(t.buffer); }} className="font-semibold truncate max-w-[100px]">{t.name}</button>
               <button onClick={() => setTracks(prev => prev.map((tr, i) => i === idx ? { ...tr, muted: !tr.muted } : tr))} className={`px-1 rounded ${t.muted ? 'text-red-400' : 'text-slate-500'}`}>M</button>
               <button onClick={() => setTracks(prev => prev.map((tr, i) => i === idx ? { ...tr, solo: !tr.solo } : tr))} className={`px-1 rounded ${t.solo ? 'text-amber-400' : 'text-slate-500'}`}>S</button>
@@ -943,7 +943,7 @@ export default function WaveformEditor({ audioContext, onExport }) {
         {audioBuffer && <span>Duration: {audioBuffer.duration.toFixed(2)}s</span>}
         {audioBuffer && <span>SR: {audioBuffer.sampleRate}Hz</span>}
         {selStart !== null && selEnd !== null && Math.abs(selEnd - selStart) > 0.001 && (
-          <span className="text-indigo-400">Sel: {Math.min(selStart, selEnd).toFixed(2)}s → {Math.max(selStart, selEnd).toFixed(2)}s ({Math.abs(selEnd - selStart).toFixed(2)}s)</span>
+          <span className="text-amber-400">Sel: {Math.min(selStart, selEnd).toFixed(2)}s → {Math.max(selStart, selEnd).toFixed(2)}s ({Math.abs(selEnd - selStart).toFixed(2)}s)</span>
         )}
         {noiseProfile && <span className="text-amber-400">Noise profile captured</span>}
         <span className="ml-auto">Undo: {undoStack.length} | Redo: {redoStack.length}</span>

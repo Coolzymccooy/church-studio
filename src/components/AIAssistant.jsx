@@ -159,8 +159,8 @@ What should I adjust for the best church broadcast quality?`;
     >
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2.5 border-b border-slate-700/60 shrink-0" style={{ background: '#030710' }}>
-        <div className="w-6 h-6 rounded flex items-center justify-center" style={{ background: 'rgba(79,123,255,0.2)' }}>
-          <Sparkles size={12} className="text-[#4F7BFF]" />
+        <div className="w-6 h-6 rounded flex items-center justify-center" style={{ background: 'rgba(245,158,11,0.2)' }}>
+          <Sparkles size={12} className="text-[#F59E0B]" />
         </div>
         <div className="flex-1">
           <p className="text-[11px] font-bold text-slate-100 tracking-wide">TIWATON AI</p>
@@ -177,7 +177,7 @@ What should I adjust for the best church broadcast quality?`;
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={`flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-semibold transition-colors ${
-                activeTab === tab.id ? 'bg-[#4F7BFF]/20 text-[#4F7BFF]' : 'text-slate-500 hover:text-slate-300'
+                activeTab === tab.id ? 'bg-[#F59E0B]/20 text-[#F59E0B]' : 'text-slate-500 hover:text-slate-300'
               }`}
             >
               {tab.icon}
@@ -200,12 +200,12 @@ What should I adjust for the best church broadcast quality?`;
               placeholder="sk-ant-..."
               value={apiKey}
               onChange={e => setApiKey(e.target.value)}
-              className="flex-1 px-2 py-1 rounded text-[9px] bg-black/40 border border-slate-700 text-slate-300 placeholder-slate-600 outline-none focus:border-[#4F7BFF]/50"
+              className="flex-1 px-2 py-1 rounded text-[9px] bg-black/40 border border-slate-700 text-slate-300 placeholder-slate-600 outline-none focus:border-[#F59E0B]/50"
             />
             <button
               onClick={() => setShowKeyInput(false)}
               className="px-2 py-1 rounded text-[9px] font-bold text-white"
-              style={{ background: '#4F7BFF' }}
+              style={{ background: '#F59E0B' }}
             >
               Save
             </button>
@@ -222,7 +222,7 @@ What should I adjust for the best church broadcast quality?`;
             <button
               key={key}
               onClick={() => { setActiveTab('chat'); sendMessage(prompt); }}
-              className="w-full text-left px-3 py-2.5 rounded-lg border border-slate-700 hover:border-[#4F7BFF]/40 hover:bg-[#4F7BFF]/5 transition-colors"
+              className="w-full text-left px-3 py-2.5 rounded-lg border border-slate-700 hover:border-[#F59E0B]/40 hover:bg-[#F59E0B]/5 transition-colors"
             >
               <p className="text-[10px] font-semibold text-slate-200 mb-0.5">{label}</p>
               <p className="text-[9px] text-slate-500 leading-relaxed">{prompt.slice(0, 80)}…</p>
@@ -231,7 +231,7 @@ What should I adjust for the best church broadcast quality?`;
           <div className="mt-4 pt-3 border-t border-slate-800">
             <button
               onClick={runAudioAnalysis}
-              className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-[#4F7BFF]/30 text-[10px] font-bold text-[#4F7BFF] hover:bg-[#4F7BFF]/10 transition-colors"
+              className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-[#F59E0B]/30 text-[10px] font-bold text-[#F59E0B] hover:bg-[#F59E0B]/10 transition-colors"
             >
               <Cpu size={10} />
               Analyze Current Audio State
@@ -248,7 +248,7 @@ What should I adjust for the best church broadcast quality?`;
           <div className="space-y-1.5">
             {[
               { label: 'Engine', value: isLive ? 'LIVE' : 'Stopped', color: isLive ? '#00E676' : '#FF5252' },
-              { label: 'Preset', value: currentPreset || 'balanced', color: '#4F7BFF' },
+              { label: 'Preset', value: currentPreset || 'balanced', color: '#F59E0B' },
               { label: 'Active Features', value: Object.entries(features || {}).filter(([,v]) => v).length + ' enabled', color: '#94a3b8' },
               spectrumData && { label: 'Peak Level', value: spectrumData.peak?.toFixed(1) + ' dBFS', color: '#94a3b8' },
               spectrumData && { label: 'Voice Activity', value: spectrumData.voicePercent?.toFixed(0) + '%', color: '#94a3b8' },
@@ -274,7 +274,7 @@ What should I adjust for the best church broadcast quality?`;
 
           <button
             onClick={runAudioAnalysis}
-            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-[#4F7BFF]/30 text-[10px] font-bold text-[#4F7BFF] hover:bg-[#4F7BFF]/10 transition-colors"
+            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-[#F59E0B]/30 text-[10px] font-bold text-[#F59E0B] hover:bg-[#F59E0B]/10 transition-colors"
           >
             <Sparkles size={11} />
             Ask Claude to Analyze &amp; Optimize
@@ -290,8 +290,8 @@ What should I adjust for the best church broadcast quality?`;
             {messages.map((msg, i) => (
               <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 {msg.role === 'assistant' && (
-                  <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 mr-2 mt-0.5" style={{ background: 'rgba(79,123,255,0.2)' }}>
-                    <Sparkles size={9} className="text-[#4F7BFF]" />
+                  <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 mr-2 mt-0.5" style={{ background: 'rgba(245,158,11,0.2)' }}>
+                    <Sparkles size={9} className="text-[#F59E0B]" />
                   </div>
                 )}
                 <div
@@ -302,7 +302,7 @@ What should I adjust for the best church broadcast quality?`;
                       ? 'border border-red-500/30 text-red-400 rounded-bl-none'
                       : 'text-slate-300 border border-slate-700/60 rounded-bl-none'
                   }`}
-                  style={msg.role === 'user' ? { background: '#4F7BFF' } : { background: 'rgba(13,20,40,0.8)' }}
+                  style={msg.role === 'user' ? { background: '#F59E0B' } : { background: 'rgba(13,20,40,0.8)' }}
                 >
                   <p className="whitespace-pre-wrap">{msg.content}</p>
                 </div>
@@ -310,15 +310,15 @@ What should I adjust for the best church broadcast quality?`;
             ))}
             {isLoading && (
               <div className="flex justify-start">
-                <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 mr-2" style={{ background: 'rgba(79,123,255,0.2)' }}>
-                  <Sparkles size={9} className="text-[#4F7BFF]" />
+                <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 mr-2" style={{ background: 'rgba(245,158,11,0.2)' }}>
+                  <Sparkles size={9} className="text-[#F59E0B]" />
                 </div>
                 <div className="px-3 py-2 rounded-lg border border-slate-700/60" style={{ background: 'rgba(13,20,40,0.8)' }}>
                   <div className="flex gap-1">
                     {[0,1,2].map(i => (
                       <div
                         key={i}
-                        className="w-1.5 h-1.5 rounded-full bg-[#4F7BFF] animate-bounce"
+                        className="w-1.5 h-1.5 rounded-full bg-[#F59E0B] animate-bounce"
                         style={{ animationDelay: `${i * 0.15}s` }}
                       />
                     ))}
@@ -343,13 +343,13 @@ What should I adjust for the best church broadcast quality?`;
                 }}
                 placeholder="Ask about audio settings, presets, or church tech…"
                 rows={2}
-                className="flex-1 px-2.5 py-1.5 rounded-lg text-[10px] bg-black/40 border border-slate-700 text-slate-300 placeholder-slate-600 outline-none focus:border-[#4F7BFF]/50 resize-none leading-relaxed"
+                className="flex-1 px-2.5 py-1.5 rounded-lg text-[10px] bg-black/40 border border-slate-700 text-slate-300 placeholder-slate-600 outline-none focus:border-[#F59E0B]/50 resize-none leading-relaxed"
               />
               <button
                 onClick={() => sendMessage(input)}
                 disabled={isLoading || !input.trim()}
                 className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors disabled:opacity-40"
-                style={{ background: '#4F7BFF' }}
+                style={{ background: '#F59E0B' }}
               >
                 <Send size={12} className="text-white" />
               </button>

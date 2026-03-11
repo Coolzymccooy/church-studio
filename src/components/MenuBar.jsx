@@ -24,7 +24,7 @@ function DropdownMenu({ label, items, isOpen, onToggle, onClose }) {
         onClick={onToggle}
         className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors ${
           isOpen
-            ? 'bg-[#4F7BFF]/20 text-white'
+            ? 'bg-[#F59E0B]/20 text-white'
             : 'text-slate-400 hover:text-white hover:bg-white/5'
         }`}
       >
@@ -53,7 +53,7 @@ function DropdownMenu({ label, items, isOpen, onToggle, onClose }) {
                 className={`w-full flex items-center justify-between px-4 py-1.5 text-[11px] transition-colors text-left ${
                   item.disabled
                     ? 'text-slate-600 cursor-not-allowed'
-                    : 'text-slate-300 hover:bg-[#4F7BFF]/15 hover:text-white cursor-pointer'
+                    : 'text-slate-300 hover:bg-[#F59E0B]/15 hover:text-white cursor-pointer'
                 }`}
               >
                 <span className="flex items-center gap-2">
@@ -194,11 +194,11 @@ export default function MenuBar({
     >
       {/* Logo */}
       <div
-        className="flex items-center gap-2 px-2 mr-3 cursor-pointer group"
-        onClick={onGoHome}
-        title="Back to Home"
+        className={`flex items-center gap-2 px-2 mr-3 group ${onGoHome ? 'cursor-pointer' : 'cursor-default'}`}
+        onClick={onGoHome || undefined}
+        title={onGoHome ? 'Back to Home' : 'TIWATON AI Studio'}
       >
-        <div className="w-5 h-5 bg-indigo-600 rounded flex items-center justify-center shadow-[0_0_8px_rgba(79,70,229,0.5)] group-hover:scale-105 transition-transform">
+        <div className="w-5 h-5 bg-amber-600 rounded flex items-center justify-center shadow-[0_0_8px_rgba(245,158,11,0.5)] group-hover:scale-105 transition-transform">
           <Waves size={11} className="text-white" />
         </div>
         <span className="text-slate-200 font-bold text-[11px] tracking-[0.2em]">TIWATON</span>
@@ -228,7 +228,7 @@ export default function MenuBar({
           <button
             onClick={() => onHandleModeSwitch?.('live')}
             className={`px-2.5 py-0.5 rounded text-[10px] font-semibold transition-all ${
-              mode === 'live' ? 'bg-[#4F7BFF] text-white' : 'text-slate-500 hover:text-white'
+              mode === 'live' ? 'bg-[#F59E0B] text-white' : 'text-slate-500 hover:text-white'
             }`}
           >
             Live
@@ -236,7 +236,7 @@ export default function MenuBar({
           <button
             onClick={() => onHandleModeSwitch?.('file')}
             className={`px-2.5 py-0.5 rounded text-[10px] font-semibold transition-all ${
-              mode === 'file' ? 'bg-[#4F7BFF] text-white' : 'text-slate-500 hover:text-white'
+              mode === 'file' ? 'bg-[#F59E0B] text-white' : 'text-slate-500 hover:text-white'
             }`}
           >
             File

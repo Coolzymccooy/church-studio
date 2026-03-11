@@ -48,6 +48,8 @@ import {
 const TiwatonApp = () => {
   const [view, setView] = useState(() => {
     if (typeof window === 'undefined') return 'landing';
+    // Skip landing page in Electron desktop app — go straight to studio
+    if (window.electronAPI?.isElectron) return 'studio';
     const savedView = window.localStorage.getItem('tiwaton:view');
     return savedView || 'landing';
   });
@@ -63,7 +65,7 @@ const TiwatonApp = () => {
 
   return (
     <>
-      <AudioProcessor goHome={() => setView('landing')} />
+      <AudioProcessor goHome={window.electronAPI?.isElectron ? null : () => setView('landing')} />
       <HelpCorner />
     </>
   );
@@ -72,9 +74,9 @@ const TiwatonApp = () => {
 // --- LANDING PAGE ---
 const LandingPage = ({ onEnter }) => {
   return (
-    <div className="min-h-[100dvh] bg-slate-950 text-white relative overflow-hidden font-sans selection:bg-indigo-500 selection:text-white">
+    <div className="min-h-[100dvh] bg-slate-950 text-white relative overflow-hidden font-sans selection:bg-amber-500 selection:text-white">
       <div className="absolute inset-0 z-0 opacity-20 pointer-events-none">
-        <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] bg-indigo-600 rounded-full blur-[120px] animate-pulse" />
+        <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] bg-amber-600 rounded-full blur-[120px] animate-pulse" />
         <div
           className="absolute bottom-[-25%] right-[-15%] w-[520px] h-[520px] bg-purple-600 rounded-full blur-[140px]"
           style={{ animationDuration: '4s' }}
@@ -84,7 +86,7 @@ const LandingPage = ({ onEnter }) => {
       <header className="relative z-10">
         <div className="mx-auto max-w-6xl px-6 pt-10 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-tr from-indigo-500 to-purple-500 rounded-xl flex items-center justify-center shadow-[0_0_24px_rgba(99,102,241,0.6)]">
+            <div className="w-10 h-10 bg-gradient-to-tr from-amber-500 to-yellow-600 rounded-xl flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.6)]">
               <Waves size={22} className="text-white" />
             </div>
             <div className="text-sm uppercase tracking-[0.3em] text-slate-400">
@@ -93,7 +95,7 @@ const LandingPage = ({ onEnter }) => {
           </div>
           <button
             onClick={onEnter}
-            className="hidden md:inline-flex items-center gap-2 px-5 py-2 text-sm font-semibold bg-white text-slate-950 rounded-full hover:bg-indigo-50 transition-colors"
+            className="hidden md:inline-flex items-center gap-2 px-5 py-2 text-sm font-semibold bg-white text-slate-950 rounded-full hover:bg-amber-50 transition-colors"
           >
             Enter Studio <ArrowRight size={16} />
           </button>
@@ -103,10 +105,10 @@ const LandingPage = ({ onEnter }) => {
       <main className="relative z-10">
         <section className="mx-auto max-w-6xl px-6 pt-14 pb-16 grid lg:grid-cols-[1.1fr_0.9fr] gap-12 items-center">
           <div className="text-left">
-            <p className="text-sm uppercase tracking-[0.4em] text-indigo-300 mb-4">
+            <p className="text-sm uppercase tracking-[0.4em] text-amber-300 mb-4">
               Human-first audio automation
             </p>
-            <h1 className="text-5xl md:text-7xl font-black tracking-tight leading-[1.05] mb-6 bg-clip-text text-transparent bg-gradient-to-r from-white via-indigo-100 to-slate-400">
+            <h1 className="text-5xl md:text-7xl font-black tracking-tight leading-[1.05] mb-6 bg-clip-text text-transparent bg-gradient-to-r from-white via-amber-50 to-slate-400">
               The AI sound engineer that never misses a word.
             </h1>
             <p className="text-lg md:text-xl text-slate-300 leading-relaxed max-w-2xl mb-8">
@@ -120,12 +122,12 @@ const LandingPage = ({ onEnter }) => {
                 onClick={onEnter}
                 className="group relative px-8 py-4 bg-white text-slate-950 font-bold text-lg rounded-full overflow-hidden hover:scale-[1.02] transition-transform duration-300 shadow-[0_0_30px_rgba(255,255,255,0.25)]"
               >
-                <div className="absolute inset-0 bg-gradient-to-r from-indigo-400 to-purple-400 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                <div className="absolute inset-0 bg-gradient-to-r from-amber-400 to-yellow-500 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                 <span className="relative z-10 flex items-center gap-3 group-hover:text-white transition-colors">
                   Enter Studio <ArrowRight size={20} />
                 </span>
               </button>
-              <button className="px-8 py-4 rounded-full border border-slate-700 text-slate-200 hover:border-indigo-400 hover:text-white transition-colors">
+              <button className="px-8 py-4 rounded-full border border-slate-700 text-slate-200 hover:border-amber-400 hover:text-white transition-colors">
                 Watch how it works
               </button>
             </div>
@@ -192,7 +194,7 @@ const LandingPage = ({ onEnter }) => {
                   key={item.title}
                   className="flex items-start gap-4 p-4 rounded-2xl bg-slate-950/60 border border-slate-800/80"
                 >
-                  <div className="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-200 flex items-center justify-center">
+                  <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-200 flex items-center justify-center">
                     {item.icon}
                   </div>
                   <div>
@@ -245,7 +247,7 @@ const LandingPage = ({ onEnter }) => {
           <div className="rounded-3xl border border-slate-800 bg-gradient-to-r from-slate-900/80 via-slate-900/40 to-slate-900/80 p-10">
             <div className="grid lg:grid-cols-[1.2fr_0.8fr] gap-10 items-center">
               <div>
-                <p className="text-sm uppercase tracking-[0.3em] text-indigo-300 mb-3">
+                <p className="text-sm uppercase tracking-[0.3em] text-amber-300 mb-3">
                   How it works
                 </p>
                 <h2 className="text-3xl md:text-4xl font-semibold text-white mb-4">
@@ -259,15 +261,15 @@ const LandingPage = ({ onEnter }) => {
                 </p>
                 <div className="flex flex-wrap gap-6 text-sm text-slate-300">
                   <span className="flex items-center gap-2">
-                    <Zap size={16} className="text-indigo-300" />
+                    <Zap size={16} className="text-amber-300" />
                     Instant voice detection
                   </span>
                   <span className="flex items-center gap-2">
-                    <Volume2 size={16} className="text-indigo-300" />
+                    <Volume2 size={16} className="text-amber-300" />
                     Adaptive leveling
                   </span>
                   <span className="flex items-center gap-2">
-                    <Radio size={16} className="text-indigo-300" />
+                    <Radio size={16} className="text-amber-300" />
                     Stream-ready output
                   </span>
                 </div>
@@ -283,7 +285,7 @@ const LandingPage = ({ onEnter }) => {
                     key={step}
                     className="flex items-center gap-4 p-4 rounded-2xl bg-slate-950/60 border border-slate-800"
                   >
-                    <div className="w-10 h-10 rounded-full bg-indigo-500/20 text-indigo-200 flex items-center justify-center font-semibold">
+                    <div className="w-10 h-10 rounded-full bg-amber-500/20 text-amber-200 flex items-center justify-center font-semibold">
                       {index + 1}
                     </div>
                     <p className="text-sm text-slate-300">{step}</p>
@@ -307,7 +309,7 @@ const LandingPage = ({ onEnter }) => {
             </div>
             <button
               onClick={onEnter}
-              className="px-8 py-4 rounded-full bg-indigo-500 hover:bg-indigo-400 text-white font-semibold shadow-[0_0_30px_rgba(99,102,241,0.4)]"
+              className="px-8 py-4 rounded-full bg-amber-500 hover:bg-amber-400 text-white font-semibold shadow-[0_0_15px_rgba(245,158,11,0.4)]"
             >
               Launch Studio
             </button>
@@ -3013,8 +3015,8 @@ const AudioProcessor = ({ goHome }) => {
         <span className="text-slate-600">BUFFER: <span className="text-slate-300">{audioStats.bufferSize || '128'}</span></span>
         <span className="text-slate-600">LATENCY: <span className="text-slate-300">{audioStats.sampleRate > 0 ? ((audioStats.bufferSize || 128) / audioStats.sampleRate * 1000).toFixed(1)+'ms' : '--'}</span></span>
         <div className="h-3 w-px bg-slate-800"/>
-        <span className={features.denoise && isLive ? 'text-[#4F7BFF]' : 'text-slate-700'}>HYPERGATE:{features.denoise ? 'ON' : 'OFF'}</span>
-        <span className={features.pastorIsolation && isLive ? 'text-[#4F7BFF]' : 'text-slate-700'}>ISOLATION:{features.pastorIsolation ? 'ON' : 'OFF'}</span>
+        <span className={features.denoise && isLive ? 'text-[#F59E0B]' : 'text-slate-700'}>HYPERGATE:{features.denoise ? 'ON' : 'OFF'}</span>
+        <span className={features.pastorIsolation && isLive ? 'text-[#F59E0B]' : 'text-slate-700'}>ISOLATION:{features.pastorIsolation ? 'ON' : 'OFF'}</span>
         <span className={features.mastering && isLive ? 'text-[#00E676]' : 'text-slate-700'}>POLISH:{features.mastering ? 'ON' : 'OFF'}</span>
         <div className="h-3 w-px bg-slate-800 ml-auto"/>
         <span className="text-slate-600 ml-0">VOICE: <span className={voiceActive ? 'text-[#00E676] font-bold' : 'text-slate-600'}>{voiceActive ? '92%' : '0%'}</span></span>
@@ -3028,7 +3030,7 @@ const AudioProcessor = ({ goHome }) => {
           <div className="bg-slate-900 w-full max-w-lg rounded-2xl border border-slate-700 shadow-2xl p-6 space-y-6">
             <div className="flex justify-between items-center border-b border-slate-800 pb-4">
               <h2 className="text-xl font-bold flex items-center gap-2">
-                <Settings size={20} className="text-indigo-400" />
+                <Settings size={20} className="text-amber-400" />
                 Device Settings
               </h2>
               <div className="flex gap-2">
@@ -3141,7 +3143,7 @@ const AudioProcessor = ({ goHome }) => {
                   className={`text-lg font-mono flex items-center gap-2 ${
                     audioStats.sampleRate > 0 && audioStats.sampleRate < 44100
                       ? 'text-amber-500'
-                      : 'text-indigo-400'
+                      : 'text-amber-400'
                   }`}
                 >
                   {audioStats.sampleRate > 0
@@ -3155,7 +3157,7 @@ const AudioProcessor = ({ goHome }) => {
               </div>
               <div className="bg-slate-800 p-4 rounded-xl border border-slate-700">
                 <div className="text-xs font-bold mb-1">BUFFER SIZE</div>
-                <div className="text-lg font-mono text-indigo-400">
+                <div className="text-lg font-mono text-amber-400">
                   {audioStats.bufferSize || '--'} smp
                 </div>
               </div>
@@ -3175,16 +3177,16 @@ const AudioProcessor = ({ goHome }) => {
           <div className="px-3 py-2 border-b border-slate-800 flex items-center justify-between shrink-0">
             <span className="text-[9px] font-bold tracking-[0.2em] text-slate-500 uppercase">Input Rack</span>
             <div className="flex rounded p-0.5 border border-slate-800 gap-0.5" style={{background:'#050A1C'}}>
-              <button onClick={() => handleModeSwitch('live')} className={`px-2 py-0.5 rounded text-[9px] font-bold transition-all ${mode === 'live' ? 'bg-[#4F7BFF] text-white' : 'text-slate-500 hover:text-white'}`}>Live</button>
-              <button onClick={() => handleModeSwitch('file')} className={`px-2 py-0.5 rounded text-[9px] font-bold transition-all ${mode === 'file' ? 'bg-[#4F7BFF] text-white' : 'text-slate-500 hover:text-white'}`}>File</button>
+              <button onClick={() => handleModeSwitch('live')} className={`px-2 py-0.5 rounded text-[9px] font-bold transition-all ${mode === 'live' ? 'bg-[#F59E0B] text-white' : 'text-slate-500 hover:text-white'}`}>Live</button>
+              <button onClick={() => handleModeSwitch('file')} className={`px-2 py-0.5 rounded text-[9px] font-bold transition-all ${mode === 'file' ? 'bg-[#F59E0B] text-white' : 'text-slate-500 hover:text-white'}`}>File</button>
             </div>
           </div>
           {/* Tab nav */}
           <div className="grid grid-cols-4 gap-0.5 p-2 border-b border-slate-800 shrink-0">
             {[{id:'core',label:'Core'},{id:'stack',label:'AI'},{id:'profiles',label:'Profiles'},{id:'session',label:'Session'}].map(tab => (
               <button key={tab.id} onClick={() => setControlTab(tab.id)}
-                className={`py-1.5 rounded text-[9px] font-bold uppercase tracking-wide transition-colors ${controlTab === tab.id ? 'text-[#4F7BFF] border border-[#4F7BFF]/40' : 'text-slate-500 hover:text-slate-300 border border-transparent'}`}
-                style={controlTab === tab.id ? {background:'rgba(79,123,255,0.12)'} : {}}>
+                className={`py-1.5 rounded text-[9px] font-bold uppercase tracking-wide transition-colors ${controlTab === tab.id ? 'text-[#F59E0B] border border-[#F59E0B]/40' : 'text-slate-500 hover:text-slate-300 border border-transparent'}`}
+                style={controlTab === tab.id ? {background:'rgba(245,158,11,0.12)'} : {}}>
                 {tab.label}
               </button>
             ))}
@@ -3204,10 +3206,10 @@ const AudioProcessor = ({ goHome }) => {
                   <div className="p-3 space-y-2">
                     <div className="flex justify-between items-center">
                       <span className="text-[10px] font-medium text-slate-300">Level</span>
-                      <span className="text-[10px] text-[#4F7BFF] font-mono">{(Math.log10(inputGainValue) * 20).toFixed(1)} dB</span>
+                      <span className="text-[10px] text-[#F59E0B] font-mono">{(Math.log10(inputGainValue) * 20).toFixed(1)} dB</span>
                     </div>
                     <input type="range" min="0" max="4" step="0.1" value={inputGainValue} onChange={handleInputGainChange}
-                      className="w-full h-1 rounded-lg appearance-none cursor-pointer" style={{background:'#4F7BFF40'}} />
+                      className="w-full h-1 rounded-lg appearance-none cursor-pointer" style={{background:'#F59E0B40'}} />
                     <div className="text-[9px] text-slate-600">Device: {selectedDevices.inputId === 'default' ? 'Default Mic' : 'Custom Input'}</div>
                   </div>
                 </div>
@@ -3222,15 +3224,15 @@ const AudioProcessor = ({ goHome }) => {
                   </div>
                   <div className="p-3 space-y-2.5">
                     <div className="flex items-center gap-1.5">
-                      <button onClick={() => setGateMode('balanced')} className={`flex-1 py-1 rounded text-[9px] font-bold border ${gateMode === 'balanced' ? 'border-[#4F7BFF]/50 text-[#4F7BFF]' : 'border-slate-700 text-slate-500 hover:text-slate-300'}`} style={gateMode === 'balanced' ? {background:'rgba(79,123,255,0.12)'} : {}}>Balanced</button>
+                      <button onClick={() => setGateMode('balanced')} className={`flex-1 py-1 rounded text-[9px] font-bold border ${gateMode === 'balanced' ? 'border-[#F59E0B]/50 text-[#F59E0B]' : 'border-slate-700 text-slate-500 hover:text-slate-300'}`} style={gateMode === 'balanced' ? {background:'rgba(245,158,11,0.12)'} : {}}>Balanced</button>
                       <button onClick={() => setGateMode('speech')} className={`flex-1 py-1 rounded text-[9px] font-bold border ${gateMode === 'speech' ? 'border-amber-500/50 text-amber-300' : 'border-slate-700 text-slate-500 hover:text-slate-300'}`} style={gateMode === 'speech' ? {background:'rgba(245,158,11,0.12)'} : {}}>Speech Only</button>
                     </div>
-                    <div onClick={() => setFeatures({...features, denoise: !features.denoise})} className={`cursor-pointer flex items-center justify-between p-2 rounded border transition-all ${features.denoise ? 'border-[#4F7BFF]/40' : 'border-slate-800 hover:border-slate-700'}`} style={features.denoise ? {background:'rgba(79,123,255,0.08)'} : {}}>
+                    <div onClick={() => setFeatures({...features, denoise: !features.denoise})} className={`cursor-pointer flex items-center justify-between p-2 rounded border transition-all ${features.denoise ? 'border-[#F59E0B]/40' : 'border-slate-800 hover:border-slate-700'}`} style={features.denoise ? {background:'rgba(245,158,11,0.08)'} : {}}>
                       <div className="flex items-center gap-2">
-                        <Activity size={11} className={features.denoise ? 'text-[#4F7BFF]' : 'text-slate-600'} />
+                        <Activity size={11} className={features.denoise ? 'text-[#F59E0B]' : 'text-slate-600'} />
                         <span className="text-[10px] font-semibold text-slate-300">Reduction</span>
                       </div>
-                      <div className={`w-7 h-3.5 rounded-full transition-colors relative ${features.denoise ? 'bg-[#4F7BFF]' : 'bg-slate-700'}`}>
+                      <div className={`w-7 h-3.5 rounded-full transition-colors relative ${features.denoise ? 'bg-[#F59E0B]' : 'bg-slate-700'}`}>
                         <div className={`absolute top-0.5 w-2.5 h-2.5 bg-white rounded-full transition-transform ${features.denoise ? 'translate-x-3.5 left-0.5' : 'left-0.5'}`}/>
                       </div>
                     </div>
@@ -3241,9 +3243,9 @@ const AudioProcessor = ({ goHome }) => {
                           <span className={`font-mono ${visualizerGateStatus ? 'text-[#FF5252]' : 'text-[#00E676]'}`}>{noiseFloorThreshold} dB</span>
                         </div>
                         <input type="range" min="-100" max="-20" step="1" value={noiseFloorThreshold} onChange={(e) => setNoiseFloorThreshold(parseFloat(e.target.value))}
-                          className="w-full h-0.5 rounded-lg appearance-none cursor-pointer" style={{background:'rgba(79,123,255,0.4)'}} />
+                          className="w-full h-0.5 rounded-lg appearance-none cursor-pointer" style={{background:'rgba(245,158,11,0.4)'}} />
                         <div className="grid grid-cols-2 gap-1.5">
-                          <button onClick={startAutoCalibrate} disabled={isAutoCalibrating} className={`py-1 rounded text-[9px] font-semibold border ${isAutoCalibrating ? 'border-[#4F7BFF]/40 text-[#4F7BFF] cursor-wait animate-pulse' : 'border-slate-700 text-slate-400 hover:border-slate-600'}`}>
+                          <button onClick={startAutoCalibrate} disabled={isAutoCalibrating} className={`py-1 rounded text-[9px] font-semibold border ${isAutoCalibrating ? 'border-[#F59E0B]/40 text-[#F59E0B] cursor-wait animate-pulse' : 'border-slate-700 text-slate-400 hover:border-slate-600'}`}>
                             {isAutoCalibrating ? 'Calibrating...' : 'Auto-Calibrate'}
                           </button>
                           <button onClick={startMicLearn} disabled={isMicLearning} className={`py-1 rounded text-[9px] font-semibold border ${isMicLearning ? 'border-cyan-500/40 text-cyan-300 cursor-wait animate-pulse' : micLearned ? 'border-emerald-500/40 text-emerald-300' : 'border-slate-700 text-slate-400 hover:border-slate-600'}`}>
@@ -3275,14 +3277,14 @@ const AudioProcessor = ({ goHome }) => {
                   {key:'mastering', icon:<Volume2 size={11}/>, label:'Voice Polish', desc:'Broadcast loudness + sheen'},
                 ].map(({key, icon, label, desc}) => (
                   <div key={key} onClick={() => setFeatures({...features, [key]: !features[key]})}
-                    className={`cursor-pointer p-2.5 rounded-lg border transition-all ${features[key] ? 'border-[#4F7BFF]/40' : 'border-slate-800 hover:border-slate-700 opacity-60 hover:opacity-100'}`}
-                    style={features[key] ? {background:'rgba(79,123,255,0.08)'} : {}}>
+                    className={`cursor-pointer p-2.5 rounded-lg border transition-all ${features[key] ? 'border-[#F59E0B]/40' : 'border-slate-800 hover:border-slate-700 opacity-60 hover:opacity-100'}`}
+                    style={features[key] ? {background:'rgba(245,158,11,0.08)'} : {}}>
                     <div className="flex items-center justify-between">
-                      <div className={`flex items-center gap-1.5 ${features[key] ? 'text-[#4F7BFF]' : 'text-slate-500'}`}>
+                      <div className={`flex items-center gap-1.5 ${features[key] ? 'text-[#F59E0B]' : 'text-slate-500'}`}>
                         {icon}
                         <span className="text-[10px] font-semibold text-slate-300">{label}</span>
                       </div>
-                      <div className={`w-6 h-3 rounded-full transition-colors relative ${features[key] ? 'bg-[#4F7BFF]' : 'bg-slate-700'}`}>
+                      <div className={`w-6 h-3 rounded-full transition-colors relative ${features[key] ? 'bg-[#F59E0B]' : 'bg-slate-700'}`}>
                         <div className={`absolute top-0.5 w-2 h-2 bg-white rounded-full transition-transform ${features[key] ? 'translate-x-3 left-0.5' : 'left-0.5'}`}/>
                       </div>
                     </div>
@@ -3303,7 +3305,7 @@ const AudioProcessor = ({ goHome }) => {
                     <input type="text" value={roomName} onChange={(e) => setRoomName(e.target.value)} placeholder="e.g. Main Sanctuary" className="w-full border border-slate-700 rounded p-1.5 text-[10px] text-slate-200 placeholder-slate-600" style={{background:'#050A1C'}} />
                     <div className="flex items-center justify-between">
                       <span className="text-[9px] text-slate-500">Noise Profile</span>
-                      <button onClick={handleNoiseProfileCapture} disabled={!latestSpectrumRef.current} className={`px-2 py-0.5 rounded text-[9px] border ${latestSpectrumRef.current ? 'border-[#4F7BFF]/40 text-[#4F7BFF]' : 'border-slate-700 text-slate-600'}`} style={latestSpectrumRef.current ? {background:'rgba(79,123,255,0.1)'} : {}}>Capture</button>
+                      <button onClick={handleNoiseProfileCapture} disabled={!latestSpectrumRef.current} className={`px-2 py-0.5 rounded text-[9px] border ${latestSpectrumRef.current ? 'border-[#F59E0B]/40 text-[#F59E0B]' : 'border-slate-700 text-slate-600'}`} style={latestSpectrumRef.current ? {background:'rgba(245,158,11,0.1)'} : {}}>Capture</button>
                     </div>
                     <select className="w-full border border-slate-700 rounded p-1.5 text-[10px] text-slate-200" style={{background:'#050A1C'}} value={selectedNoiseProfileId} onChange={(e) => setSelectedNoiseProfileId(e.target.value)}>
                       <option value="">No profile</option>
@@ -3317,7 +3319,7 @@ const AudioProcessor = ({ goHome }) => {
                   </div>
                   <div className="p-2 space-y-1">
                     {[['balanced','Balanced'],['pastor','Pastor'],['guest','Guest Speaker'],['choir','Choir Lead']].map(([val, label]) => (
-                      <button key={val} onClick={() => setSpeakerPreset(val)} className={`w-full py-1.5 px-2 rounded text-[10px] font-semibold border text-left transition-all ${speakerPreset === val ? 'border-[#4F7BFF]/50 text-[#4F7BFF]' : 'border-slate-800 text-slate-500 hover:text-slate-300'}`} style={speakerPreset === val ? {background:'rgba(79,123,255,0.12)'} : {}}>
+                      <button key={val} onClick={() => setSpeakerPreset(val)} className={`w-full py-1.5 px-2 rounded text-[10px] font-semibold border text-left transition-all ${speakerPreset === val ? 'border-[#F59E0B]/50 text-[#F59E0B]' : 'border-slate-800 text-slate-500 hover:text-slate-300'}`} style={speakerPreset === val ? {background:'rgba(245,158,11,0.12)'} : {}}>
                         {label}
                       </button>
                     ))}
@@ -3350,23 +3352,23 @@ const AudioProcessor = ({ goHome }) => {
                 <div className="rounded-lg border border-slate-800 overflow-hidden" style={{background:'#080E1F'}}>
                   <div className="px-3 py-1.5 border-b border-slate-800 flex items-center justify-between" style={{background:'rgba(255,255,255,0.03)'}}>
                     <span className="text-[9px] font-bold tracking-[0.15em] text-slate-500 uppercase">A/B Compare</span>
-                    <span className="text-[9px] text-[#4F7BFF]">{abMode === 'A' ? 'A — Raw' : 'B — AI'}</span>
+                    <span className="text-[9px] text-[#F59E0B]">{abMode === 'A' ? 'A — Raw' : 'B — AI'}</span>
                   </div>
                   <div className="p-2 grid grid-cols-2 gap-1.5">
                     <button onClick={() => setIsBypassed(true)} className={`py-1.5 rounded border text-[10px] font-bold ${abMode === 'A' ? 'border-amber-500/50 text-amber-300' : 'border-slate-700 text-slate-600 hover:text-slate-400'}`} style={abMode === 'A' ? {background:'rgba(245,158,11,0.1)'} : {}}>A — Raw</button>
-                    <button onClick={() => setIsBypassed(false)} className={`py-1.5 rounded border text-[10px] font-bold ${abMode === 'B' ? 'border-[#4F7BFF]/50 text-[#4F7BFF]' : 'border-slate-700 text-slate-600 hover:text-slate-400'}`} style={abMode === 'B' ? {background:'rgba(79,123,255,0.12)'} : {}}>B — AI</button>
+                    <button onClick={() => setIsBypassed(false)} className={`py-1.5 rounded border text-[10px] font-bold ${abMode === 'B' ? 'border-[#F59E0B]/50 text-[#F59E0B]' : 'border-slate-700 text-slate-600 hover:text-slate-400'}`} style={abMode === 'B' ? {background:'rgba(245,158,11,0.12)'} : {}}>B — AI</button>
                   </div>
                 </div>
                 <div className="rounded-lg border border-slate-800 overflow-hidden" style={{background:'#080E1F'}}>
                   <div className="px-3 py-1.5 border-b border-slate-800 flex items-center justify-between" style={{background:'rgba(255,255,255,0.03)'}}>
                     <span className="text-[9px] font-bold tracking-[0.15em] text-slate-500 uppercase">Session Snapshots</span>
-                    <button onClick={handleSnapshotSave} className="px-2 py-0.5 rounded border border-[#4F7BFF]/40 text-[9px] text-[#4F7BFF]" style={{background:'rgba(79,123,255,0.1)'}}>Save</button>
+                    <button onClick={handleSnapshotSave} className="px-2 py-0.5 rounded border border-[#F59E0B]/40 text-[9px] text-[#F59E0B]" style={{background:'rgba(245,158,11,0.1)'}}>Save</button>
                   </div>
                   <div className="p-2 space-y-1">
                     {snapshots.length === 0
                       ? <p className="text-[9px] text-slate-600 p-1">Save a snapshot to recall your full mix.</p>
                       : snapshots.map(s => (
-                        <button key={s.id} onClick={() => handleSnapshotApply(s)} className="w-full flex items-center justify-between px-2 py-1.5 rounded border border-slate-800 text-[10px] text-slate-300 hover:border-[#4F7BFF]/30 hover:text-white">
+                        <button key={s.id} onClick={() => handleSnapshotApply(s)} className="w-full flex items-center justify-between px-2 py-1.5 rounded border border-slate-800 text-[10px] text-slate-300 hover:border-[#F59E0B]/30 hover:text-white">
                           <span>{s.label}</span>
                           <span className="text-[9px] text-slate-500">{s.speakerPreset}</span>
                         </button>
@@ -3387,16 +3389,16 @@ const AudioProcessor = ({ goHome }) => {
           {/* Center tab bar */}
           <div className="h-10 border-b border-slate-800 flex items-center px-3 gap-2 shrink-0" style={{background:'#0D1428'}}>
             <div className="flex rounded p-0.5 border border-slate-800 gap-0.5" style={{background:'#050A1C'}}>
-              <button onClick={() => setMainTab('live')} className={`px-3 py-1 rounded text-[9px] font-bold tracking-wide transition-all ${mainTab === 'live' ? 'bg-[#4F7BFF] text-white' : 'text-slate-500 hover:text-white'}`}>LIVE</button>
-              <button onClick={() => setMainTab('editor')} className={`px-3 py-1 rounded text-[9px] font-bold tracking-wide transition-all ${mainTab === 'editor' ? 'bg-[#4F7BFF] text-white' : 'text-slate-500 hover:text-white'}`}>EDITOR</button>
+              <button onClick={() => setMainTab('live')} className={`px-3 py-1 rounded text-[9px] font-bold tracking-wide transition-all ${mainTab === 'live' ? 'bg-[#F59E0B] text-white' : 'text-slate-500 hover:text-white'}`}>LIVE</button>
+              <button onClick={() => setMainTab('editor')} className={`px-3 py-1 rounded text-[9px] font-bold tracking-wide transition-all ${mainTab === 'editor' ? 'bg-[#F59E0B] text-white' : 'text-slate-500 hover:text-white'}`}>EDITOR</button>
             </div>
             {/* Active feature badges */}
             <div className="flex items-center gap-1 overflow-x-auto" style={{scrollbarWidth:'none'}}>
               {features.denoise && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-[#00E676]/30 text-[#00E676] whitespace-nowrap" style={{background:'rgba(0,230,118,0.08)'}}>HYPER-GATE</span>}
               {features.voicePattern && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-[#00E676]/30 text-[#00E676] whitespace-nowrap" style={{background:'rgba(0,230,118,0.08)'}}>VOICE CLEANSE</span>}
-              {features.pastorIsolation && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-[#4F7BFF]/30 text-[#4F7BFF] whitespace-nowrap" style={{background:'rgba(79,123,255,0.08)'}}>ISOLATION</span>}
-              {features.sermonWarmth && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-[#4F7BFF]/30 text-[#4F7BFF] whitespace-nowrap" style={{background:'rgba(79,123,255,0.08)'}}>WARMTH</span>}
-              {features.mastering && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-[#4F7BFF]/30 text-[#4F7BFF] whitespace-nowrap" style={{background:'rgba(79,123,255,0.08)'}}>POLISH</span>}
+              {features.pastorIsolation && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-[#F59E0B]/30 text-[#F59E0B] whitespace-nowrap" style={{background:'rgba(245,158,11,0.08)'}}>ISOLATION</span>}
+              {features.sermonWarmth && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-[#F59E0B]/30 text-[#F59E0B] whitespace-nowrap" style={{background:'rgba(245,158,11,0.08)'}}>WARMTH</span>}
+              {features.mastering && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-[#F59E0B]/30 text-[#F59E0B] whitespace-nowrap" style={{background:'rgba(245,158,11,0.08)'}}>POLISH</span>}
               {features.musicDucking && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-amber-500/30 text-amber-400 whitespace-nowrap" style={{background:'rgba(245,158,11,0.08)'}}>DUCKING</span>}
               {features.streamingSafe && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-amber-500/30 text-amber-400 whitespace-nowrap" style={{background:'rgba(245,158,11,0.08)'}}>STREAM SAFE</span>}
               {selectedNoiseProfileId && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-slate-600 text-slate-400 whitespace-nowrap">NOISE PROFILE</span>}
@@ -3421,7 +3423,7 @@ const AudioProcessor = ({ goHome }) => {
                       <div className="w-px h-3 bg-slate-600"/>
                       <button onClick={discardRecording} className="px-2 py-1 hover:bg-slate-700 text-slate-400 hover:text-red-400"><Trash2 size={11}/></button>
                       <div className="w-px h-3 bg-slate-600"/>
-                      <button onClick={() => shareRecording('webm')} className="px-2 py-1 hover:bg-slate-700 font-bold text-[#4F7BFF] flex items-center gap-1"><Share2 size={9}/>WebM</button>
+                      <button onClick={() => shareRecording('webm')} className="px-2 py-1 hover:bg-slate-700 font-bold text-[#F59E0B] flex items-center gap-1"><Share2 size={9}/>WebM</button>
                       <div className="w-px h-3 bg-slate-600"/>
                       <button onClick={() => shareRecording('wav')} className="px-2 py-1 hover:bg-slate-700 font-bold text-amber-400 flex items-center gap-1"><Waves size={9}/>WAV</button>
                       <div className="w-px h-3 bg-slate-600"/>
@@ -3442,12 +3444,12 @@ const AudioProcessor = ({ goHome }) => {
               {!isLive && !isPlayingFile && mode === 'live' && (
                 <div className="absolute inset-0 flex items-center justify-center backdrop-blur-sm z-30" style={{background:'rgba(0,0,0,0.65)'}}>
                   <div className="text-center p-8 rounded-2xl border border-slate-700 shadow-2xl w-full max-w-sm" style={{background:'#0D1428'}}>
-                    <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4" style={{background:'rgba(79,123,255,0.15)', color:'#4F7BFF'}}>
+                    <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4" style={{background:'rgba(245,158,11,0.15)', color:'#F59E0B'}}>
                       <Mic size={32}/>
                     </div>
                     <h3 className="text-xl font-bold mb-2">Sound Check</h3>
                     <p className="text-slate-400 text-sm mb-6">Connect mic or mixer, then go live.</p>
-                    <button onClick={toggleLive} className="px-8 py-3 text-white font-bold rounded-lg shadow-lg flex items-center gap-2 mx-auto hover:opacity-90" style={{background:'#4F7BFF'}}>
+                    <button onClick={toggleLive} className="px-8 py-3 text-white font-bold rounded-lg shadow-lg flex items-center gap-2 mx-auto hover:opacity-90" style={{background:'#F59E0B'}}>
                       <Play size={18} fill="currentColor"/> Go Live
                     </button>
                   </div>
@@ -3480,7 +3482,7 @@ const AudioProcessor = ({ goHome }) => {
               )}
               {isLive && recordingState === 'review' && (
                 <div className="absolute bottom-14 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-1">
-                  <span className="text-[9px] text-[#4F7BFF] font-bold tracking-widest">LIVE MIC MUTED • REVIEWING</span>
+                  <span className="text-[9px] text-[#F59E0B] font-bold tracking-widest">LIVE MIC MUTED • REVIEWING</span>
                   {isPlayingBack && <span className="text-[9px] font-mono text-slate-400">{formatTime(playbackPosition)} / {playbackDuration ? formatTime(playbackDuration) : '--:--'}</span>}
                   {!isPlayingBack && playbackDuration && <span className="text-[9px] font-mono text-slate-400">Ready • {formatTime(playbackDuration)}</span>}
                 </div>
@@ -3503,22 +3505,22 @@ const AudioProcessor = ({ goHome }) => {
                 <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 w-[min(760px,95%)]">
                   <div className="border border-slate-700 rounded-xl px-4 py-3 backdrop-blur" style={{background:'rgba(13,20,40,0.95)'}}>
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-[9px] font-semibold text-slate-300 flex items-center gap-1.5"><Sliders className="w-3 h-3" style={{color:'#4F7BFF'}}/> Trim Sermon Section</span>
+                      <span className="text-[9px] font-semibold text-slate-300 flex items-center gap-1.5"><Sliders className="w-3 h-3" style={{color:'#F59E0B'}}/> Trim Sermon Section</span>
                       <span className="text-[9px] font-mono text-slate-500">Total: {formatTime(Math.floor(fileDuration))}</span>
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <div className="flex justify-between text-[9px] text-slate-500 mb-1"><span>Start</span><span>{formatTime(Math.floor(trimStart || 0))}</span></div>
-                        <input type="range" min="0" max={fileDuration || 0} step="0.1" value={trimStart} onChange={handleTrimStartChange} className="w-full h-0.5 rounded appearance-none cursor-pointer" style={{background:'rgba(79,123,255,0.3)'}}/>
+                        <input type="range" min="0" max={fileDuration || 0} step="0.1" value={trimStart} onChange={handleTrimStartChange} className="w-full h-0.5 rounded appearance-none cursor-pointer" style={{background:'rgba(245,158,11,0.3)'}}/>
                       </div>
                       <div>
                         <div className="flex justify-between text-[9px] text-slate-500 mb-1"><span>End</span><span>{formatTime(Math.floor(trimEnd || fileDuration || 0))}</span></div>
-                        <input type="range" min="0" max={fileDuration || 0} step="0.1" value={trimEnd} onChange={handleTrimEndChange} className="w-full h-0.5 rounded appearance-none cursor-pointer" style={{background:'rgba(79,123,255,0.3)'}}/>
+                        <input type="range" min="0" max={fileDuration || 0} step="0.1" value={trimEnd} onChange={handleTrimEndChange} className="w-full h-0.5 rounded appearance-none cursor-pointer" style={{background:'rgba(245,158,11,0.3)'}}/>
                       </div>
                     </div>
                     <div className="flex items-center gap-2 mt-2">
-                      <button onClick={previewTrimSegment} disabled={isPreviewingTrim} className="px-3 py-1 rounded text-[9px] font-semibold border border-[#4F7BFF]/40 text-[#4F7BFF] hover:bg-[#4F7BFF]/10 flex items-center gap-1">
-                        {isPreviewingTrim ? <span className="w-2 h-2 rounded-full border border-[#4F7BFF] border-t-transparent animate-spin"/> : <Play className="w-2.5 h-2.5"/>}
+                      <button onClick={previewTrimSegment} disabled={isPreviewingTrim} className="px-3 py-1 rounded text-[9px] font-semibold border border-[#F59E0B]/40 text-[#F59E0B] hover:bg-[#F59E0B]/10 flex items-center gap-1">
+                        {isPreviewingTrim ? <span className="w-2 h-2 rounded-full border border-[#F59E0B] border-t-transparent animate-spin"/> : <Play className="w-2.5 h-2.5"/>}
                         {isPreviewingTrim ? 'Previewing...' : 'Preview'}
                       </button>
                       <button onClick={clearTrim} className="px-3 py-1 rounded text-[9px] font-semibold border border-slate-700 text-slate-400 hover:bg-slate-800">Full File</button>
@@ -3571,7 +3573,7 @@ const AudioProcessor = ({ goHome }) => {
               </div>
               <div className="p-2.5">
                 <p className="text-[10px] text-slate-300 font-medium truncate">{broadcastLabel}</p>
-                <button onClick={cycleOutputTarget} className="mt-1 flex items-center gap-1.5 text-[9px] text-[#4F7BFF] hover:text-indigo-300 transition-colors">
+                <button onClick={cycleOutputTarget} className="mt-1 flex items-center gap-1.5 text-[9px] text-[#F59E0B] hover:text-amber-300 transition-colors">
                   {outputTargets.find(t => t.name === outputTarget)?.icon || <Cpu size={10}/>}
                   <span>{outputTarget}</span>
                 </button>
@@ -3590,7 +3592,7 @@ const AudioProcessor = ({ goHome }) => {
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-slate-500">Target</span>
-                  <span className="font-mono text-[#4F7BFF]">{loudnessTarget} LUFS</span>
+                  <span className="font-mono text-[#F59E0B]">{loudnessTarget} LUFS</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-slate-500">Current</span>
@@ -3643,7 +3645,7 @@ const AudioProcessor = ({ goHome }) => {
           className="w-11 h-11 rounded-full flex items-center justify-center transition-all"
           style={isLive
             ? {background:'#FF5252', boxShadow:'0 0 20px rgba(255,82,82,0.4)'}
-            : {background:'#4F7BFF', boxShadow:'0 0 20px rgba(79,123,255,0.4)'}}>
+            : {background:'#F59E0B', boxShadow:'0 0 20px rgba(245,158,11,0.4)'}}>
           {isLive ? <Square size={16} fill="currentColor"/> : <Play size={16} fill="currentColor" className="ml-0.5"/>}
         </button>
         {/* Status */}
@@ -3671,7 +3673,7 @@ const AudioProcessor = ({ goHome }) => {
             <div className="flex items-end gap-0.5 h-9">
               {[...Array(8)].map((_,i) => (
                 <div key={i} className="w-1.5 rounded-sm transition-all duration-75"
-                  style={{height:`${(i+1)*12}%`, background: isLive && recordingState !== 'review' ? (isBypassed ? '#64748b' : i < 6 ? '#4F7BFF' : '#FF5252') : '#1e293b'}}/>
+                  style={{height:`${(i+1)*12}%`, background: isLive && recordingState !== 'review' ? (isBypassed ? '#64748b' : i < 6 ? '#F59E0B' : '#FF5252') : '#1e293b'}}/>
               ))}
             </div>
             <span className="text-[8px] text-slate-600" style={{fontFamily:'JetBrains Mono, monospace'}}>OUT L</span>
@@ -3681,7 +3683,7 @@ const AudioProcessor = ({ goHome }) => {
         {/* Gain Rider */}
         <div>
           <div className="text-[8px] font-bold uppercase tracking-wider text-slate-600 mb-0.5">Gain Rider</div>
-          <span className={`text-[11px] font-mono ${features.smartMixing ? 'text-[#4F7BFF]' : 'text-slate-700'}`} style={{fontFamily:'JetBrains Mono, monospace'}}>
+          <span className={`text-[11px] font-mono ${features.smartMixing ? 'text-[#F59E0B]' : 'text-slate-700'}`} style={{fontFamily:'JetBrains Mono, monospace'}}>
             {features.smartMixing ? `${gainRiderDb >= 0 ? '+' : ''}${gainRiderDb.toFixed(1)} dB` : 'OFF'}
           </span>
         </div>
@@ -3695,7 +3697,7 @@ const AudioProcessor = ({ goHome }) => {
           </button>
           <button onClick={() => setIsMonitoring(!isMonitoring)} disabled={recordingState === 'review'}
             className="p-1.5 rounded-lg border relative transition-all"
-            style={isMonitoring ? {background:'rgba(79,123,255,0.15)', borderColor:'rgba(79,123,255,0.4)', color:'#4F7BFF'} : {background:'#0D1428', borderColor:'#1e293b', color:'#94a3b8'}}>
+            style={isMonitoring ? {background:'rgba(245,158,11,0.15)', borderColor:'rgba(245,158,11,0.4)', color:'#F59E0B'} : {background:'#0D1428', borderColor:'#1e293b', color:'#94a3b8'}}>
             <Headphones size={16}/>
             {isMonitoring && recordingState !== 'review' && <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full animate-pulse" style={{background:'#00E676'}}/>}
           </button>
@@ -3735,7 +3737,7 @@ const AudioProcessor = ({ goHome }) => {
       {/* Mobile fallback for very small screens */}
       <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 border-t border-slate-800 px-3 py-2 flex justify-between items-center" style={{background:'#030710'}}>
         <button onClick={mode === 'live' ? toggleLive : null} className="w-10 h-10 rounded-full flex items-center justify-center"
-          style={isLive ? {background:'#FF5252'} : {background:'#4F7BFF'}}>
+          style={isLive ? {background:'#FF5252'} : {background:'#F59E0B'}}>
           {isLive ? <Square size={14} fill="currentColor"/> : <Play size={14} fill="currentColor"/>}
         </button>
         <span className={`text-[10px] font-semibold ${isLive ? 'text-[#00E676]' : 'text-slate-500'}`}>{isLive ? 'Live' : 'Standby'}</span>
@@ -3751,12 +3753,12 @@ const AudioProcessor = ({ goHome }) => {
         title="TIWATON AI — Claude powered"
         className="fixed bottom-4 left-4 z-50 w-10 h-10 rounded-full flex items-center justify-center shadow-lg border transition-all hover:scale-105"
         style={showAI
-          ? { background: '#4F7BFF', borderColor: '#4F7BFF' }
-          : { background: '#0D1428', borderColor: 'rgba(79,123,255,0.4)' }}
+          ? { background: '#F59E0B', borderColor: '#F59E0B' }
+          : { background: '#0D1428', borderColor: 'rgba(245,158,11,0.4)' }}
       >
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
           <path d="M8 1.5C4.41 1.5 1.5 4.41 1.5 8s2.91 6.5 6.5 6.5 6.5-2.91 6.5-6.5S11.59 1.5 8 1.5zm0 2a1 1 0 110 2 1 1 0 010-2zm1 8H7v-4h2v4z"
-            fill={showAI ? '#fff' : '#4F7BFF'}/>
+            fill={showAI ? '#fff' : '#F59E0B'}/>
         </svg>
       </button>
 
@@ -3782,14 +3784,14 @@ const FeatureToggle = ({ icon, label, desc, active, onClick }) => (
     onClick={onClick}
     className={`p-3 rounded-xl border cursor-pointer transition-all group ${
       active
-        ? 'bg-indigo-900/30 border-indigo-500/50 shadow-[0_0_15px_rgba(99,102,241,0.2)]'
+        ? 'bg-amber-900/30 border-amber-500/50 shadow-[0_0_15px_rgba(245,158,11,0.2)]'
         : 'bg-slate-900 border-slate-800 hover:border-slate-700 opacity-60 hover:opacity-100'
     }`}
   >
     <div className="flex items-center justify-between mb-1">
       <div
         className={`flex items-center gap-3 ${
-          active ? 'text-indigo-400' : 'text-slate-400 group-hover:text-slate-300'
+          active ? 'text-amber-400' : 'text-slate-400 group-hover:text-slate-300'
         }`}
       >
         {icon}
@@ -3797,7 +3799,7 @@ const FeatureToggle = ({ icon, label, desc, active, onClick }) => (
       </div>
       <div
         className={`w-4 h-4 rounded-full border flex items-center justify-center ${
-          active ? 'bg-indigo-500 border-indigo-500' : 'border-slate-600'
+          active ? 'bg-amber-500 border-amber-500' : 'border-slate-600'
         }`}
       >
         {active && <CheckCircle2 size={12} className="text-white" />}
@@ -3850,7 +3852,7 @@ function HelpCorner() {
         onClick={() => setIsOpen(true)}
         className="fixed bottom-20 right-4 z-40 flex items-center gap-2 rounded-full bg-slate-900/95 px-4 py-2 text-xs font-semibold text-slate-100 shadow-lg border border-slate-700 hover:bg-slate-800"
       >
-        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-indigo-500 text-[11px] font-bold">
+        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-500 text-[11px] font-bold">
           ?
         </span>
         <span className="hidden sm:inline">Need help with audio?</span>
@@ -3864,7 +3866,7 @@ function HelpCorner() {
             {/* Header */}
             <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
               <div className="flex items-center gap-2">
-                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-600 text-xs font-bold text-white">
+                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-amber-600 text-xs font-bold text-white">
                   ?
                 </div>
                 <div>
@@ -3901,7 +3903,7 @@ function HelpCorner() {
                 <ul className="ml-4 list-disc space-y-1">
                   <li>Pastor mic → Mixer / Audio Interface (correct gain, no clipping).</li>
                   <li>
-                    Only <span className="font-semibold text-indigo-300">one</span> clean feed to the computer (USB preferred).
+                    Only <span className="font-semibold text-amber-300">one</span> clean feed to the computer (USB preferred).
                   </li>
                   <li>Turn off system Noise Suppression / AGC.</li>
                   <li>Sound engineer monitors with AirPods / headphones.</li>
@@ -3924,11 +3926,11 @@ function HelpCorner() {
                   <p className="font-semibold text-slate-200">B. Outputs</p>
                   <ul className="ml-4 list-disc space-y-1">
                     <li>
-                      <span className="text-indigo-300 font-semibold">Monitoring Output</span>{' '}
+                      <span className="text-amber-300 font-semibold">Monitoring Output</span>{' '}
                       → AirPods / Headphones (what you listen on).
                     </li>
                     <li>
-                      <span className="text-indigo-300 font-semibold">Broadcast Output</span>{' '}
+                      <span className="text-amber-300 font-semibold">Broadcast Output</span>{' '}
                       → Virtual Cable (what OBS / YouTube hears).
                     </li>
                     <li>
@@ -3947,7 +3949,7 @@ function HelpCorner() {
                     <li>Enable Hyper-Gate, Voice Isolation, Warmth, Auto-Mixing.</li>
                     <li>
                       Run{' '}
-                      <span className="font-semibold text-indigo-300">
+                      <span className="font-semibold text-amber-300">
                         Auto-Calibrate Gate
                       </span>{' '}
                       once when the room is at normal noise level.
@@ -3967,7 +3969,7 @@ function HelpCorner() {
                 <ul className="ml-4 list-disc space-y-1 mt-1">
                   <li>
                     Add{' '}
-                    <span className="font-semibold text-indigo-300">
+                    <span className="font-semibold text-amber-300">
                       Audio Input Capture
                     </span>{' '}
                     → Choose:{' '}
@@ -4011,7 +4013,7 @@ function HelpCorner() {
                     Lower Noise Threshold in TIWATON (move the slider left).
                   </li>
                   <li>
-                    <span className="text-indigo-300 font-semibold">
+                    <span className="text-amber-300 font-semibold">
                       TIWATON acting strange?
                     </span>{' '}
                     Use Reset in the footer and restart Live.
@@ -4022,9 +4024,9 @@ function HelpCorner() {
               {/* GOLDEN RULE CARD */}
               <div className="mt-2 rounded-xl border border-slate-800 bg-slate-900 px-3 py-2">
                 <p className="text-[11px] text-slate-400">
-                  <span className="font-semibold text-indigo-300">Golden Rule:</span>{' '}
+                  <span className="font-semibold text-amber-300">Golden Rule:</span>{' '}
                   TIWATON replaces all mics in OBS. Only the{' '}
-                  <span className="font-semibold text-indigo-300">Broadcast Output</span> from
+                  <span className="font-semibold text-amber-300">Broadcast Output</span> from
                   TIWATON should be selected as the mic in OBS / streaming apps.
                 </p>
               </div>
