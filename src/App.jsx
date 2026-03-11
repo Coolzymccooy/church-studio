@@ -1,5 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { isDesktopApp, isTauri, onMenuCommand } from './lib/platform';
+import {
+  adjustPageZoom,
+  isDesktopApp,
+  isTauri,
+  onMenuCommand,
+  toggleFullscreen,
+} from './lib/platform';
 import WaveformEditor from './components/WaveformEditor';
 import MenuBar from './components/MenuBar';
 import AIAssistant from './components/AIAssistant';
@@ -1422,6 +1428,9 @@ const AudioProcessor = ({ goHome }) => {
         case 'menu:capture-noise':    h.handleNoiseProfileCapture(); break;
         case 'menu:set-tab':          h.setMainTab(args[0]); break;
         case 'menu:toggle-bypass':    h.setIsBypassed(b => !b); break;
+        case 'menu:toggle-fullscreen': void toggleFullscreen(); break;
+        case 'menu:zoom-in':          adjustPageZoom(1); break;
+        case 'menu:zoom-out':         adjustPageZoom(-1); break;
         case 'menu:export-wav':       h.shareRecording('wav'); break;
         case 'menu:export-webm':      h.shareRecording('webm'); break;
         case 'menu:export-mp4':       h.exportMp4(); break;

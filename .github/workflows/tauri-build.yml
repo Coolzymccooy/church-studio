@@ -1,6 +1,7 @@
 name: Tauri Build & Release
 
 on:
+  pull_request:
   push:
     tags:
       - 'v*'
@@ -11,6 +12,13 @@ on:
         required: false
         default: false
         type: boolean
+      tag:
+        description: 'Release tag to create manually, e.g. v1.2.0'
+        required: false
+        type: string
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -20,17 +28,20 @@ jobs:
         include:
           - platform: ubuntu-22.04
             args: ''
-            artifact: '*.AppImage,*.deb'
           - platform: windows-latest
             args: ''
-            artifact: '*.exe,*.msi'
           - platform: macos-latest
             args: '--target universal-apple-darwin'
-            artifact: '*.dmg'
 
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Validate manual release inputs
+        if: github.event_name == 'workflow_dispatch' && inputs.release && inputs.tag == ''
+        run: |
+          echo "Manual release runs require the 'tag' input, for example v1.2.0."
+          exit 1
 
       - name: Install Node
         uses: actions/setup-node@v4
@@ -61,18 +72,27 @@ jobs:
         run: npm run build
 
       - name: Build Tauri app
+        if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && !inputs.release)
+        uses: tauri-apps/tauri-action@v0
+        with:
+          args: ${{ matrix.args }}
+          projectPath: .
+          tauriScript: npx tauri
+
+      - name: Build Tauri app and create draft release
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release && inputs.tag != '')
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'TIWATON AI Studio ${{ github.ref_name }}'
+          tagName: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          releaseName: ${{ format('TIWATON AI Studio {0}', github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name) }}
           releaseBody: |
-            ## TIWATON AI Studio ${{ github.ref_name }}
+            ## TIWATON AI Studio ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
-            AI-powered church audio workstation — now as a true native Tauri app.
+            AI-powered church audio workstation, now as a true native Tauri app.
 
             ### Downloads
             - **Windows**: `.exe` installer

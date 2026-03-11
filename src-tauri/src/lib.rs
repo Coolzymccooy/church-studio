@@ -177,10 +177,13 @@ pub fn run() {
                 .item(&MenuItemBuilder::with_id("toggle-bypass", "Toggle AI Bypass")
                     .accelerator("Alt+B").build(app)?)
                 .separator()
-                .item(&PredefinedMenuItem::fullscreen(app, Some("Full Screen"))?)
+                .item(&MenuItemBuilder::with_id("toggle-fullscreen", "Full Screen")
+                    .accelerator("F11").build(app)?)
                 .separator()
-                .item(&PredefinedMenuItem::zoom_in(app, Some("Zoom In"))?)
-                .item(&PredefinedMenuItem::zoom_out(app, Some("Zoom Out"))?)
+                .item(&MenuItemBuilder::with_id("zoom-in", "Zoom In")
+                    .accelerator("CmdOrCtrl+=").build(app)?)
+                .item(&MenuItemBuilder::with_id("zoom-out", "Zoom Out")
+                    .accelerator("CmdOrCtrl+-").build(app)?)
                 .build()?;
 
             let export_menu = SubmenuBuilder::new(app, "Export")
@@ -218,6 +221,9 @@ pub fn run() {
                     "set-tab-live"   => MenuPayload { event: "menu:set-tab".into(),       args: vec!["live".into()] },
                     "set-tab-editor" => MenuPayload { event: "menu:set-tab".into(),       args: vec!["editor".into()] },
                     "toggle-bypass"  => MenuPayload { event: "menu:toggle-bypass".into(), args: vec![] },
+                    "toggle-fullscreen" => MenuPayload { event: "menu:toggle-fullscreen".into(), args: vec![] },
+                    "zoom-in"        => MenuPayload { event: "menu:zoom-in".into(),       args: vec![] },
+                    "zoom-out"       => MenuPayload { event: "menu:zoom-out".into(),      args: vec![] },
                     "export-wav"     => MenuPayload { event: "menu:export-wav".into(),    args: vec![] },
                     "export-webm"    => MenuPayload { event: "menu:export-webm".into(),   args: vec![] },
                     "export-mp4"     => MenuPayload { event: "menu:export-mp4".into(),    args: vec![] },

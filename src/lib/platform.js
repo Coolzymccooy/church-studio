@@ -90,3 +90,37 @@ export async function showSaveDialog({ defaultName = 'file', filters = [] } = {}
  * Only meaningful in Tauri (decorations: false). In browser, returns {}.
  */
 export const dragRegionProps = isTauri ? { 'data-tauri-drag-region': '' } : {};
+
+let pageZoom = 1;
+const ZOOM_MIN = 0.7;
+const ZOOM_MAX = 2;
+const ZOOM_STEP = 0.1;
+
+function applyPageZoom(nextZoom) {
+  pageZoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, nextZoom));
+  document.documentElement.style.zoom = String(pageZoom);
+  if (document.body) {
+    document.body.style.zoom = String(pageZoom);
+  }
+  return pageZoom;
+}
+
+export async function toggleFullscreen() {
+  if (document.fullscreenElement) {
+    if (document.exitFullscreen) {
+      await document.exitFullscreen();
+    }
+    return false;
+  }
+
+  if (document.documentElement.requestFullscreen) {
+    await document.documentElement.requestFullscreen();
+    return true;
+  }
+
+  return false;
+}
+
+export function adjustPageZoom(direction) {
+  return applyPageZoom(pageZoom + (direction * ZOOM_STEP));
+}
