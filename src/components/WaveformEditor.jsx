@@ -10,16 +10,16 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 const COLORS = {
   bg: '#050A1C',
   panel: '#0D1428',
-  wave: 'var(--accent)',
+  wave: '#F59E0B',           // resolved from --accent at draw time
   waveActive: '#00E676',
-  selection: 'rgba(var(--accent-rgb), 0.25)',
-  selectionBorder: 'var(--accent)',
+  selection: 'rgba(245,158,11,0.25)', // resolved from --accent-rgb at draw time
+  selectionBorder: '#F59E0B',         // resolved from --accent at draw time
   playhead: '#FF5252',
   grid: 'rgba(255,255,255,0.06)',
   text: '#94a3b8',
   textBright: '#e2e8f0',
   noiseProfile: '#FF5252',
-  fadeOverlay: 'rgba(var(--accent-rgb), 0.15)',
+  fadeOverlay: 'rgba(245,158,11,0.15)', // resolved from --accent-rgb at draw time
 };
 
 // Resample AudioBuffer channel data to fit pixel width
@@ -209,11 +209,21 @@ export default function WaveformEditor({ audioContext, onExport }) {
     canvas.height = canvasHeight;
 
     const draw = () => {
-      ctx.fillStyle = COLORS.panel;
+      // Resolve CSS custom properties for canvas (ctx.fillStyle can't use var(...))
+      const accentRgb = getComputedStyle(document.documentElement).getPropertyValue('--accent-rgb').trim() || '245,158,11';
+      const accentHex = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#F59E0B';
+      const resolvedColors = {
+        ...COLORS,
+        wave: accentHex,
+        selection: `rgba(${accentRgb},0.25)`,
+        selectionBorder: accentHex,
+        fadeOverlay: `rgba(${accentRgb},0.15)`,
+      };
+      ctx.fillStyle = resolvedColors.panel;
       ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
       if (!audioBuffer) {
-        ctx.fillStyle = COLORS.text;
+        ctx.fillStyle = resolvedColors.text;
         ctx.font = '13px Inter, sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText('Drop an audio file or click "Import" to begin editing', canvasWidth / 2, canvasHeight / 2);
@@ -231,7 +241,7 @@ export default function WaveformEditor({ audioContext, onExport }) {
       const endSample = Math.min(Math.ceil(endTime * sr), data.length);
 
       // Draw grid lines
-      ctx.strokeStyle = COLORS.grid;
+      ctx.strokeStyle = resolvedColors.grid;
       ctx.lineWidth = 1;
       const gridInterval = zoom > 200 ? 0.1 : zoom > 50 ? 0.5 : zoom > 10 ? 1 : 5;
       const gridStart = Math.floor(startTime / gridInterval) * gridInterval;
@@ -242,7 +252,7 @@ export default function WaveformEditor({ audioContext, onExport }) {
         ctx.lineTo(x, canvasHeight);
         ctx.stroke();
         // Time label
-        ctx.fillStyle = COLORS.text;
+        ctx.fillStyle = resolvedColors.text;
         ctx.font = '10px JetBrains Mono, monospace';
         ctx.textAlign = 'center';
         const label = t >= 60 ? `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}` : t.toFixed(1) + 's';
@@ -255,9 +265,9 @@ export default function WaveformEditor({ audioContext, onExport }) {
         const e = Math.max(selStart, selEnd);
         const x1 = timeToPx(s);
         const x2 = timeToPx(e);
-        ctx.fillStyle = COLORS.selection;
+        ctx.fillStyle = resolvedColors.selection;
         ctx.fillRect(x1, 0, x2 - x1, canvasHeight);
-        ctx.strokeStyle = COLORS.selectionBorder;
+        ctx.strokeStyle = resolvedColors.selectionBorder;
         ctx.lineWidth = 1;
         ctx.strokeRect(x1, 0, x2 - x1, canvasHeight);
       }
@@ -266,7 +276,7 @@ export default function WaveformEditor({ audioContext, onExport }) {
       const peaks = getPeaks(data, canvasWidth, startSample, endSample);
       const mid = canvasHeight / 2;
       const amp = mid - 20;
-      ctx.fillStyle = COLORS.wave;
+      ctx.fillStyle = resolvedColors.wave;
       for (let i = 0; i < peaks.length; i++) {
         const { min, max } = peaks[i];
         const y1 = mid - max * amp;
@@ -285,14 +295,14 @@ export default function WaveformEditor({ audioContext, onExport }) {
       // Playhead
       const phX = timeToPx(playheadPos);
       if (phX >= 0 && phX <= canvasWidth) {
-        ctx.strokeStyle = COLORS.playhead;
+        ctx.strokeStyle = resolvedColors.playhead;
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(phX, 0);
         ctx.lineTo(phX, canvasHeight);
         ctx.stroke();
         // Playhead triangle
-        ctx.fillStyle = COLORS.playhead;
+        ctx.fillStyle = resolvedColors.playhead;
         ctx.beginPath();
         ctx.moveTo(phX - 5, 0);
         ctx.lineTo(phX + 5, 0);
@@ -301,7 +311,7 @@ export default function WaveformEditor({ audioContext, onExport }) {
       }
 
       // Duration label
-      ctx.fillStyle = COLORS.textBright;
+      ctx.fillStyle = resolvedColors.textBright;
       ctx.font = '11px JetBrains Mono, monospace';
       ctx.textAlign = 'right';
       ctx.fillText(`${duration.toFixed(2)}s | ${sr}Hz | ${audioBuffer.numberOfChannels}ch`, canvasWidth - 8, canvasHeight - 8);
@@ -310,7 +320,7 @@ export default function WaveformEditor({ audioContext, onExport }) {
       if (selStart !== null && selEnd !== null && Math.abs(selEnd - selStart) > 0.001) {
         const s = Math.min(selStart, selEnd);
         const e = Math.max(selStart, selEnd);
-        ctx.fillStyle = COLORS.selectionBorder;
+        ctx.fillStyle = resolvedColors.selectionBorder;
         ctx.textAlign = 'left';
         ctx.fillText(`Selection: ${s.toFixed(2)}s → ${e.toFixed(2)}s (${(e - s).toFixed(2)}s)`, 8, canvasHeight - 8);
       }

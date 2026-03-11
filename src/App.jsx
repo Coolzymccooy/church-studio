@@ -477,20 +477,28 @@ const AudioProcessor = ({ goHome }) => {
         denoise: false, dereverb: false, pastorIsolation: false,
         sermonWarmth: false, smartMixing: false, mastering: false,
         voicePattern: false, musicDucking: false, streamingSafe: false,
+        lookaheadGate: false, dynamicDeEsser: true, multibandComp: false,
       };
     } catch {
       return {
         denoise: false, dereverb: false, pastorIsolation: false,
         sermonWarmth: false, smartMixing: false, mastering: false,
         voicePattern: false, musicDucking: false, streamingSafe: false,
+        lookaheadGate: false, dynamicDeEsser: true, multibandComp: false,
       };
     }
   });
   const [speakerPreset, setSpeakerPreset] = useState(() => {
     return window.localStorage.getItem('tiwaton:speakerPreset') || 'balanced';
   });
-  const [loudnessDb, setLoudnessDb] = useState(null);
+  const [loudnessDb, setLoudnessDb]     = useState(null);
   const [loudnessTarget, setLoudnessTarget] = useState(-14);
+  // True LUFS metering (ITU-R BS.1770) — set by LUFS worklet
+  const [lufsM,  setLufsM]  = useState(null); // momentary (400ms)
+  const [lufsST, setLufsST] = useState(null); // short-term (3s)
+  const [lufsI,  setLufsI]  = useState(null); // integrated (gated)
+  // De-esser gain reduction for meter
+  const [desserGrDb, setDesserGrDb] = useState(0);
   const [abMode, setAbMode] = useState('B');
   const [snapshots, setSnapshots] = useState([]);
   const snapshotCounterRef = useRef(1);
@@ -752,9 +760,13 @@ const AudioProcessor = ({ goHome }) => {
       voicePattern: false,
       musicDucking: false,
       streamingSafe: false,
+      lookaheadGate: false,
+      dynamicDeEsser: true,
+      multibandComp: false,
     });
     setSpeakerPreset('balanced');
     setLoudnessDb(null);
+    setLufsM(null); setLufsST(null); setLufsI(null);
     setLoudnessTarget(-14);
     setAbMode('B');
     setSnapshots([]);
@@ -879,6 +891,66 @@ const AudioProcessor = ({ goHome }) => {
         console.warn('[TIWATON] RNNoise worklet not available:', err.message);
       }
 
+      // ── LUFS Meter (ITU-R BS.1770) ────────────────────────────────────────
+      let lufsNode = null;
+      try {
+        await ctx.audioWorklet.addModule('/worklets/lufs-worklet.js');
+        lufsNode = new AudioWorkletNode(ctx, 'lufs-processor', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
+        lufsNode.port.onmessage = (e) => {
+          const { momentary, shortTerm, integrated } = e.data;
+          setLufsM( parseFloat(momentary.toFixed(1)));
+          setLufsST(parseFloat(shortTerm.toFixed(1)));
+          setLufsI( parseFloat(integrated.toFixed(1)));
+          // Keep legacy loudnessDb in sync for streamingSafe guard
+          setLoudnessDb(parseFloat(shortTerm.toFixed(1)));
+        };
+        console.log('[TIWATON] LUFS Meter loaded (ITU-R BS.1770-4)');
+      } catch (err) {
+        console.warn('[TIWATON] LUFS worklet unavailable:', err.message);
+      }
+
+      // ── Lookahead Gate ────────────────────────────────────────────────────
+      let lookaheadGateNode = null;
+      try {
+        await ctx.audioWorklet.addModule('/worklets/lookahead-gate-worklet.js');
+        lookaheadGateNode = new AudioWorkletNode(ctx, 'lookahead-gate-processor');
+        lookaheadGateNode.parameters.get('enabled').value =
+          featuresRef.current.lookaheadGate ? 1 : 0;
+        console.log('[TIWATON] Lookahead Gate loaded (20ms attack-safe gating)');
+      } catch (err) {
+        console.warn('[TIWATON] Lookahead gate worklet unavailable:', err.message);
+      }
+
+      // ── Dynamic De-esser ─────────────────────────────────────────────────
+      let dynamicDesserNode = null;
+      try {
+        await ctx.audioWorklet.addModule('/worklets/dynamic-desser-worklet.js');
+        dynamicDesserNode = new AudioWorkletNode(ctx, 'dynamic-desser-processor');
+        dynamicDesserNode.parameters.get('enabled').value =
+          featuresRef.current.dynamicDeEsser ? 1 : 0;
+        dynamicDesserNode.port.onmessage = (e) => {
+          if (typeof e.data.grDb === 'number') setDesserGrDb(parseFloat(e.data.grDb.toFixed(1)));
+        };
+        console.log('[TIWATON] Dynamic De-esser loaded (sidechain sibilance detector)');
+      } catch (err) {
+        console.warn('[TIWATON] Dynamic de-esser worklet unavailable:', err.message);
+      }
+
+      // ── Spectral Dereverb ─────────────────────────────────────────────────
+      let dereverbNode = null;
+      try {
+        await ctx.audioWorklet.addModule('/worklets/dereverb-worklet.js');
+        dereverbNode = new AudioWorkletNode(ctx, 'dereverb-processor');
+        dereverbNode.port.postMessage({
+          enabled:  featuresRef.current.dereverb,
+          strength: 1.5,
+          floor:    0.08,
+        });
+        console.log('[TIWATON] Spectral Dereverb loaded (overlap-add minimum-statistics)');
+      } catch (err) {
+        console.warn('[TIWATON] Dereverb worklet unavailable:', err.message);
+      }
+
       let source;
 
       if (inputStream) {
@@ -989,11 +1061,11 @@ const AudioProcessor = ({ goHome }) => {
       polishAir.gain.value = 0;
 
       const limiter = ctx.createDynamicsCompressor();
-      limiter.threshold.value = 0;
-      limiter.knee.value = 30;
-      limiter.ratio.value = 1;
-      limiter.attack.value = 0.003;
-      limiter.release.value = 0.2;
+      limiter.threshold.value = -1;
+      limiter.knee.value = 0;
+      limiter.ratio.value = 20;
+      limiter.attack.value = 0.001;
+      limiter.release.value = 0.1;
 
       const master = ctx.createGain();
       master.gain.value = 1.0;
@@ -1007,11 +1079,55 @@ const AudioProcessor = ({ goHome }) => {
       const destNode = ctx.createMediaStreamDestination();
       destNodeRef.current = destNode;
 
-      // Chain connections
+      // ── Multiband Compressor (4 bands: Sub / Low-Mid / Mid / Air) ─────────
+      // Each band: crossover filter(s) → DynamicsCompressor → GainNode
+      // All band outputs connect to mbMerge (auto-summed by Web Audio)
+      const mbMerge = ctx.createGain(); mbMerge.gain.value = 1.0;
+
+      // Sub band (0–150 Hz) — controls low rumble / proximity effect
+      const mb_sub_lp = ctx.createBiquadFilter();
+      mb_sub_lp.type = 'lowpass'; mb_sub_lp.frequency.value = 150; mb_sub_lp.Q.value = 0.7;
+      const mb_sub_comp = ctx.createDynamicsCompressor();
+      mb_sub_comp.threshold.value = -20; mb_sub_comp.knee.value = 6;
+      mb_sub_comp.ratio.value = 3; mb_sub_comp.attack.value = 0.02; mb_sub_comp.release.value = 0.3;
+      const mb_sub_gain = ctx.createGain(); mb_sub_gain.gain.value = 1.0;
+
+      // Low-mid band (150–800 Hz) — controls body / warmth
+      const mb_lm_hp = ctx.createBiquadFilter();
+      mb_lm_hp.type = 'highpass'; mb_lm_hp.frequency.value = 150; mb_lm_hp.Q.value = 0.7;
+      const mb_lm_lp = ctx.createBiquadFilter();
+      mb_lm_lp.type = 'lowpass'; mb_lm_lp.frequency.value = 800; mb_lm_lp.Q.value = 0.7;
+      const mb_lm_comp = ctx.createDynamicsCompressor();
+      mb_lm_comp.threshold.value = -22; mb_lm_comp.knee.value = 8;
+      mb_lm_comp.ratio.value = 3.5; mb_lm_comp.attack.value = 0.01; mb_lm_comp.release.value = 0.2;
+      const mb_lm_gain = ctx.createGain(); mb_lm_gain.gain.value = 1.0;
+
+      // Mid band (800 Hz–4 kHz) — controls presence / intelligibility (most critical for speech)
+      const mb_mid_hp = ctx.createBiquadFilter();
+      mb_mid_hp.type = 'highpass'; mb_mid_hp.frequency.value = 800; mb_mid_hp.Q.value = 0.7;
+      const mb_mid_lp = ctx.createBiquadFilter();
+      mb_mid_lp.type = 'lowpass'; mb_mid_lp.frequency.value = 4000; mb_mid_lp.Q.value = 0.7;
+      const mb_mid_comp = ctx.createDynamicsCompressor();
+      mb_mid_comp.threshold.value = -18; mb_mid_comp.knee.value = 6;
+      mb_mid_comp.ratio.value = 4; mb_mid_comp.attack.value = 0.005; mb_mid_comp.release.value = 0.15;
+      const mb_mid_gain = ctx.createGain(); mb_mid_gain.gain.value = 1.0;
+
+      // Air band (4 kHz+) — controls brilliance / air / sibilance
+      const mb_air_hp = ctx.createBiquadFilter();
+      mb_air_hp.type = 'highpass'; mb_air_hp.frequency.value = 4000; mb_air_hp.Q.value = 0.7;
+      const mb_air_comp = ctx.createDynamicsCompressor();
+      mb_air_comp.threshold.value = -24; mb_air_comp.knee.value = 10;
+      mb_air_comp.ratio.value = 2.5; mb_air_comp.attack.value = 0.002; mb_air_comp.release.value = 0.1;
+      const mb_air_gain = ctx.createGain(); mb_air_gain.gain.value = 1.0;
+
+      // Gate output node — the signal entering the DSP chain after gating
+      const gateOutput = ctx.createGain(); gateOutput.gain.value = 1.0;
+
+      // ════ SIGNAL CHAIN ════════════════════════════════════════════════════
       source.connect(inputGain);
       inputGain.connect(lowCut);
 
-      // Insert RNNoise (neural denoise) before analyser if available
+      // ── Neural Denoise (RNNoise WASM) ────────────────────────────────────
       if (rnnoiseNode) {
         lowCut.connect(rnnoiseNode);
         rnnoiseNode.connect(ana);
@@ -1019,37 +1135,91 @@ const AudioProcessor = ({ goHome }) => {
         lowCut.connect(ana);
       }
 
-      // Insert HyperGate worklet after analyser if available, otherwise use GainNode fallback
-      if (hyperGateNode) {
+      // ── Gate Layer (HyperGate or Lookahead Gate or GainNode fallback) ────
+      // Lookahead gate: delays signal 20ms and pre-opens gate before syllables
+      // HyperGate: FFT-based voice detection, sub-1ms reaction
+      // Both can coexist: lookahead gate first (delays signal), then HyperGate re-gates
+      if (lookaheadGateNode) {
+        ana.connect(lookaheadGateNode);
+        if (hyperGateNode) {
+          lookaheadGateNode.connect(hyperGateNode);
+          hyperGateNode.connect(gateOutput);
+        } else {
+          lookaheadGateNode.connect(gateOutput);
+        }
+      } else if (hyperGateNode) {
         ana.connect(hyperGateNode);
-        hyperGateNode.connect(noiseNotch);
+        hyperGateNode.connect(gateOutput);
       } else {
         ana.connect(gateGain);
-        gateGain.connect(noiseNotch);
+        gateGain.connect(gateOutput);
       }
+
+      // ── EQ + Spectral Shaping ─────────────────────────────────────────────
+      gateOutput.connect(noiseNotch);
       noiseNotch.connect(voiceContour);
       voiceContour.connect(noiseBlend);
       noiseBlend.connect(noiseLowShelf);
       noiseLowShelf.connect(noiseHighShelf);
-      noiseHighShelf.connect(deEsser);
-      deEsser.connect(compressor);
 
+      // ── Dynamic De-esser (sidechain sibilance detector) ──────────────────
+      // Sits BEFORE multiband comp so sibilance doesn't pump the compressors
+      if (dynamicDesserNode) {
+        noiseHighShelf.connect(dynamicDesserNode);
+        dynamicDesserNode.connect(deEsser); // deEsser acts as backup/static stage
+      } else {
+        noiseHighShelf.connect(deEsser);
+      }
+
+      // ── Multiband Compressor (4 bands) ───────────────────────────────────
+      // Split into 4 parallel frequency bands, compress each independently, sum back
+      deEsser.connect(mb_sub_lp);
+      deEsser.connect(mb_lm_hp);
+      deEsser.connect(mb_mid_hp);
+      deEsser.connect(mb_air_hp);
+
+      mb_sub_lp.connect(mb_sub_comp);    mb_sub_comp.connect(mb_sub_gain);    mb_sub_gain.connect(mbMerge);
+      mb_lm_hp.connect(mb_lm_lp);       mb_lm_lp.connect(mb_lm_comp);        mb_lm_comp.connect(mb_lm_gain);  mb_lm_gain.connect(mbMerge);
+      mb_mid_hp.connect(mb_mid_lp);      mb_mid_lp.connect(mb_mid_comp);      mb_mid_comp.connect(mb_mid_gain); mb_mid_gain.connect(mbMerge);
+      mb_air_hp.connect(mb_air_comp);    mb_air_comp.connect(mb_air_gain);    mb_air_gain.connect(mbMerge);
+
+      mbMerge.connect(compressor);
+
+      // ── Broadband Compressor + Auto Gain ─────────────────────────────────
       compressor.connect(autoGain);
       autoGain.connect(eqWarmth);
 
+      // ── EQ Colour / Warmth ────────────────────────────────────────────────
       eqWarmth.connect(eqClarity);
-      eqClarity.connect(reverbFilter);
+
+      // ── Spectral Dereverberation ──────────────────────────────────────────
+      // Spectral dereverb worklet replaces old lowpass+duck approach when active
+      // Old reverbFilter/Ducker remain in chain for legacy param compatibility
+      if (dereverbNode) {
+        eqClarity.connect(dereverbNode);
+        dereverbNode.connect(reverbFilter);
+      } else {
+        eqClarity.connect(reverbFilter);
+      }
       reverbFilter.connect(reverbDucker);
       reverbDucker.connect(duckGain);
+
+      // ── Polish EQ + Brick-wall Limiter ───────────────────────────────────
       duckGain.connect(polishLow);
       polishLow.connect(polishPresence);
       polishPresence.connect(polishAir);
       polishAir.connect(limiter);
       limiter.connect(master);
 
-      // reverbDucker routes through duckGain→polish→limiter→master (no bypass)
-      master.connect(monitorGain);
-      master.connect(destNode);
+      // ── LUFS Meter tap (meter-only, passes through) ──────────────────────
+      if (lufsNode) {
+        master.connect(lufsNode);
+        lufsNode.connect(monitorGain);
+        lufsNode.connect(destNode);
+      } else {
+        master.connect(monitorGain);
+        master.connect(destNode);
+      }
 
       // MONITORING OUTPUT DEVICE (AirPods / speakers)
       if (ctx.destination.setSinkId && selectedDevices.outputId !== 'default') {
@@ -1066,6 +1236,7 @@ const AudioProcessor = ({ goHome }) => {
         inputGain,
         lowCut,
         gateGain,
+        gateOutput,
         noiseNotch,
         voiceContour,
         noiseBlend,
@@ -1086,8 +1257,19 @@ const AudioProcessor = ({ goHome }) => {
         master,
         monitorGain,
         analyser: ana,
+        // new worklet nodes
         hyperGateNode,
         rnnoiseNode,
+        lufsNode,
+        lookaheadGateNode,
+        dynamicDesserNode,
+        dereverbNode,
+        // multiband compressor nodes
+        mb_sub_comp, mb_sub_gain,
+        mb_lm_comp,  mb_lm_gain,
+        mb_mid_comp, mb_mid_gain,
+        mb_air_comp, mb_air_gain,
+        mbMerge,
       };
 
       setAudioEngineError(null);
@@ -1859,6 +2041,13 @@ const AudioProcessor = ({ goHome }) => {
       limiter,
       master,
       deEsser,
+      lookaheadGateNode,
+      dynamicDesserNode,
+      dereverbNode,
+      mb_sub_comp, mb_sub_gain,
+      mb_lm_comp,  mb_lm_gain,
+      mb_mid_comp, mb_mid_gain,
+      mb_air_comp, mb_air_gain,
     } = processingRefs.current;
     const now = audioContext.currentTime;
 
@@ -1957,15 +2146,55 @@ const AudioProcessor = ({ goHome }) => {
     }
 
     if (reverbFilter) {
-      const targetFreq = getTarget(features.dereverb, 6200, 18000);
+      // When spectral dereverb worklet is active, keep legacy filter wide open
+      // When only legacy mode: tighten to 6200 Hz to simulate reverb removal
+      const useLegacyDereverb = features.dereverb && !dereverbNode;
+      const targetFreq = getTarget(useLegacyDereverb, 6200, 18000);
       reverbFilter.frequency.linearRampToValueAtTime(targetFreq, now + 0.25);
     }
 
     if (reverbDucker) {
       const targetGain =
-        features.dereverb && !isBypassed ? (voiceActive ? 1.0 : 0.55) : 1.0;
+        features.dereverb && !isBypassed && !dereverbNode ? (voiceActive ? 1.0 : 0.55) : 1.0;
       reverbDucker.gain.linearRampToValueAtTime(targetGain, now + 0.2);
     }
+
+    // ── Spectral Dereverb Worklet ──────────────────────────────────────────
+    if (dereverbNode) {
+      dereverbNode.port.postMessage({
+        enabled:  features.dereverb && !isBypassed,
+        strength: features.pastorIsolation ? 2.0 : 1.5,
+        floor:    0.08,
+      });
+    }
+
+    // ── Lookahead Gate ─────────────────────────────────────────────────────
+    if (lookaheadGateNode) {
+      const enabledParam = lookaheadGateNode.parameters.get('enabled');
+      if (enabledParam) enabledParam.value = (features.lookaheadGate && !isBypassed) ? 1 : 0;
+    }
+
+    // ── Dynamic De-esser ──────────────────────────────────────────────────
+    if (dynamicDesserNode) {
+      const enabledParam = dynamicDesserNode.parameters.get('enabled');
+      if (enabledParam) enabledParam.value = (features.dynamicDeEsser && !isBypassed) ? 1 : 0;
+      // Adjust de-esser threshold and frequency based on active features
+      const freqParam    = dynamicDesserNode.parameters.get('frequency');
+      const threshParam  = dynamicDesserNode.parameters.get('threshold');
+      if (freqParam)   freqParam.value   = features.pastorIsolation ? 6500 : 7500;
+      if (threshParam) threshParam.value = features.pastorIsolation ? -20  : -24;
+    }
+
+    // ── Multiband Compressor — enable/bypass per feature flag ────────────
+    // When multibandComp is OFF, set all band gains to 0 dB so signal sums flat
+    // (the deEsser → mbMerge path is always active; bypassed = each comp ratio=1)
+    const mbActive = features.multibandComp && !isBypassed;
+    if (mb_sub_comp)  mb_sub_comp.ratio.value  = mbActive ? 3   : 1;
+    if (mb_lm_comp)   mb_lm_comp.ratio.value   = mbActive ? 3.5 : 1;
+    if (mb_mid_comp)  mb_mid_comp.ratio.value  = mbActive ? 4   : 1;
+    if (mb_air_comp)  mb_air_comp.ratio.value  = mbActive ? 2.5 : 1;
+    // Tighten mid band further for pastor isolation (nail the voice band)
+    if (mb_mid_comp && features.pastorIsolation) mb_mid_comp.ratio.value = mbActive ? 5.5 : 1;
 
     if (noiseNotch) {
       const targetQ = getTarget(features.voicePattern, 5, 1);
@@ -2120,6 +2349,9 @@ const AudioProcessor = ({ goHome }) => {
       analyser.getByteTimeDomainData(timeData);
       latestSpectrumRef.current = freqData.slice(0);
 
+      // Resolve theme accent color for canvas (CSS vars don't work in ctx.fillStyle)
+      const accentRgb = getComputedStyle(document.documentElement).getPropertyValue('--accent-rgb').trim() || '245,158,11';
+
       const w = canvas.width;
       const h = canvas.height;
       const cx = w / 2;
@@ -2184,11 +2416,11 @@ const AudioProcessor = ({ goHome }) => {
           // Gate closed, noise being blocked - RED
           barColor = 'rgba(239,68,68,0.6)'; // red-500
         } else if (inVoiceBand) {
-          // Voice band, quiet - CYAN
-          barColor = 'rgba(56,189,248,0.75)'; // cyan-400
+          // Voice band, quiet - theme accent (bright)
+          barColor = `rgba(${accentRgb},0.80)`;
         } else {
-          // Default - BLUE
-          barColor = 'rgba(37,99,235,0.55)'; // blue-600
+          // Default - theme accent (dim)
+          barColor = `rgba(${accentRgb},0.40)`;
         }
 
         ctx.fillStyle = barColor;
@@ -2657,9 +2889,9 @@ const AudioProcessor = ({ goHome }) => {
         coreGrad.addColorStop(0.5, 'rgba(88,28,135,0.15)');
         coreGrad.addColorStop(1, 'rgba(15,23,42,0.0)');
       } else {
-        // Idle blue
-        coreGrad.addColorStop(0, 'rgba(129,140,248,0.35)');
-        coreGrad.addColorStop(0.5, 'rgba(30,64,175,0.25)');
+        // Idle - theme accent
+        coreGrad.addColorStop(0, `rgba(${accentRgb},0.35)`);
+        coreGrad.addColorStop(0.5, `rgba(${accentRgb},0.15)`);
         coreGrad.addColorStop(1, 'rgba(15,23,42,0.0)');
       }
 
@@ -2762,7 +2994,7 @@ const AudioProcessor = ({ goHome }) => {
         dot('rgba(34,197,94,0.85)', 'Voice (passing)');
         dot('rgba(239,68,68,0.6)', 'Noise (blocked)');
         dot('rgba(251,146,60,0.7)', 'Rejected (baby/hiss)');
-        dot('rgba(56,189,248,0.75)', 'Voice band (quiet)');
+        dot(`rgba(${accentRgb},0.80)`, 'Voice band (quiet)');
 
         ctx.textAlign = 'center';
       }
@@ -3333,13 +3565,49 @@ const AudioProcessor = ({ goHome }) => {
             {/* ── AI STACK TAB ── */}
             {controlTab === 'stack' && (
               <div className="space-y-2">
-                <button onClick={() => { setFeatures({denoise:true,dereverb:true,voicePattern:true,musicDucking:true,pastorIsolation:true,sermonWarmth:true,smartMixing:true,mastering:true,streamingSafe:true}); setGateMode('speech'); setSpeakerPreset('pastor'); }}
+                <button onClick={() => { setFeatures({denoise:true,dereverb:true,voicePattern:true,musicDucking:true,pastorIsolation:true,sermonWarmth:true,smartMixing:true,mastering:true,streamingSafe:true,lookaheadGate:true,dynamicDeEsser:true,multibandComp:true}); setGateMode('speech'); setSpeakerPreset('pastor'); }}
                   className="w-full py-2 rounded-lg border border-[#00E676]/30 text-[#00E676] text-[9px] font-bold tracking-[0.15em] hover:opacity-90 transition-opacity" style={{background:'rgba(0,230,118,0.08)'}}>
                   ✦ CHURCH BETA — ALL ON
                 </button>
                 <p className="text-[9px] text-slate-600 text-center pb-1">All AI features + Speech-Only gate + Pastor preset</p>
+
+                {/* ─ Next-Gen DSP section header ─ */}
+                <div className="flex items-center gap-2 pt-1">
+                  <div className="flex-1 h-px bg-slate-800"/>
+                  <span className="text-[8px] font-bold tracking-[0.15em] text-slate-600 uppercase">Next-Gen DSP</span>
+                  <div className="flex-1 h-px bg-slate-800"/>
+                </div>
+
                 {[
-                  {key:'dereverb', icon:<Radio size={11}/>, label:'Echo / Reverb Cleaner', desc:'Dries up room reflections'},
+                  {key:'lookaheadGate',   icon:<Waves size={11}/>,   label:'Lookahead Gate',         desc:'20ms pre-opens gate — no clipped first syllable'},
+                  {key:'dynamicDeEsser',  icon:<Mic size={11}/>,     label:'Dynamic De-esser',       desc:'Sidechain sibilance detector — more transparent than notch'},
+                  {key:'multibandComp',   icon:<Sliders size={11}/>, label:'Multiband Compressor',   desc:'4-band (sub/low/mid/air) independent compression'},
+                  {key:'dereverb',        icon:<Radio size={11}/>,    label:'Spectral Dereverberation', desc:'Overlap-add FFT reverb tail subtraction'},
+                ].map(({key, icon, label, desc}) => (
+                  <div key={key} onClick={() => setFeatures({...features, [key]: !features[key]})}
+                    className={`cursor-pointer p-2.5 rounded-lg border transition-all ${features[key] ? 'border-[var(--accent)]/40' : 'border-slate-800 hover:border-slate-700 opacity-60 hover:opacity-100'}`}
+                    style={features[key] ? {background:'rgba(var(--accent-rgb),0.08)'} : {}}>
+                    <div className="flex items-center justify-between">
+                      <div className={`flex items-center gap-1.5 ${features[key] ? 'text-[var(--accent)]' : 'text-slate-500'}`}>
+                        {icon}
+                        <span className="text-[10px] font-semibold text-slate-300">{label}</span>
+                      </div>
+                      <div className={`w-6 h-3 rounded-full transition-colors relative ${features[key] ? 'bg-[var(--accent)]' : 'bg-slate-700'}`}>
+                        <div className={`absolute top-0.5 w-2 h-2 bg-white rounded-full transition-transform ${features[key] ? 'translate-x-3 left-0.5' : 'left-0.5'}`}/>
+                      </div>
+                    </div>
+                    <p className="text-[9px] text-slate-600 mt-1 pl-4">{desc}</p>
+                  </div>
+                ))}
+
+                {/* ─ Standard AI features ─ */}
+                <div className="flex items-center gap-2 pt-1">
+                  <div className="flex-1 h-px bg-slate-800"/>
+                  <span className="text-[8px] font-bold tracking-[0.15em] text-slate-600 uppercase">AI Processing</span>
+                  <div className="flex-1 h-px bg-slate-800"/>
+                </div>
+
+                {[
                   {key:'voicePattern', icon:<Waves size={11}/>, label:'Voice Pattern Cleanse', desc:'Removes non-voice spectral content'},
                   {key:'musicDucking', icon:<Volume2 size={11}/>, label:'Music Ducking', desc:'Drops music when speech detected'},
                   {key:'pastorIsolation', icon:<Mic size={11}/>, label:'Pastor Voice Isolation', desc:'Prioritises pastor over choir'},
@@ -3406,8 +3674,27 @@ const AudioProcessor = ({ goHome }) => {
                       <option value={-16}>Facebook Live (-16 LUFS)</option>
                       <option value={-20}>Zoom / Teams (-20 LUFS)</option>
                     </select>
+                    {/* True LUFS meter (ITU-R BS.1770) */}
+                    <div className="rounded border border-slate-700 p-2 space-y-1" style={{background:'#050A1C'}}>
+                      <div className="flex justify-between text-[9px]">
+                        <span className="text-slate-500">Momentary</span>
+                        <span className={`font-mono font-bold ${lufsM !== null && lufsM > loudnessTarget + 3 ? 'text-[#FF5252]' : lufsM !== null && lufsM > loudnessTarget ? 'text-[var(--accent)]' : 'text-[#00E676]'}`}>{lufsM !== null ? `${lufsM} LU` : '--'}</span>
+                      </div>
+                      <div className="flex justify-between text-[9px]">
+                        <span className="text-slate-500">Short-Term</span>
+                        <span className={`font-mono ${lufsST !== null && lufsST > loudnessTarget + 2 ? 'text-[#FF5252]' : 'text-slate-300'}`}>{lufsST !== null ? `${lufsST} LUFS` : '--'}</span>
+                      </div>
+                      <div className="flex justify-between text-[9px]">
+                        <span className="text-slate-500">Integrated</span>
+                        <span className="font-mono text-slate-400">{lufsI !== null ? `${lufsI} LUFS` : '--'}</span>
+                      </div>
+                      <div className="flex justify-between text-[9px] border-t border-slate-700 pt-1">
+                        <span className="text-slate-500">Target</span>
+                        <span className="font-mono text-[var(--accent)]">{loudnessTarget} LUFS</span>
+                      </div>
+                    </div>
                     <div className="flex items-center justify-between text-[9px]">
-                      <span className="text-slate-500">Current: {typeof loudnessDb === 'number' ? `${loudnessDb} dB` : '--'}</span>
+                      <span className="text-slate-500 text-[8px]">ITU-R BS.1770-4 K-weighted</span>
                       <button onClick={() => setFeatures({...features, streamingSafe: !features.streamingSafe})} className={`px-2 py-0.5 rounded border text-[9px] font-bold ${features.streamingSafe ? 'border-[#00E676]/40 text-[#00E676]' : 'border-slate-700 text-slate-500'}`}>
                         STREAM SAFE {features.streamingSafe ? 'ON' : 'OFF'}
                       </button>
@@ -3504,6 +3791,9 @@ const AudioProcessor = ({ goHome }) => {
             {/* Active feature badges */}
             <div className="flex items-center gap-1 overflow-x-auto" style={{scrollbarWidth:'none'}}>
               {features.denoise && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-[#00E676]/30 text-[#00E676] whitespace-nowrap" style={{background:'rgba(0,230,118,0.08)'}}>HYPER-GATE</span>}
+              {features.lookaheadGate && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-[#00E676]/30 text-[#00E676] whitespace-nowrap" style={{background:'rgba(0,230,118,0.08)'}}>LOOKAHEAD</span>}
+              {features.dynamicDeEsser && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-[var(--accent)]/30 text-[var(--accent)] whitespace-nowrap" style={{background:'rgba(var(--accent-rgb),0.08)'}}>DE-ESS{desserGrDb < -0.5 ? ` ${desserGrDb}dB` : ''}</span>}
+              {features.multibandComp && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-[var(--accent)]/30 text-[var(--accent)] whitespace-nowrap" style={{background:'rgba(var(--accent-rgb),0.08)'}}>4-BAND</span>}
               {features.voicePattern && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-[#00E676]/30 text-[#00E676] whitespace-nowrap" style={{background:'rgba(0,230,118,0.08)'}}>VOICE CLEANSE</span>}
               {features.pastorIsolation && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-[var(--accent)]/30 text-[var(--accent)] whitespace-nowrap" style={{background:'rgba(var(--accent-rgb),0.08)'}}>ISOLATION</span>}
               {features.sermonWarmth && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-[var(--accent)]/30 text-[var(--accent)] whitespace-nowrap" style={{background:'rgba(var(--accent-rgb),0.08)'}}>WARMTH</span>}
@@ -3705,7 +3995,7 @@ const AudioProcessor = ({ goHome }) => {
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-slate-500">Current</span>
-                  <span className={`font-mono ${typeof loudnessDb === 'number' && loudnessDb > loudnessTarget + 3 ? 'text-[#FF5252]' : 'text-slate-400'}`}>{typeof loudnessDb === 'number' ? `${loudnessDb} dB` : '--'}</span>
+                  <span className={`font-mono ${lufsST !== null && lufsST > loudnessTarget + 3 ? 'text-[#FF5252]' : 'text-slate-400'}`}>{lufsST !== null ? `${lufsST} LUFS` : '--'}</span>
                 </div>
               </div>
             </div>

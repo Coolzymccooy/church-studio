@@ -2,7 +2,7 @@
   "name": "tiwaton-ai-studio",
   "productName": "TIWATON AI Studio",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "AI-powered church audio processing workstation",
   "author": "TIWATON",
   "main": "electron/main.js",
@@ -17,6 +17,7 @@
     "preview": "vite preview",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .\"",
     "electron:build": "vite build && electron-builder",
+    "electron:release": "vite build && electron-builder --publish always",
     "electron:preview": "vite build && electron ."
   },
   "build": {
@@ -64,6 +65,12 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "TIWATON AI Studio"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "Coolzymccooy",
+      "repo": "church-studio",
+      "releaseType": "release"
     }
   },
   "dependencies": {
