@@ -3106,6 +3106,63 @@ const AudioProcessor = ({ goHome }) => {
               <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">
                 Broadcast Output (what OBS / YouTube hears)
               </label>
+
+              {/* Auto-detect virtual cable */}
+              {(() => {
+                const vcKeywords = ['vb-cable', 'vb cable', 'blackhole', 'black hole', 'loopback', 'virtual'];
+                const detected = availableDevices.outputs.filter(d =>
+                  vcKeywords.some(kw => (d.label || '').toLowerCase().includes(kw))
+                );
+                const isWindows = navigator.userAgent.toLowerCase().includes('win');
+                const isMac = navigator.userAgent.toLowerCase().includes('mac');
+
+                return detected.length > 0 ? (
+                  <div className="mb-2 flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-emerald-700/40 bg-emerald-900/10">
+                    <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />
+                    <span className="text-[10px] text-emerald-400 font-semibold">
+                      Virtual cable detected: {detected.map(d => d.label).join(', ')}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="mb-2 rounded-lg border border-amber-700/30 px-3 py-2.5 space-y-1.5" style={{ background: 'rgba(245,158,11,0.05)' }}>
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle size={12} className="text-amber-500 shrink-0 mt-0.5" />
+                      <p className="text-[10px] text-amber-400 font-semibold">No virtual cable detected</p>
+                    </div>
+                    <p className="text-[9px] text-slate-500 leading-relaxed">
+                      A virtual cable routes TIWATON audio into OBS. Install one (free), then refresh devices.
+                    </p>
+                    <div className="flex gap-2">
+                      {(isWindows || (!isWindows && !isMac)) && (
+                        <a
+                          href="https://vb-audio.com/Cable/"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center gap-1 px-2 py-1 rounded-md text-[9px] font-bold text-black"
+                          style={{ background: '#F59E0B' }}
+                        >
+                          <ArrowRight size={9} />
+                          VB-CABLE (Windows)
+                        </a>
+                      )}
+                      {(isMac || (!isWindows && !isMac)) && (
+                        <a
+                          href="https://existential.audio/blackhole/"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center gap-1 px-2 py-1 rounded-md text-[9px] font-bold text-black"
+                          style={{ background: '#F59E0B' }}
+                        >
+                          <ArrowRight size={9} />
+                          BlackHole (Mac)
+                        </a>
+                      )}
+                    </div>
+                    <p className="text-[9px] text-slate-600">After installing, click the ↺ refresh button above.</p>
+                  </div>
+                );
+              })()}
+
               <select
                 className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3"
                 value={selectedDevices.broadcastBus}
@@ -3116,7 +3173,7 @@ const AudioProcessor = ({ goHome }) => {
                   })
                 }
               >
-                <option value="Not set">Not set yet (set device in OBS)</option>
+                <option value="Not set">Not set yet</option>
                 <option value="Same as monitor">Same as monitor output</option>
                 {availableDevices.outputs.map((d) => (
                   <option key={d.deviceId} value={d.label || d.deviceId}>
@@ -3124,9 +3181,8 @@ const AudioProcessor = ({ goHome }) => {
                   </option>
                 ))}
               </select>
-              <p className="mt-1 text-[10px] text-slate-500">
-                Pick the virtual cable / loopback device you also select as the input in OBS
-                (e.g. VB-CABLE, BlackHole, Loopback).
+              <p className="mt-1.5 text-[10px] text-slate-600 leading-snug">
+                Set this to VB-CABLE Input (Windows) or BlackHole 2ch (Mac). Then in OBS, choose the same device as your Audio Input Capture source.
               </p>
             </div>
 
