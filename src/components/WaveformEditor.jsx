@@ -7,6 +7,152 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
  * and multi-track overlay with mix-down.
  */
 
+// ─── Radix-2 DIT FFT (Cooley-Tukey, in-place) ────────────────────────────────
+// Used by spectral subtraction noise removal — operates in frequency domain.
+function _fft(re, im, inverse) {
+  const N = re.length;
+  // Bit-reversal permutation
+  for (let i = 1, j = 0; i < N; i++) {
+    let bit = N >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) {
+      let t;
+      t = re[i]; re[i] = re[j]; re[j] = t;
+      t = im[i]; im[i] = im[j]; im[j] = t;
+    }
+  }
+  // Butterfly stages
+  for (let s = 2; s <= N; s <<= 1) {
+    const ang = (inverse ? 2 : -2) * Math.PI / s;
+    const wR = Math.cos(ang), wI = Math.sin(ang);
+    for (let k = 0; k < N; k += s) {
+      let uR = 1, uI = 0;
+      for (let j = 0; j < s >> 1; j++) {
+        const p = k + j, q = p + (s >> 1);
+        const tR = uR * re[q] - uI * im[q];
+        const tI = uR * im[q] + uI * re[q];
+        re[q] = re[p] - tR; im[q] = im[p] - tI;
+        re[p] += tR;        im[p] += tI;
+        const nR = uR * wR - uI * wI;
+        uI = uR * wI + uI * wR;
+        uR = nR;
+      }
+    }
+  }
+  if (inverse) for (let i = 0; i < N; i++) { re[i] /= N; im[i] /= N; }
+}
+
+/**
+ * Build Hann window of length N.
+ * Returns: Float32Array
+ */
+function makeHann(N) {
+  const w = new Float32Array(N);
+  for (let i = 0; i < N; i++) w[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / (N - 1)));
+  return w;
+}
+
+/**
+ * Compute average power spectrum from a Float32Array signal using FFT.
+ * Returns Float32Array[N/2+1] — power (magnitude²) per frequency bin.
+ *
+ * @param {Float32Array} signal  — audio samples
+ * @param {number}       N       — FFT size (must be power of 2)
+ * @param {Float32Array} win     — Hann window (length N)
+ */
+function computePowerSpectrum(signal, N, win) {
+  const HALF = (N >> 1) + 1;
+  const power = new Float64Array(HALF);
+  const re = new Float32Array(N);
+  const im = new Float32Array(N);
+  let frames = 0;
+  const HOP = N >> 1; // 50% overlap for profile capture
+
+  for (let pos = 0; pos + N <= signal.length; pos += HOP) {
+    for (let i = 0; i < N; i++) { re[i] = signal[pos + i] * win[i]; im[i] = 0; }
+    _fft(re, im, false);
+    for (let k = 0; k < HALF; k++) power[k] += re[k] * re[k] + im[k] * im[k];
+    frames++;
+  }
+  if (frames > 0) for (let k = 0; k < HALF; k++) power[k] /= frames;
+  return new Float32Array(power);
+}
+
+/**
+ * Overlap-add spectral subtraction noise removal.
+ *
+ * Algorithm:
+ *   For each overlapping frame:
+ *     1. Apply analysis Hann window
+ *     2. Forward FFT → complex spectrum
+ *     3. Per bin: suppressed = max(|X[k]| − α·√noise[k], β·|X[k]|)
+ *        where α = over-subtraction factor, β = spectral floor
+ *     4. Reconstruct with original phase
+ *     5. IFFT → time domain frame
+ *     6. Apply synthesis Hann window + overlap-add
+ *
+ * @param {Float32Array} input       — one channel of audio
+ * @param {Float32Array} noisePower  — noise power spectrum (from computePowerSpectrum)
+ * @param {number}       alpha       — over-subtraction factor (1.0 = conservative, 2.0 = aggressive)
+ * @param {number}       beta        — spectral floor (0.05 = low musical-noise risk)
+ * @param {number}       N           — FFT size
+ * @param {Float32Array} win         — Hann window (length N)
+ * @returns {Float32Array}           — processed audio
+ */
+function spectralSubtract(input, noisePower, alpha, beta, N, win) {
+  const HALF = (N >> 1) + 1;
+  const HOP  = N >> 1; // 50% overlap
+  const output = new Float64Array(input.length);
+  const re = new Float32Array(N);
+  const im = new Float32Array(N);
+
+  // Precompute noise magnitude per bin (√ of averaged power)
+  const noiseMag = new Float32Array(HALF);
+  for (let k = 0; k < HALF; k++) noiseMag[k] = Math.sqrt(noisePower[k]);
+
+  // OLA normalisation for analysis+synthesis Hann at 50% overlap = 2.0
+  const norm = 2.0 / N;
+
+  for (let pos = 0; pos + N <= input.length; pos += HOP) {
+    // ── Analysis window ─────────────────────────────────────────────────────
+    for (let i = 0; i < N; i++) { re[i] = input[pos + i] * win[i]; im[i] = 0; }
+
+    // ── Forward FFT ──────────────────────────────────────────────────────────
+    _fft(re, im, false);
+
+    // ── Spectral subtraction per bin ─────────────────────────────────────────
+    for (let k = 0; k < HALF; k++) {
+      const mag   = Math.sqrt(re[k] * re[k] + im[k] * im[k]);
+      const phase = Math.atan2(im[k], re[k]);
+
+      // Suppress: subtract scaled noise, never go below spectral floor
+      const suppressed = Math.max(mag - alpha * noiseMag[k], beta * mag);
+      const gain = mag > 1e-12 ? suppressed / mag : 0;
+
+      re[k] = re[k] * gain;
+      im[k] = im[k] * gain;
+
+      // Enforce Hermitian symmetry so IFFT produces real output
+      if (k > 0 && k < N >> 1) {
+        re[N - k] =  re[k];
+        im[N - k] = -im[k];
+      }
+    }
+
+    // ── Inverse FFT ──────────────────────────────────────────────────────────
+    _fft(re, im, true);
+
+    // ── Synthesis window + overlap-add ───────────────────────────────────────
+    for (let i = 0; i < N; i++) {
+      const idx = pos + i;
+      if (idx < output.length) output[idx] += re[i] * win[i] * norm * N;
+    }
+  }
+
+  return new Float32Array(output);
+}
+
 const COLORS = {
   bg: '#050A1C',
   panel: '#0D1428',
@@ -628,37 +774,25 @@ export default function WaveformEditor({ audioContext, onExport }) {
     setPlayheadPos(0);
   }, [audioBuffer, pushUndo, createBuffer, activeTrackIdx]);
 
-  // --- NOISE REMOVAL (Spectral Subtraction) ---
+  // --- NOISE REMOVAL (True FFT Spectral Subtraction) ---
   const captureNoiseProfile = useCallback(() => {
     const sel = getSelSamples();
     if (!sel || sel.end <= sel.start) {
-      alert('Select a region of pure noise (no speech) to capture the noise profile.');
+      alert('Select a region of pure noise (room tone / background — no speech) to capture.');
       return;
     }
-    const data = audioBuffer.getChannelData(0);
-    const noiseData = data.slice(sel.start, sel.end);
+    const N   = 2048;
+    const win = makeHann(N);
+    const noiseData = audioBuffer.getChannelData(0).slice(sel.start, sel.end);
 
-    // Compute average power spectrum of noise
-    const fftSize = 2048;
-    const numFrames = Math.floor(noiseData.length / fftSize);
-    const avgSpectrum = new Float32Array(fftSize);
-
-    for (let frame = 0; frame < numFrames; frame++) {
-      const offset = frame * fftSize;
-      // Simple power spectrum via correlation (using real FFT approximation)
-      for (let i = 0; i < fftSize; i++) {
-        const val = i + offset < noiseData.length ? noiseData[i + offset] : 0;
-        avgSpectrum[i] += val * val;
-      }
+    if (noiseData.length < N) {
+      alert('Selection too short — select at least 0.05s of background noise.');
+      return;
     }
 
-    if (numFrames > 0) {
-      for (let i = 0; i < fftSize; i++) {
-        avgSpectrum[i] /= numFrames;
-      }
-    }
-
-    setNoiseProfile(avgSpectrum);
+    // FFT-based average power spectrum: profile[k] = mean |X[k]|² across frames
+    const profile = computePowerSpectrum(noiseData, N, win);
+    setNoiseProfile(profile);
   }, [audioBuffer, getSelSamples]);
 
   const applyNoiseRemoval = useCallback(() => {
@@ -668,56 +802,24 @@ export default function WaveformEditor({ audioContext, onExport }) {
     }
     pushUndo();
 
-    const sr = audioBuffer.sampleRate;
+    const N   = 2048;
+    const win = makeHann(N);
+    const sr  = audioBuffer.sampleRate;
     const nch = audioBuffer.numberOfChannels;
-    const fftSize = 2048;
-    const hopSize = fftSize / 2;
-    const reductionFactor = Math.pow(10, noiseReduction / 20);
-    const resultChannels = [];
 
+    // noiseReduction slider is in dB.
+    // α (over-subtraction factor): maps dB range to useful alpha range.
+    //   6 dB  → α = 1.0 (gentle, minimal musical noise)
+    //  12 dB  → α = 1.5 (standard)
+    //  18 dB  → α = 2.0 (aggressive)
+    //  24 dB  → α = 2.5 (very aggressive)
+    const alpha = 1.0 + (noiseReduction - 6) / 12 * 1.5;
+    const beta  = 0.05; // Spectral floor — prevents musical noise / complete silence
+
+    const resultChannels = [];
     for (let ch = 0; ch < nch; ch++) {
       const input = audioBuffer.getChannelData(ch);
-      const output = new Float32Array(input.length);
-      const window = new Float32Array(fftSize);
-      for (let i = 0; i < fftSize; i++) {
-        window[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / (fftSize - 1)));
-      }
-
-      // Overlap-add spectral subtraction
-      for (let pos = 0; pos + fftSize <= input.length; pos += hopSize) {
-        // Windowed frame
-        const frame = new Float32Array(fftSize);
-        for (let i = 0; i < fftSize; i++) {
-          frame[i] = input[pos + i] * window[i];
-        }
-
-        // Simple spectral subtraction: reduce energy in bins matching noise profile
-        for (let i = 0; i < fftSize; i++) {
-          const noisePower = noiseProfile[i] * reductionFactor;
-          const signalPower = frame[i] * frame[i];
-          if (signalPower < noisePower) {
-            frame[i] *= 0.05; // Heavily suppress
-          } else {
-            const scale = Math.sqrt(Math.max(0, signalPower - noisePower) / (signalPower + 1e-10));
-            frame[i] *= scale;
-          }
-        }
-
-        // Overlap-add
-        for (let i = 0; i < fftSize; i++) {
-          if (pos + i < output.length) {
-            output[pos + i] += frame[i] * window[i];
-          }
-        }
-      }
-
-      // Normalize overlap-add gain
-      const normFactor = hopSize / fftSize * 2;
-      for (let i = 0; i < output.length; i++) {
-        output[i] *= normFactor;
-      }
-
-      resultChannels.push(output);
+      resultChannels.push(spectralSubtract(input, noiseProfile, alpha, beta, N, win));
     }
 
     const newBuf = createBuffer(resultChannels, sr);
@@ -743,52 +845,17 @@ export default function WaveformEditor({ audioContext, onExport }) {
       const fftSize = 2048;
 
       if (noiseFrames > fftSize) {
-        const autoNoiseProfile = new Float32Array(fftSize);
-        const data0 = audioBuffer.getChannelData(0);
-        const numNoiseFrames = Math.floor(noiseFrames / fftSize);
+        const win = makeHann(fftSize);
+        const noiseSignal = audioBuffer.getChannelData(0).slice(0, noiseFrames);
+        const autoNoiseProfile = computePowerSpectrum(noiseSignal, fftSize, win);
 
-        if (numNoiseFrames > 0) {
-          for (let frame = 0; frame < numNoiseFrames; frame++) {
-            const offset = frame * fftSize;
-            for (let i = 0; i < fftSize; i++) {
-              const val = offset + i < data0.length ? data0[offset + i] : 0;
-              autoNoiseProfile[i] += val * val;
-            }
-          }
-          for (let i = 0; i < fftSize; i++) autoNoiseProfile[i] /= numNoiseFrames;
-
-          const reductionFactor = Math.pow(10, 12 / 20);
-          const hopSize = fftSize / 2;
-          const resultChs = [];
-
-          for (let ch = 0; ch < nch; ch++) {
-            const input = audioBuffer.getChannelData(ch);
-            const output = new Float32Array(input.length);
-            const hann = new Float32Array(fftSize);
-            for (let i = 0; i < fftSize; i++) hann[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / (fftSize - 1)));
-
-            for (let pos = 0; pos + fftSize <= input.length; pos += hopSize) {
-              const frame = new Float32Array(fftSize);
-              for (let i = 0; i < fftSize; i++) frame[i] = input[pos + i] * hann[i];
-              for (let i = 0; i < fftSize; i++) {
-                const noisePow = autoNoiseProfile[i] * reductionFactor;
-                const sigPow = frame[i] * frame[i];
-                if (sigPow < noisePow) {
-                  frame[i] *= 0.05;
-                } else {
-                  frame[i] *= Math.sqrt(Math.max(0, sigPow - noisePow) / (sigPow + 1e-10));
-                }
-              }
-              for (let i = 0; i < fftSize; i++) {
-                if (pos + i < output.length) output[pos + i] += frame[i] * hann[i];
-              }
-            }
-            const normFactor = hopSize / fftSize * 2;
-            for (let i = 0; i < output.length; i++) output[i] *= normFactor;
-            resultChs.push(output);
-          }
-          processedBuffer = createBuffer(resultChs, sr);
+        // alpha=1.5 (12dB equivalent), beta=0.05 spectral floor
+        const resultChs = [];
+        for (let ch = 0; ch < nch; ch++) {
+          const input = audioBuffer.getChannelData(ch);
+          resultChs.push(spectralSubtract(input, autoNoiseProfile, 1.5, 0.05, fftSize, win));
         }
+        processedBuffer = createBuffer(resultChs, sr);
       }
 
       setMasterProgress(30);
