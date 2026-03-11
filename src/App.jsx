@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { isDesktopApp, onMenuCommand } from './lib/platform';
+import { isDesktopApp, isTauri, onMenuCommand } from './lib/platform';
 import WaveformEditor from './components/WaveformEditor';
 import MenuBar from './components/MenuBar';
 import AIAssistant from './components/AIAssistant';
@@ -525,6 +525,9 @@ const AudioProcessor = ({ goHome }) => {
   const gainRiderDbRef = useRef(gainRiderDb);
   const canvasRef = useRef(null);
   const animationRef = useRef(null);
+  // Tauri Rust engine — spectrum data injected from audio-meters event
+  const tauriSpectrumRef = useRef(new Float32Array(128));
+  const tauriUnlistenRef = useRef(null);
 
   useEffect(() => {
     isMonitoringRef.current = isMonitoring;
@@ -680,6 +683,17 @@ const AudioProcessor = ({ goHome }) => {
       streamRef.current = null;
     }
     if (animationRef.current) cancelAnimationFrame(animationRef.current);
+
+    // Stop Rust audio engine (Tauri mode)
+    if (tauriUnlistenRef.current) {
+      tauriUnlistenRef.current();
+      tauriUnlistenRef.current = null;
+    }
+    if (isTauri) {
+      import('@tauri-apps/api/core').then(({ invoke }) => {
+        invoke('stop_audio_engine').catch(() => {});
+      });
+    }
 
     // stop media elements
     if (audioElRef.current) {
@@ -1302,6 +1316,41 @@ const AudioProcessor = ({ goHome }) => {
       return;
     }
 
+    // ── Tauri native Rust engine (CPAL — sub-5ms, direct hardware audio) ──────
+    if (isTauri && mode === 'live') {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const info = await invoke('start_audio_engine', {
+          inputDevice:  selectedDevices.inputId  !== 'default' ? selectedDevices.inputId  : null,
+          outputDevice: selectedDevices.outputId !== 'default' ? selectedDevices.outputId : null,
+        });
+        setAudioStats({ sampleRate: info.sample_rate, bufferSize: 256, state: 'running' });
+
+        // Fake Web Audio analyser shim so visualizeAndGate() works unchanged.
+        // Spectrum data is injected from 'audio-meters' Tauri events into tauriSpectrumRef.
+        processingRefs.current.analyser = {
+          frequencyBinCount: 128,
+          getByteFrequencyData(arr) {
+            const spec = tauriSpectrumRef.current;
+            for (let i = 0; i < arr.length && i < spec.length; i++) {
+              arr[i] = Math.round(spec[i] * 255);
+            }
+          },
+          getByteTimeDomainData(arr) { arr.fill(128); },
+        };
+
+        setIsLive(true);
+        setAudioEngineError(null);
+        trackEvent('engine_start', { preset: 'tauri-rust', sr: info.sample_rate });
+        visualizeAndGate();
+      } catch (err) {
+        console.error('Tauri engine start failed', err);
+        setAudioEngineError(err?.message || 'Could not start Rust audio engine.');
+      }
+      return;
+    }
+
+    // ── Web Audio path (browser / Electron) ────────────────────────────────
     try {
       const constraints = {
         audio: {
@@ -3119,6 +3168,55 @@ const AudioProcessor = ({ goHome }) => {
       );
     }
   }, [isMonitoring, recordingState, audioContext]);
+
+  // ── Tauri: listen for audio-meters events → React state ────────────────────
+  useEffect(() => {
+    if (!isTauri || !isLive) return;
+    let unlisten = null;
+    import('@tauri-apps/api/event').then(({ listen }) => {
+      listen('audio-meters', (e) => {
+        const m = e.payload;
+        if (m.spectrum && m.spectrum.length > 0) {
+          tauriSpectrumRef.current = new Float32Array(m.spectrum);
+        }
+        if (typeof m.lufs_m === 'number' && isFinite(m.lufs_m)) {
+          setLufsM(parseFloat(m.lufs_m.toFixed(1)));
+          setLufsST(parseFloat(m.lufs_st.toFixed(1)));
+          setLufsI(parseFloat(m.lufs_i.toFixed(1)));
+          setLoudnessDb(parseFloat(m.lufs_st.toFixed(1)));
+        }
+        if (typeof m.deess_gr_db === 'number') {
+          setDesserGrDb(parseFloat(m.deess_gr_db.toFixed(1)));
+        }
+        if (typeof m.auto_gain_db === 'number') {
+          setGainRiderDb(parseFloat(m.auto_gain_db.toFixed(1)));
+        }
+        if (typeof m.gate_gain === 'number') {
+          setVisualizerGateStatus(m.gate_gain < 0.5);
+        }
+      }).then(fn => { unlisten = fn; tauriUnlistenRef.current = () => { fn(); unlisten = null; }; });
+    });
+    return () => { if (unlisten) { unlisten(); } tauriUnlistenRef.current = null; };
+  }, [isLive]);
+
+  // ── Tauri: sync DSP params to Rust engine when settings change ─────────────
+  useEffect(() => {
+    if (!isTauri || !isLive) return;
+    import('@tauri-apps/api/core').then(({ invoke }) => {
+      const p = (k, v) => invoke('set_param',      { key: k, value: v }).catch(() => {});
+      const b = (k, v) => invoke('set_param_bool', { key: k, value: v }).catch(() => {});
+      b('gate_enabled',     features.denoise);
+      b('noise_enabled',    features.denoise);
+      b('comp_enabled',     true);
+      b('deess_enabled',    features.dynamicDeEsser !== false);
+      b('dereverb_enabled', features.dereverb);
+      b('bypass',           isBypassed);
+      p('gate_threshold_db', noiseFloorThreshold);
+      p('gain_db',           inputGainValue > 0 ? 20 * Math.log10(inputGainValue) : -60);
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLive, features.denoise, features.dereverb, features.dynamicDeEsser,
+      isBypassed, noiseFloorThreshold, inputGainValue]);
 
   // --- Helper: Resolve labels for Output Router panel ---//
   const resolveOutputLabel = (id) => {
