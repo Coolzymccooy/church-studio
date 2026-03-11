@@ -1,0 +1,88 @@
+name: Tauri Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'Create GitHub Release'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-22.04
+            args: ''
+            artifact: '*.AppImage,*.deb'
+          - platform: windows-latest
+            args: ''
+            artifact: '*.exe,*.msi'
+          - platform: macos-latest
+            args: '--target universal-apple-darwin'
+            artifact: '*.dmg'
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libglib2.0-dev libcairo2-dev libgdk-pixbuf-2.0-dev
+
+      - name: Install frontend deps
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'TIWATON AI Studio ${{ github.ref_name }}'
+          releaseBody: |
+            ## TIWATON AI Studio ${{ github.ref_name }}
+
+            AI-powered church audio workstation — now as a true native Tauri app.
+
+            ### Downloads
+            - **Windows**: `.exe` installer
+            - **macOS**: Universal `.dmg` (Intel + Apple Silicon)
+            - **Linux**: `.AppImage` or `.deb`
+
+            ### Changes
+            See [commit history](https://github.com/Coolzymccooy/church-studio/commits)
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+          projectPath: .
+          tauriScript: npx tauri

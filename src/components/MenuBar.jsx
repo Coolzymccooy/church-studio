@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Waves } from 'lucide-react';
+import { dragRegionProps } from '../lib/platform';
 
 /**
  * MenuBar — Native-style menu bar for TIWATON AI STUDIO.
@@ -192,6 +193,7 @@ export default function MenuBar({
     <div
       className="h-9 shrink-0 flex items-center px-2 gap-1 z-30 border-b border-slate-800/60"
       style={{ background: '#030710', fontFamily: 'Inter, system-ui, sans-serif' }}
+      {...dragRegionProps}
     >
       {/* Logo */}
       <div

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { isDesktopApp, onMenuCommand } from './lib/platform';
 import WaveformEditor from './components/WaveformEditor';
 import MenuBar from './components/MenuBar';
 import AIAssistant from './components/AIAssistant';
@@ -51,8 +52,8 @@ import {
 const TiwatonApp = () => {
   const [view, setView] = useState(() => {
     if (typeof window === 'undefined') return 'landing';
-    // Skip landing page in Electron desktop app — go straight to studio
-    if (window.electronAPI?.isElectron) return 'studio';
+    // Skip landing page in desktop app (Tauri or Electron) — go straight to studio
+    if (isDesktopApp) return 'studio';
     const savedView = window.localStorage.getItem('tiwaton:view');
     return savedView || 'landing';
   });
@@ -68,7 +69,7 @@ const TiwatonApp = () => {
 
   return (
     <>
-      <AudioProcessor goHome={window.electronAPI?.isElectron ? null : () => setView('landing')} />
+      <AudioProcessor goHome={isDesktopApp ? null : () => setView('landing')} />
       <HelpCorner />
     </>
   );
@@ -1349,20 +1350,19 @@ const AudioProcessor = ({ goHome }) => {
     }
   };
 
-  // ── Electron native menu IPC bridge ─────────────────────────────────────
-  // Use a stable ref so the one-time IPC listener always calls the latest handlers
-  const electronHandlersRef = useRef(null);
+  // ── Native menu IPC bridge (Tauri + legacy Electron) ────────────────────
+  // Use a stable ref so the one-time listener always calls the latest handlers
+  const menuHandlersRef = useRef(null);
   useEffect(() => {
-    electronHandlersRef.current = {
+    menuHandlersRef.current = {
       toggleLive, hardReset, startAutoCalibrate, startMicLearn,
       setMainTab, setIsBypassed, shareRecording, exportMp4,
       downloadWaveform, handleSnapshotSave, handleNoiseProfileCapture,
     };
   });
   useEffect(() => {
-    if (!window.electronAPI?.onMenuCommand) return;
-    const cleanup = window.electronAPI.onMenuCommand((event, ...args) => {
-      const h = electronHandlersRef.current;
+    const cleanup = onMenuCommand((event, ...args) => {
+      const h = menuHandlersRef.current;
       if (!h) return;
       switch (event) {
         case 'menu:toggle-live':      h.toggleLive(); break;
