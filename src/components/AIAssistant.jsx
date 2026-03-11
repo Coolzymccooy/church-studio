@@ -21,7 +21,7 @@ Keep responses concise and practical. When suggesting preset changes, format the
 const KNOWLEDGE_BASE = [
   {
     category: 'Getting Started',
-    color: '#F59E0B',
+    color: 'var(--accent)',
     emoji: '🚀',
     items: [
       {
@@ -131,7 +131,7 @@ function QACard({ q, a }) {
     <button
       onClick={() => setOpen(o => !o)}
       className="w-full text-left rounded-xl border overflow-hidden transition-all"
-      style={{ borderColor: open ? 'rgba(245,158,11,0.35)' : 'rgba(255,255,255,0.06)', background: '#0D1428' }}
+      style={{ borderColor: open ? 'rgba(var(--accent-rgb),0.35)' : 'rgba(255,255,255,0.06)', background: '#0D1428' }}
     >
       <div className="flex items-start gap-2.5 px-3 py-2.5">
         <span className="text-[10px] font-semibold text-slate-300 flex-1 leading-snug">{q}</span>
@@ -261,8 +261,8 @@ ${spectrumData ? `- Spectrum peak: ${spectrumData.peak?.toFixed(1)}dBFS, Noise f
     >
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2.5 border-b border-slate-700/60 shrink-0" style={{ background: '#030710' }}>
-        <div className="w-6 h-6 rounded flex items-center justify-center" style={{ background: 'rgba(245,158,11,0.2)' }}>
-          <Sparkles size={12} className="text-[#F59E0B]" />
+        <div className="w-6 h-6 rounded flex items-center justify-center" style={{ background: 'rgba(var(--accent-rgb),0.2)' }}>
+          <Sparkles size={12} className="text-[var(--accent)]" />
         </div>
         <div className="flex-1">
           <p className="text-[11px] font-bold text-slate-100 tracking-wide">TIWATON AI</p>
@@ -274,7 +274,7 @@ ${spectrumData ? `- Spectrum peak: ${spectrumData.peak?.toFixed(1)}dBFS, Noise f
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={`flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-semibold transition-colors ${
-                activeTab === tab.id ? 'bg-[#F59E0B]/20 text-[#F59E0B]' : 'text-slate-500 hover:text-slate-300'
+                activeTab === tab.id ? 'bg-[var(--accent)]/20 text-[var(--accent)]' : 'text-slate-500 hover:text-slate-300'
               }`}
             >
               {tab.icon}
@@ -317,7 +317,7 @@ ${spectrumData ? `- Spectrum peak: ${spectrumData.peak?.toFixed(1)}dBFS, Noise f
               {!hasKey && (
                 <div
                   className="mt-3 rounded-xl border px-3 py-3"
-                  style={{ background: 'rgba(245,158,11,0.05)', borderColor: 'rgba(245,158,11,0.2)' }}
+                  style={{ background: 'rgba(var(--accent-rgb),0.05)', borderColor: 'rgba(var(--accent-rgb),0.2)' }}
                 >
                   <p className="text-[10px] font-bold text-amber-400 mb-1">Unlock AI Chat</p>
                   <p className="text-[9px] text-slate-500 mb-2 leading-relaxed">
@@ -330,12 +330,12 @@ ${spectrumData ? `- Spectrum peak: ${spectrumData.peak?.toFixed(1)}dBFS, Noise f
                         placeholder="sk-ant-..."
                         value={apiKey}
                         onChange={e => setApiKey(e.target.value)}
-                        className="flex-1 px-2 py-1.5 rounded-lg text-[9px] bg-black/40 border border-slate-700 text-slate-300 placeholder-slate-600 outline-none focus:border-[#F59E0B]/50"
+                        className="flex-1 px-2 py-1.5 rounded-lg text-[9px] bg-black/40 border border-slate-700 text-slate-300 placeholder-slate-600 outline-none focus:border-[var(--accent)]/50"
                       />
                       <button
                         onClick={() => setShowKeyInput(false)}
                         className="px-2.5 py-1.5 rounded-lg text-[9px] font-bold text-black"
-                        style={{ background: '#F59E0B' }}
+                        style={{ background: 'var(--accent)' }}
                       >
                         Save
                       </button>
@@ -387,7 +387,7 @@ ${spectrumData ? `- Spectrum peak: ${spectrumData.peak?.toFixed(1)}dBFS, Noise f
           {/* API key gate */}
           {!hasKey && (
             <div className="flex-1 flex flex-col items-center justify-center p-5 text-center gap-3">
-              <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)' }}>
+              <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: 'rgba(var(--accent-rgb),0.1)', border: '1px solid rgba(var(--accent-rgb),0.2)' }}>
                 <Sparkles size={20} className="text-amber-400" />
               </div>
               <div>
@@ -403,12 +403,12 @@ ${spectrumData ? `- Spectrum peak: ${spectrumData.peak?.toFixed(1)}dBFS, Noise f
                     placeholder="sk-ant-api03-..."
                     value={apiKey}
                     onChange={e => setApiKey(e.target.value)}
-                    className="flex-1 px-2.5 py-2 rounded-lg text-[10px] bg-black/40 border border-slate-700 text-slate-300 placeholder-slate-600 outline-none focus:border-[#F59E0B]/50"
+                    className="flex-1 px-2.5 py-2 rounded-lg text-[10px] bg-black/40 border border-slate-700 text-slate-300 placeholder-slate-600 outline-none focus:border-[var(--accent)]/50"
                   />
                   <button
                     onClick={() => setShowKeyInput(false)}
                     className="px-3 py-2 rounded-lg text-[10px] font-bold text-black"
-                    style={{ background: '#F59E0B' }}
+                    style={{ background: 'var(--accent)' }}
                   >
                     Save
                   </button>
@@ -417,7 +417,7 @@ ${spectrumData ? `- Spectrum peak: ${spectrumData.peak?.toFixed(1)}dBFS, Noise f
                 <button
                   onClick={() => setShowKeyInput(true)}
                   className="px-4 py-2 rounded-lg text-[11px] font-bold text-black"
-                  style={{ background: '#F59E0B' }}
+                  style={{ background: 'var(--accent)' }}
                 >
                   Enter API Key
                 </button>
@@ -435,8 +435,8 @@ ${spectrumData ? `- Spectrum peak: ${spectrumData.peak?.toFixed(1)}dBFS, Noise f
                 {messages.map((msg, i) => (
                   <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                     {msg.role === 'assistant' && (
-                      <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 mr-2 mt-0.5" style={{ background: 'rgba(245,158,11,0.2)' }}>
-                        <Sparkles size={9} className="text-[#F59E0B]" />
+                      <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 mr-2 mt-0.5" style={{ background: 'rgba(var(--accent-rgb),0.2)' }}>
+                        <Sparkles size={9} className="text-[var(--accent)]" />
                       </div>
                     )}
                     <div
@@ -447,7 +447,7 @@ ${spectrumData ? `- Spectrum peak: ${spectrumData.peak?.toFixed(1)}dBFS, Noise f
                           ? 'border border-red-500/30 text-red-400 rounded-bl-none'
                           : 'text-slate-300 border border-slate-700/60 rounded-bl-none'
                       }`}
-                      style={msg.role === 'user' ? { background: '#F59E0B' } : { background: 'rgba(13,20,40,0.8)' }}
+                      style={msg.role === 'user' ? { background: 'var(--accent)' } : { background: 'rgba(13,20,40,0.8)' }}
                     >
                       <p className="whitespace-pre-wrap">{msg.content}</p>
                     </div>
@@ -455,13 +455,13 @@ ${spectrumData ? `- Spectrum peak: ${spectrumData.peak?.toFixed(1)}dBFS, Noise f
                 ))}
                 {isLoading && (
                   <div className="flex justify-start">
-                    <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 mr-2" style={{ background: 'rgba(245,158,11,0.2)' }}>
-                      <Sparkles size={9} className="text-[#F59E0B]" />
+                    <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 mr-2" style={{ background: 'rgba(var(--accent-rgb),0.2)' }}>
+                      <Sparkles size={9} className="text-[var(--accent)]" />
                     </div>
                     <div className="px-3 py-2 rounded-lg border border-slate-700/60" style={{ background: 'rgba(13,20,40,0.8)' }}>
                       <div className="flex gap-1">
                         {[0, 1, 2].map(i => (
-                          <div key={i} className="w-1.5 h-1.5 rounded-full bg-[#F59E0B] animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
+                          <div key={i} className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
                         ))}
                       </div>
                     </div>
@@ -503,13 +503,13 @@ ${spectrumData ? `- Spectrum peak: ${spectrumData.peak?.toFixed(1)}dBFS, Noise f
                     }}
                     placeholder="Ask about settings, presets, OBS routing…"
                     rows={2}
-                    className="flex-1 px-2.5 py-1.5 rounded-lg text-[10px] bg-black/40 border border-slate-700 text-slate-300 placeholder-slate-600 outline-none focus:border-[#F59E0B]/50 resize-none leading-relaxed"
+                    className="flex-1 px-2.5 py-1.5 rounded-lg text-[10px] bg-black/40 border border-slate-700 text-slate-300 placeholder-slate-600 outline-none focus:border-[var(--accent)]/50 resize-none leading-relaxed"
                   />
                   <button
                     onClick={() => sendMessage(input)}
                     disabled={isLoading || !input.trim()}
                     className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors disabled:opacity-40"
-                    style={{ background: '#F59E0B' }}
+                    style={{ background: 'var(--accent)' }}
                   >
                     <Send size={12} className="text-white" />
                   </button>
@@ -534,7 +534,7 @@ ${spectrumData ? `- Spectrum peak: ${spectrumData.peak?.toFixed(1)}dBFS, Noise f
           <div className="space-y-1.5">
             {[
               { label: 'Engine', value: isLive ? 'LIVE' : 'Stopped', color: isLive ? '#00E676' : '#FF5252' },
-              { label: 'Preset', value: currentPreset || 'balanced', color: '#F59E0B' },
+              { label: 'Preset', value: currentPreset || 'balanced', color: 'var(--accent)' },
               { label: 'Active Features', value: Object.entries(features || {}).filter(([, v]) => v).length + ' enabled', color: '#94a3b8' },
               spectrumData && { label: 'Peak Level', value: spectrumData.peak?.toFixed(1) + ' dBFS', color: '#94a3b8' },
               spectrumData && { label: 'Voice Activity', value: spectrumData.voicePercent?.toFixed(0) + '%', color: '#94a3b8' },
@@ -561,7 +561,7 @@ ${spectrumData ? `- Spectrum peak: ${spectrumData.peak?.toFixed(1)}dBFS, Noise f
           {hasKey ? (
             <button
               onClick={runAudioAnalysis}
-              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-[#F59E0B]/30 text-[10px] font-bold text-[#F59E0B] hover:bg-[#F59E0B]/10 transition-colors"
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-[var(--accent)]/30 text-[10px] font-bold text-[var(--accent)] hover:bg-[var(--accent)]/10 transition-colors"
             >
               <Sparkles size={11} />
               Ask Claude to Analyze & Optimize

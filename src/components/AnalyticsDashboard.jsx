@@ -3,17 +3,17 @@ import { getAnalytics, getTotals, getRecentEvents, clearAnalytics } from '../uti
 import { Activity, Trash2, RefreshCw } from 'lucide-react';
 
 const EVENT_LABELS = {
-  session_start: { label: 'Sessions Started', icon: '🚀', color: '#F59E0B' },
+  session_start: { label: 'Sessions Started', icon: '🚀', color: 'var(--accent)' },
   session_end: { label: 'Sessions Ended', icon: '🏁', color: '#94A3B8' },
   engine_start: { label: 'Engine Started', icon: '▶️', color: '#00E676' },
   engine_stop: { label: 'Engine Stopped', icon: '⏹', color: '#FF5252' },
   feature_toggle: { label: 'Feature Toggles', icon: '⚙️', color: '#60A5FA' },
-  preset_change: { label: 'Preset Changes', icon: '🎙', color: '#F59E0B' },
+  preset_change: { label: 'Preset Changes', icon: '🎙', color: 'var(--accent)' },
   recording_start: { label: 'Recordings Started', icon: '⏺', color: '#FF5252' },
   recording_stop: { label: 'Recordings Stopped', icon: '⏹', color: '#FF5252' },
   export_wav: { label: 'WAV Exports', icon: '💾', color: '#00E676' },
   export_mp4: { label: 'MP4 Exports', icon: '🎬', color: '#60A5FA' },
-  sermon_master: { label: 'Sermon Masters Run', icon: '🎙', color: '#F59E0B' },
+  sermon_master: { label: 'Sermon Masters Run', icon: '🎙', color: 'var(--accent)' },
   bypass_toggle: { label: 'Bypass Toggles', icon: '🔄', color: '#94A3B8' },
   noise_calibrate: { label: 'Calibrations Run', icon: '📊', color: '#A78BFA' },
   snapshot_save: { label: 'Snapshots Saved', icon: '📸', color: '#60A5FA' },
@@ -74,11 +74,11 @@ export default function AnalyticsDashboard() {
           {/* Stat cards */}
           <div className="grid grid-cols-2 gap-1.5">
             {[
-              { label: 'Total Events', value: totalEvents, color: '#F59E0B' },
+              { label: 'Total Events', value: totalEvents, color: 'var(--accent)' },
               { label: 'Engine Starts', value: engineStarts, color: '#00E676' },
               { label: 'Recordings', value: recordings, color: '#FF5252' },
               { label: 'Exports', value: exports, color: '#60A5FA' },
-              { label: 'Sermon Masters', value: sermonMasters, color: '#F59E0B' },
+              { label: 'Sermon Masters', value: sermonMasters, color: 'var(--accent)' },
               { label: 'Snapshots', value: totals.snapshot_save || 0, color: '#A78BFA' },
             ].map(({ label, value, color }) => (
               <div key={label} className="rounded-lg border border-slate-800 px-2.5 py-2" style={{ background: '#080E1F' }}>

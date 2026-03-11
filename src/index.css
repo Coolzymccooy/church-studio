@@ -14,70 +14,123 @@ body,
   height: 100%;
 }
 
-/* Remove any old centering / boxing */
 body {
   margin: 0;
   padding: 0;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  background-color: #020617; /* fallback dark background */
+  background-color: #020617;
 }
 
-/* Canvas fills container cleanly */
 canvas {
   display: block;
 }
 
-/* ─── Theme CSS variables ─────────────────────────────────── */
+/* ─── Theme CSS custom properties ────────────────────────────────────────────
+   These drive all var(--accent) inline styles and arbitrary Tailwind values.
+   The [data-theme] attribute is set on <html> by ThemeContext.
+   ─────────────────────────────────────────────────────────────────────────── */
+
 :root {
-  --accent: #F59E0B;
-  --accent-rgb: 245,158,11;
-  --accent-dark: #D97706;
+  --accent:        #F59E0B;
+  --accent-rgb:    245,158,11;
+  --accent-dark:   #D97706;
   --accent-darker: #92400E;
 }
 
-/* Override Tailwind amber classes per theme */
 [data-theme="cyan"] {
-  --color-amber-300: #67E8F9;
-  --color-amber-400: #22D3EE;
-  --color-amber-500: #06B6D4;
-  --color-amber-600: #0891B2;
-  --color-amber-700: #0E7490;
-  --color-amber-800: #155E75;
-  --color-amber-900: #164E63;
+  --accent:        #06B6D4;
+  --accent-rgb:    6,182,212;
+  --accent-dark:   #0891B2;
+  --accent-darker: #0E7490;
 }
 [data-theme="emerald"] {
-  --color-amber-300: #6EE7B7;
-  --color-amber-400: #34D399;
-  --color-amber-500: #10B981;
-  --color-amber-600: #059669;
-  --color-amber-700: #047857;
-  --color-amber-800: #065F46;
-  --color-amber-900: #064E3B;
+  --accent:        #10B981;
+  --accent-rgb:    16,185,129;
+  --accent-dark:   #059669;
+  --accent-darker: #065F46;
 }
 [data-theme="violet"] {
-  --color-amber-300: #C4B5FD;
-  --color-amber-400: #A78BFA;
-  --color-amber-500: #8B5CF6;
-  --color-amber-600: #7C3AED;
-  --color-amber-700: #6D28D9;
-  --color-amber-800: #5B21B6;
-  --color-amber-900: #4C1D95;
+  --accent:        #8B5CF6;
+  --accent-rgb:    139,92,246;
+  --accent-dark:   #7C3AED;
+  --accent-darker: #4C1D95;
 }
 [data-theme="rose"] {
-  --color-amber-300: #FDA4AF;
-  --color-amber-400: #FB7185;
-  --color-amber-500: #F43F5E;
-  --color-amber-600: #E11D48;
-  --color-amber-700: #BE123C;
-  --color-amber-800: #9F1239;
+  --accent:        #F43F5E;
+  --accent-rgb:    244,63,94;
+  --accent-dark:   #E11D48;
+  --accent-darker: #881337;
+}
+[data-theme="slate"] {
+  --accent:        #94A3B8;
+  --accent-rgb:    148,163,184;
+  --accent-dark:   #64748B;
+  --accent-darker: #334155;
+}
+
+/* ─── Tailwind amber class overrides per theme ───────────────────────────────
+   Tailwind v4 generates amber-* classes referencing --color-amber-* vars.
+   Overriding them on [data-theme] makes all text-amber-*, bg-amber-*,
+   border-amber-* classes adopt the active theme colour.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+[data-theme="cyan"] {
+  --color-amber-50:  #ecfeff;
+  --color-amber-100: #cffafe;
+  --color-amber-200: #a5f3fc;
+  --color-amber-300: #67e8f9;
+  --color-amber-400: #22d3ee;
+  --color-amber-500: #06b6d4;
+  --color-amber-600: #0891b2;
+  --color-amber-700: #0e7490;
+  --color-amber-800: #155e75;
+  --color-amber-900: #164e63;
+}
+[data-theme="emerald"] {
+  --color-amber-50:  #ecfdf5;
+  --color-amber-100: #d1fae5;
+  --color-amber-200: #a7f3d0;
+  --color-amber-300: #6ee7b7;
+  --color-amber-400: #34d399;
+  --color-amber-500: #10b981;
+  --color-amber-600: #059669;
+  --color-amber-700: #047857;
+  --color-amber-800: #065f46;
+  --color-amber-900: #064e3b;
+}
+[data-theme="violet"] {
+  --color-amber-50:  #f5f3ff;
+  --color-amber-100: #ede9fe;
+  --color-amber-200: #ddd6fe;
+  --color-amber-300: #c4b5fd;
+  --color-amber-400: #a78bfa;
+  --color-amber-500: #8b5cf6;
+  --color-amber-600: #7c3aed;
+  --color-amber-700: #6d28d9;
+  --color-amber-800: #5b21b6;
+  --color-amber-900: #4c1d95;
+}
+[data-theme="rose"] {
+  --color-amber-50:  #fff1f2;
+  --color-amber-100: #ffe4e6;
+  --color-amber-200: #fecdd3;
+  --color-amber-300: #fda4af;
+  --color-amber-400: #fb7185;
+  --color-amber-500: #f43f5e;
+  --color-amber-600: #e11d48;
+  --color-amber-700: #be123c;
+  --color-amber-800: #9f1239;
   --color-amber-900: #881337;
 }
 [data-theme="slate"] {
-  --color-amber-300: #CBD5E1;
-  --color-amber-400: #94A3B8;
-  --color-amber-500: #64748B;
+  --color-amber-50:  #f8fafc;
+  --color-amber-100: #f1f5f9;
+  --color-amber-200: #e2e8f0;
+  --color-amber-300: #cbd5e1;
+  --color-amber-400: #94a3b8;
+  --color-amber-500: #64748b;
   --color-amber-600: #475569;
   --color-amber-700: #334155;
-  --color-amber-800: #1E293B;
-  --color-amber-900: #0F172A;
+  --color-amber-800: #1e293b;
+  --color-amber-900: #0f172a;
 }

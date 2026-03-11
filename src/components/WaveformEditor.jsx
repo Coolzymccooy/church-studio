@@ -10,16 +10,16 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 const COLORS = {
   bg: '#050A1C',
   panel: '#0D1428',
-  wave: '#F59E0B',
+  wave: 'var(--accent)',
   waveActive: '#00E676',
-  selection: 'rgba(245, 158, 11, 0.25)',
-  selectionBorder: '#F59E0B',
+  selection: 'rgba(var(--accent-rgb), 0.25)',
+  selectionBorder: 'var(--accent)',
   playhead: '#FF5252',
   grid: 'rgba(255,255,255,0.06)',
   text: '#94a3b8',
   textBright: '#e2e8f0',
   noiseProfile: '#FF5252',
-  fadeOverlay: 'rgba(245, 158, 11, 0.15)',
+  fadeOverlay: 'rgba(var(--accent-rgb), 0.15)',
 };
 
 // Resample AudioBuffer channel data to fit pixel width
@@ -1070,7 +1070,7 @@ export default function WaveformEditor({ audioContext, onExport }) {
         <button
           onClick={sermonMaster}
           disabled={!audioBuffer || !!masterStage}
-          className="px-3 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white font-bold text-[11px] disabled:opacity-40 whitespace-nowrap shadow-[0_0_10px_rgba(245,158,11,0.35)]"
+          className="px-3 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white font-bold text-[11px] disabled:opacity-40 whitespace-nowrap shadow-[0_0_10px_rgba(var(--accent-rgb),0.35)]"
           title="One-click podcast mastering: noise reduction → EQ warmth → compression → limiting → normalize"
         >
           {masterStage ? '⏳ Processing...' : '🎙 Sermon Master'}

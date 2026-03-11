@@ -89,7 +89,7 @@ const LandingPage = ({ onEnter }) => {
       <header className="relative z-10">
         <div className="mx-auto max-w-6xl px-6 pt-10 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-tr from-amber-500 to-yellow-600 rounded-xl flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.6)]">
+            <div className="w-10 h-10 bg-gradient-to-tr from-amber-500 to-yellow-600 rounded-xl flex items-center justify-center shadow-[0_0_15px_rgba(var(--accent-rgb),0.6)]">
               <Waves size={22} className="text-white" />
             </div>
             <div className="text-sm uppercase tracking-[0.3em] text-slate-400">
@@ -312,7 +312,7 @@ const LandingPage = ({ onEnter }) => {
             </div>
             <button
               onClick={onEnter}
-              className="px-8 py-4 rounded-full bg-amber-500 hover:bg-amber-400 text-white font-semibold shadow-[0_0_15px_rgba(245,158,11,0.4)]"
+              className="px-8 py-4 rounded-full bg-amber-500 hover:bg-amber-400 text-white font-semibold shadow-[0_0_15px_rgba(var(--accent-rgb),0.4)]"
             >
               Launch Studio
             </button>
@@ -3030,8 +3030,8 @@ const AudioProcessor = ({ goHome }) => {
         <span className="text-slate-600">BUFFER: <span className="text-slate-300">{audioStats.bufferSize || '128'}</span></span>
         <span className="text-slate-600">LATENCY: <span className="text-slate-300">{audioStats.sampleRate > 0 ? ((audioStats.bufferSize || 128) / audioStats.sampleRate * 1000).toFixed(1)+'ms' : '--'}</span></span>
         <div className="h-3 w-px bg-slate-800"/>
-        <span className={features.denoise && isLive ? 'text-[#F59E0B]' : 'text-slate-700'}>HYPERGATE:{features.denoise ? 'ON' : 'OFF'}</span>
-        <span className={features.pastorIsolation && isLive ? 'text-[#F59E0B]' : 'text-slate-700'}>ISOLATION:{features.pastorIsolation ? 'ON' : 'OFF'}</span>
+        <span className={features.denoise && isLive ? 'text-[var(--accent)]' : 'text-slate-700'}>HYPERGATE:{features.denoise ? 'ON' : 'OFF'}</span>
+        <span className={features.pastorIsolation && isLive ? 'text-[var(--accent)]' : 'text-slate-700'}>ISOLATION:{features.pastorIsolation ? 'ON' : 'OFF'}</span>
         <span className={features.mastering && isLive ? 'text-[#00E676]' : 'text-slate-700'}>POLISH:{features.mastering ? 'ON' : 'OFF'}</span>
         <div className="h-3 w-px bg-slate-800 ml-auto"/>
         <span className="text-slate-600 ml-0">VOICE: <span className={voiceActive ? 'text-[#00E676] font-bold' : 'text-slate-600'}>{voiceActive ? '92%' : '0%'}</span></span>
@@ -3139,7 +3139,7 @@ const AudioProcessor = ({ goHome }) => {
                     </span>
                   </div>
                 ) : (
-                  <div className="mb-2 rounded-lg border border-amber-700/30 px-3 py-2.5 space-y-1.5" style={{ background: 'rgba(245,158,11,0.05)' }}>
+                  <div className="mb-2 rounded-lg border border-amber-700/30 px-3 py-2.5 space-y-1.5" style={{ background: 'rgba(var(--accent-rgb),0.05)' }}>
                     <div className="flex items-start gap-2">
                       <AlertTriangle size={12} className="text-amber-500 shrink-0 mt-0.5" />
                       <p className="text-[10px] text-amber-400 font-semibold">No virtual cable detected</p>
@@ -3154,7 +3154,7 @@ const AudioProcessor = ({ goHome }) => {
                           target="_blank"
                           rel="noreferrer"
                           className="flex items-center gap-1 px-2 py-1 rounded-md text-[9px] font-bold text-black"
-                          style={{ background: '#F59E0B' }}
+                          style={{ background: 'var(--accent)' }}
                         >
                           <ArrowRight size={9} />
                           VB-CABLE (Windows)
@@ -3166,7 +3166,7 @@ const AudioProcessor = ({ goHome }) => {
                           target="_blank"
                           rel="noreferrer"
                           className="flex items-center gap-1 px-2 py-1 rounded-md text-[9px] font-bold text-black"
-                          style={{ background: '#F59E0B' }}
+                          style={{ background: 'var(--accent)' }}
                         >
                           <ArrowRight size={9} />
                           BlackHole (Mac)
@@ -3248,16 +3248,16 @@ const AudioProcessor = ({ goHome }) => {
           <div className="px-3 py-2 border-b border-slate-800 flex items-center justify-between shrink-0">
             <span className="text-[9px] font-bold tracking-[0.2em] text-slate-500 uppercase">Input Rack</span>
             <div className="flex rounded p-0.5 border border-slate-800 gap-0.5" style={{background:'#050A1C'}}>
-              <button onClick={() => handleModeSwitch('live')} className={`px-2 py-0.5 rounded text-[9px] font-bold transition-all ${mode === 'live' ? 'bg-[#F59E0B] text-white' : 'text-slate-500 hover:text-white'}`}>Live</button>
-              <button onClick={() => handleModeSwitch('file')} className={`px-2 py-0.5 rounded text-[9px] font-bold transition-all ${mode === 'file' ? 'bg-[#F59E0B] text-white' : 'text-slate-500 hover:text-white'}`}>File</button>
+              <button onClick={() => handleModeSwitch('live')} className={`px-2 py-0.5 rounded text-[9px] font-bold transition-all ${mode === 'live' ? 'bg-[var(--accent)] text-white' : 'text-slate-500 hover:text-white'}`}>Live</button>
+              <button onClick={() => handleModeSwitch('file')} className={`px-2 py-0.5 rounded text-[9px] font-bold transition-all ${mode === 'file' ? 'bg-[var(--accent)] text-white' : 'text-slate-500 hover:text-white'}`}>File</button>
             </div>
           </div>
           {/* Tab nav */}
           <div className="grid grid-cols-4 gap-0.5 p-2 border-b border-slate-800 shrink-0">
             {[{id:'core',label:'Core'},{id:'stack',label:'AI'},{id:'profiles',label:'Profiles'},{id:'session',label:'Session'}].map(tab => (
               <button key={tab.id} onClick={() => setControlTab(tab.id)}
-                className={`py-1.5 rounded text-[9px] font-bold uppercase tracking-wide transition-colors ${controlTab === tab.id ? 'text-[#F59E0B] border border-[#F59E0B]/40' : 'text-slate-500 hover:text-slate-300 border border-transparent'}`}
-                style={controlTab === tab.id ? {background:'rgba(245,158,11,0.12)'} : {}}>
+                className={`py-1.5 rounded text-[9px] font-bold uppercase tracking-wide transition-colors ${controlTab === tab.id ? 'text-[var(--accent)] border border-[var(--accent)]/40' : 'text-slate-500 hover:text-slate-300 border border-transparent'}`}
+                style={controlTab === tab.id ? {background:'rgba(var(--accent-rgb),0.12)'} : {}}>
                 {tab.label}
               </button>
             ))}
@@ -3277,7 +3277,7 @@ const AudioProcessor = ({ goHome }) => {
                   <div className="p-3 space-y-2">
                     <div className="flex justify-between items-center">
                       <span className="text-[10px] font-medium text-slate-300">Level</span>
-                      <span className="text-[10px] text-[#F59E0B] font-mono">{(Math.log10(inputGainValue) * 20).toFixed(1)} dB</span>
+                      <span className="text-[10px] text-[var(--accent)] font-mono">{(Math.log10(inputGainValue) * 20).toFixed(1)} dB</span>
                     </div>
                     <input type="range" min="0" max="4" step="0.1" value={inputGainValue} onChange={handleInputGainChange}
                       className="w-full h-1 rounded-lg appearance-none cursor-pointer" style={{background:'#F59E0B40'}} />
@@ -3295,15 +3295,15 @@ const AudioProcessor = ({ goHome }) => {
                   </div>
                   <div className="p-3 space-y-2.5">
                     <div className="flex items-center gap-1.5">
-                      <button onClick={() => setGateMode('balanced')} className={`flex-1 py-1 rounded text-[9px] font-bold border ${gateMode === 'balanced' ? 'border-[#F59E0B]/50 text-[#F59E0B]' : 'border-slate-700 text-slate-500 hover:text-slate-300'}`} style={gateMode === 'balanced' ? {background:'rgba(245,158,11,0.12)'} : {}}>Balanced</button>
-                      <button onClick={() => setGateMode('speech')} className={`flex-1 py-1 rounded text-[9px] font-bold border ${gateMode === 'speech' ? 'border-amber-500/50 text-amber-300' : 'border-slate-700 text-slate-500 hover:text-slate-300'}`} style={gateMode === 'speech' ? {background:'rgba(245,158,11,0.12)'} : {}}>Speech Only</button>
+                      <button onClick={() => setGateMode('balanced')} className={`flex-1 py-1 rounded text-[9px] font-bold border ${gateMode === 'balanced' ? 'border-[var(--accent)]/50 text-[var(--accent)]' : 'border-slate-700 text-slate-500 hover:text-slate-300'}`} style={gateMode === 'balanced' ? {background:'rgba(var(--accent-rgb),0.12)'} : {}}>Balanced</button>
+                      <button onClick={() => setGateMode('speech')} className={`flex-1 py-1 rounded text-[9px] font-bold border ${gateMode === 'speech' ? 'border-amber-500/50 text-amber-300' : 'border-slate-700 text-slate-500 hover:text-slate-300'}`} style={gateMode === 'speech' ? {background:'rgba(var(--accent-rgb),0.12)'} : {}}>Speech Only</button>
                     </div>
-                    <div onClick={() => setFeatures({...features, denoise: !features.denoise})} className={`cursor-pointer flex items-center justify-between p-2 rounded border transition-all ${features.denoise ? 'border-[#F59E0B]/40' : 'border-slate-800 hover:border-slate-700'}`} style={features.denoise ? {background:'rgba(245,158,11,0.08)'} : {}}>
+                    <div onClick={() => setFeatures({...features, denoise: !features.denoise})} className={`cursor-pointer flex items-center justify-between p-2 rounded border transition-all ${features.denoise ? 'border-[var(--accent)]/40' : 'border-slate-800 hover:border-slate-700'}`} style={features.denoise ? {background:'rgba(var(--accent-rgb),0.08)'} : {}}>
                       <div className="flex items-center gap-2">
-                        <Activity size={11} className={features.denoise ? 'text-[#F59E0B]' : 'text-slate-600'} />
+                        <Activity size={11} className={features.denoise ? 'text-[var(--accent)]' : 'text-slate-600'} />
                         <span className="text-[10px] font-semibold text-slate-300">Reduction</span>
                       </div>
-                      <div className={`w-7 h-3.5 rounded-full transition-colors relative ${features.denoise ? 'bg-[#F59E0B]' : 'bg-slate-700'}`}>
+                      <div className={`w-7 h-3.5 rounded-full transition-colors relative ${features.denoise ? 'bg-[var(--accent)]' : 'bg-slate-700'}`}>
                         <div className={`absolute top-0.5 w-2.5 h-2.5 bg-white rounded-full transition-transform ${features.denoise ? 'translate-x-3.5 left-0.5' : 'left-0.5'}`}/>
                       </div>
                     </div>
@@ -3314,9 +3314,9 @@ const AudioProcessor = ({ goHome }) => {
                           <span className={`font-mono ${visualizerGateStatus ? 'text-[#FF5252]' : 'text-[#00E676]'}`}>{noiseFloorThreshold} dB</span>
                         </div>
                         <input type="range" min="-100" max="-20" step="1" value={noiseFloorThreshold} onChange={(e) => setNoiseFloorThreshold(parseFloat(e.target.value))}
-                          className="w-full h-0.5 rounded-lg appearance-none cursor-pointer" style={{background:'rgba(245,158,11,0.4)'}} />
+                          className="w-full h-0.5 rounded-lg appearance-none cursor-pointer" style={{background:'rgba(var(--accent-rgb),0.4)'}} />
                         <div className="grid grid-cols-2 gap-1.5">
-                          <button onClick={startAutoCalibrate} disabled={isAutoCalibrating} className={`py-1 rounded text-[9px] font-semibold border ${isAutoCalibrating ? 'border-[#F59E0B]/40 text-[#F59E0B] cursor-wait animate-pulse' : 'border-slate-700 text-slate-400 hover:border-slate-600'}`}>
+                          <button onClick={startAutoCalibrate} disabled={isAutoCalibrating} className={`py-1 rounded text-[9px] font-semibold border ${isAutoCalibrating ? 'border-[var(--accent)]/40 text-[var(--accent)] cursor-wait animate-pulse' : 'border-slate-700 text-slate-400 hover:border-slate-600'}`}>
                             {isAutoCalibrating ? 'Calibrating...' : 'Auto-Calibrate'}
                           </button>
                           <button onClick={startMicLearn} disabled={isMicLearning} className={`py-1 rounded text-[9px] font-semibold border ${isMicLearning ? 'border-cyan-500/40 text-cyan-300 cursor-wait animate-pulse' : micLearned ? 'border-emerald-500/40 text-emerald-300' : 'border-slate-700 text-slate-400 hover:border-slate-600'}`}>
@@ -3348,14 +3348,14 @@ const AudioProcessor = ({ goHome }) => {
                   {key:'mastering', icon:<Volume2 size={11}/>, label:'Voice Polish', desc:'Broadcast loudness + sheen'},
                 ].map(({key, icon, label, desc}) => (
                   <div key={key} onClick={() => setFeatures({...features, [key]: !features[key]})}
-                    className={`cursor-pointer p-2.5 rounded-lg border transition-all ${features[key] ? 'border-[#F59E0B]/40' : 'border-slate-800 hover:border-slate-700 opacity-60 hover:opacity-100'}`}
-                    style={features[key] ? {background:'rgba(245,158,11,0.08)'} : {}}>
+                    className={`cursor-pointer p-2.5 rounded-lg border transition-all ${features[key] ? 'border-[var(--accent)]/40' : 'border-slate-800 hover:border-slate-700 opacity-60 hover:opacity-100'}`}
+                    style={features[key] ? {background:'rgba(var(--accent-rgb),0.08)'} : {}}>
                     <div className="flex items-center justify-between">
-                      <div className={`flex items-center gap-1.5 ${features[key] ? 'text-[#F59E0B]' : 'text-slate-500'}`}>
+                      <div className={`flex items-center gap-1.5 ${features[key] ? 'text-[var(--accent)]' : 'text-slate-500'}`}>
                         {icon}
                         <span className="text-[10px] font-semibold text-slate-300">{label}</span>
                       </div>
-                      <div className={`w-6 h-3 rounded-full transition-colors relative ${features[key] ? 'bg-[#F59E0B]' : 'bg-slate-700'}`}>
+                      <div className={`w-6 h-3 rounded-full transition-colors relative ${features[key] ? 'bg-[var(--accent)]' : 'bg-slate-700'}`}>
                         <div className={`absolute top-0.5 w-2 h-2 bg-white rounded-full transition-transform ${features[key] ? 'translate-x-3 left-0.5' : 'left-0.5'}`}/>
                       </div>
                     </div>
@@ -3376,7 +3376,7 @@ const AudioProcessor = ({ goHome }) => {
                     <input type="text" value={roomName} onChange={(e) => setRoomName(e.target.value)} placeholder="e.g. Main Sanctuary" className="w-full border border-slate-700 rounded p-1.5 text-[10px] text-slate-200 placeholder-slate-600" style={{background:'#050A1C'}} />
                     <div className="flex items-center justify-between">
                       <span className="text-[9px] text-slate-500">Noise Profile</span>
-                      <button onClick={handleNoiseProfileCapture} disabled={!latestSpectrumRef.current} className={`px-2 py-0.5 rounded text-[9px] border ${latestSpectrumRef.current ? 'border-[#F59E0B]/40 text-[#F59E0B]' : 'border-slate-700 text-slate-600'}`} style={latestSpectrumRef.current ? {background:'rgba(245,158,11,0.1)'} : {}}>Capture</button>
+                      <button onClick={handleNoiseProfileCapture} disabled={!latestSpectrumRef.current} className={`px-2 py-0.5 rounded text-[9px] border ${latestSpectrumRef.current ? 'border-[var(--accent)]/40 text-[var(--accent)]' : 'border-slate-700 text-slate-600'}`} style={latestSpectrumRef.current ? {background:'rgba(var(--accent-rgb),0.1)'} : {}}>Capture</button>
                     </div>
                     <select className="w-full border border-slate-700 rounded p-1.5 text-[10px] text-slate-200" style={{background:'#050A1C'}} value={selectedNoiseProfileId} onChange={(e) => setSelectedNoiseProfileId(e.target.value)}>
                       <option value="">No profile</option>
@@ -3390,7 +3390,7 @@ const AudioProcessor = ({ goHome }) => {
                   </div>
                   <div className="p-2 space-y-1">
                     {[['balanced','Balanced'],['pastor','Pastor'],['guest','Guest Speaker'],['choir','Choir Lead']].map(([val, label]) => (
-                      <button key={val} onClick={() => setSpeakerPreset(val)} className={`w-full py-1.5 px-2 rounded text-[10px] font-semibold border text-left transition-all ${speakerPreset === val ? 'border-[#F59E0B]/50 text-[#F59E0B]' : 'border-slate-800 text-slate-500 hover:text-slate-300'}`} style={speakerPreset === val ? {background:'rgba(245,158,11,0.12)'} : {}}>
+                      <button key={val} onClick={() => setSpeakerPreset(val)} className={`w-full py-1.5 px-2 rounded text-[10px] font-semibold border text-left transition-all ${speakerPreset === val ? 'border-[var(--accent)]/50 text-[var(--accent)]' : 'border-slate-800 text-slate-500 hover:text-slate-300'}`} style={speakerPreset === val ? {background:'rgba(var(--accent-rgb),0.12)'} : {}}>
                         {label}
                       </button>
                     ))}
@@ -3432,7 +3432,7 @@ const AudioProcessor = ({ goHome }) => {
                       <div className="flex items-center gap-1.5 text-[9px] font-mono flex-wrap">
                         <span className="px-2 py-1 rounded border border-slate-700 text-slate-400" style={{background:'#0D1428'}}>MIC</span>
                         <span className="text-slate-700">→</span>
-                        <span className="px-2 py-1 rounded border text-amber-400 font-bold" style={{background:'rgba(245,158,11,0.08)', borderColor:'rgba(245,158,11,0.3)'}}>TIWATON DSP</span>
+                        <span className="px-2 py-1 rounded border text-amber-400 font-bold" style={{background:'rgba(var(--accent-rgb),0.08)', borderColor:'rgba(var(--accent-rgb),0.3)'}}>TIWATON DSP</span>
                         <span className="text-slate-700">→</span>
                         <span className={`px-2 py-1 rounded border font-bold ${isLive ? 'text-[#00E676] border-[#00E676]/30' : 'text-slate-500 border-slate-700'}`} style={{background: isLive ? 'rgba(0,230,118,0.07)' : 'transparent'}}>
                           {selectedDevices.broadcastBus}
@@ -3461,23 +3461,23 @@ const AudioProcessor = ({ goHome }) => {
                 <div className="rounded-lg border border-slate-800 overflow-hidden" style={{background:'#080E1F'}}>
                   <div className="px-3 py-1.5 border-b border-slate-800 flex items-center justify-between" style={{background:'rgba(255,255,255,0.03)'}}>
                     <span className="text-[9px] font-bold tracking-[0.15em] text-slate-500 uppercase">A/B Compare</span>
-                    <span className="text-[9px] text-[#F59E0B]">{abMode === 'A' ? 'A — Raw' : 'B — AI'}</span>
+                    <span className="text-[9px] text-[var(--accent)]">{abMode === 'A' ? 'A — Raw' : 'B — AI'}</span>
                   </div>
                   <div className="p-2 grid grid-cols-2 gap-1.5">
-                    <button onClick={() => setIsBypassed(true)} className={`py-1.5 rounded border text-[10px] font-bold ${abMode === 'A' ? 'border-amber-500/50 text-amber-300' : 'border-slate-700 text-slate-600 hover:text-slate-400'}`} style={abMode === 'A' ? {background:'rgba(245,158,11,0.1)'} : {}}>A — Raw</button>
-                    <button onClick={() => setIsBypassed(false)} className={`py-1.5 rounded border text-[10px] font-bold ${abMode === 'B' ? 'border-[#F59E0B]/50 text-[#F59E0B]' : 'border-slate-700 text-slate-600 hover:text-slate-400'}`} style={abMode === 'B' ? {background:'rgba(245,158,11,0.12)'} : {}}>B — AI</button>
+                    <button onClick={() => setIsBypassed(true)} className={`py-1.5 rounded border text-[10px] font-bold ${abMode === 'A' ? 'border-amber-500/50 text-amber-300' : 'border-slate-700 text-slate-600 hover:text-slate-400'}`} style={abMode === 'A' ? {background:'rgba(var(--accent-rgb),0.1)'} : {}}>A — Raw</button>
+                    <button onClick={() => setIsBypassed(false)} className={`py-1.5 rounded border text-[10px] font-bold ${abMode === 'B' ? 'border-[var(--accent)]/50 text-[var(--accent)]' : 'border-slate-700 text-slate-600 hover:text-slate-400'}`} style={abMode === 'B' ? {background:'rgba(var(--accent-rgb),0.12)'} : {}}>B — AI</button>
                   </div>
                 </div>
                 <div className="rounded-lg border border-slate-800 overflow-hidden" style={{background:'#080E1F'}}>
                   <div className="px-3 py-1.5 border-b border-slate-800 flex items-center justify-between" style={{background:'rgba(255,255,255,0.03)'}}>
                     <span className="text-[9px] font-bold tracking-[0.15em] text-slate-500 uppercase">Session Snapshots</span>
-                    <button onClick={handleSnapshotSave} className="px-2 py-0.5 rounded border border-[#F59E0B]/40 text-[9px] text-[#F59E0B]" style={{background:'rgba(245,158,11,0.1)'}}>Save</button>
+                    <button onClick={handleSnapshotSave} className="px-2 py-0.5 rounded border border-[var(--accent)]/40 text-[9px] text-[var(--accent)]" style={{background:'rgba(var(--accent-rgb),0.1)'}}>Save</button>
                   </div>
                   <div className="p-2 space-y-1">
                     {snapshots.length === 0
                       ? <p className="text-[9px] text-slate-600 p-1">Save a snapshot to recall your full mix.</p>
                       : snapshots.map(s => (
-                        <button key={s.id} onClick={() => handleSnapshotApply(s)} className="w-full flex items-center justify-between px-2 py-1.5 rounded border border-slate-800 text-[10px] text-slate-300 hover:border-[#F59E0B]/30 hover:text-white">
+                        <button key={s.id} onClick={() => handleSnapshotApply(s)} className="w-full flex items-center justify-between px-2 py-1.5 rounded border border-slate-800 text-[10px] text-slate-300 hover:border-[var(--accent)]/30 hover:text-white">
                           <span>{s.label}</span>
                           <span className="text-[9px] text-slate-500">{s.speakerPreset}</span>
                         </button>
@@ -3498,18 +3498,18 @@ const AudioProcessor = ({ goHome }) => {
           {/* Center tab bar */}
           <div className="h-10 border-b border-slate-800 flex items-center px-3 gap-2 shrink-0" style={{background:'#0D1428'}}>
             <div className="flex rounded p-0.5 border border-slate-800 gap-0.5" style={{background:'#050A1C'}}>
-              <button onClick={() => setMainTab('live')} className={`px-3 py-1 rounded text-[9px] font-bold tracking-wide transition-all ${mainTab === 'live' ? 'bg-[#F59E0B] text-white' : 'text-slate-500 hover:text-white'}`}>LIVE</button>
-              <button onClick={() => setMainTab('editor')} className={`px-3 py-1 rounded text-[9px] font-bold tracking-wide transition-all ${mainTab === 'editor' ? 'bg-[#F59E0B] text-white' : 'text-slate-500 hover:text-white'}`}>EDITOR</button>
+              <button onClick={() => setMainTab('live')} className={`px-3 py-1 rounded text-[9px] font-bold tracking-wide transition-all ${mainTab === 'live' ? 'bg-[var(--accent)] text-white' : 'text-slate-500 hover:text-white'}`}>LIVE</button>
+              <button onClick={() => setMainTab('editor')} className={`px-3 py-1 rounded text-[9px] font-bold tracking-wide transition-all ${mainTab === 'editor' ? 'bg-[var(--accent)] text-white' : 'text-slate-500 hover:text-white'}`}>EDITOR</button>
             </div>
             {/* Active feature badges */}
             <div className="flex items-center gap-1 overflow-x-auto" style={{scrollbarWidth:'none'}}>
               {features.denoise && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-[#00E676]/30 text-[#00E676] whitespace-nowrap" style={{background:'rgba(0,230,118,0.08)'}}>HYPER-GATE</span>}
               {features.voicePattern && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-[#00E676]/30 text-[#00E676] whitespace-nowrap" style={{background:'rgba(0,230,118,0.08)'}}>VOICE CLEANSE</span>}
-              {features.pastorIsolation && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-[#F59E0B]/30 text-[#F59E0B] whitespace-nowrap" style={{background:'rgba(245,158,11,0.08)'}}>ISOLATION</span>}
-              {features.sermonWarmth && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-[#F59E0B]/30 text-[#F59E0B] whitespace-nowrap" style={{background:'rgba(245,158,11,0.08)'}}>WARMTH</span>}
-              {features.mastering && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-[#F59E0B]/30 text-[#F59E0B] whitespace-nowrap" style={{background:'rgba(245,158,11,0.08)'}}>POLISH</span>}
-              {features.musicDucking && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-amber-500/30 text-amber-400 whitespace-nowrap" style={{background:'rgba(245,158,11,0.08)'}}>DUCKING</span>}
-              {features.streamingSafe && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-amber-500/30 text-amber-400 whitespace-nowrap" style={{background:'rgba(245,158,11,0.08)'}}>STREAM SAFE</span>}
+              {features.pastorIsolation && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-[var(--accent)]/30 text-[var(--accent)] whitespace-nowrap" style={{background:'rgba(var(--accent-rgb),0.08)'}}>ISOLATION</span>}
+              {features.sermonWarmth && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-[var(--accent)]/30 text-[var(--accent)] whitespace-nowrap" style={{background:'rgba(var(--accent-rgb),0.08)'}}>WARMTH</span>}
+              {features.mastering && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-[var(--accent)]/30 text-[var(--accent)] whitespace-nowrap" style={{background:'rgba(var(--accent-rgb),0.08)'}}>POLISH</span>}
+              {features.musicDucking && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-amber-500/30 text-amber-400 whitespace-nowrap" style={{background:'rgba(var(--accent-rgb),0.08)'}}>DUCKING</span>}
+              {features.streamingSafe && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-amber-500/30 text-amber-400 whitespace-nowrap" style={{background:'rgba(var(--accent-rgb),0.08)'}}>STREAM SAFE</span>}
               {selectedNoiseProfileId && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-slate-600 text-slate-400 whitespace-nowrap">NOISE PROFILE</span>}
             </div>
             {/* Recording check — right side of center bar */}
@@ -3532,7 +3532,7 @@ const AudioProcessor = ({ goHome }) => {
                       <div className="w-px h-3 bg-slate-600"/>
                       <button onClick={discardRecording} className="px-2 py-1 hover:bg-slate-700 text-slate-400 hover:text-red-400"><Trash2 size={11}/></button>
                       <div className="w-px h-3 bg-slate-600"/>
-                      <button onClick={() => shareRecording('webm')} className="px-2 py-1 hover:bg-slate-700 font-bold text-[#F59E0B] flex items-center gap-1"><Share2 size={9}/>WebM</button>
+                      <button onClick={() => shareRecording('webm')} className="px-2 py-1 hover:bg-slate-700 font-bold text-[var(--accent)] flex items-center gap-1"><Share2 size={9}/>WebM</button>
                       <div className="w-px h-3 bg-slate-600"/>
                       <button onClick={() => shareRecording('wav')} className="px-2 py-1 hover:bg-slate-700 font-bold text-amber-400 flex items-center gap-1"><Waves size={9}/>WAV</button>
                       <div className="w-px h-3 bg-slate-600"/>
@@ -3553,12 +3553,12 @@ const AudioProcessor = ({ goHome }) => {
               {!isLive && !isPlayingFile && mode === 'live' && (
                 <div className="absolute inset-0 flex items-center justify-center backdrop-blur-sm z-30" style={{background:'rgba(0,0,0,0.65)'}}>
                   <div className="text-center p-8 rounded-2xl border border-slate-700 shadow-2xl w-full max-w-sm" style={{background:'#0D1428'}}>
-                    <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4" style={{background:'rgba(245,158,11,0.15)', color:'#F59E0B'}}>
+                    <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4" style={{background:'rgba(var(--accent-rgb),0.15)', color:'var(--accent)'}}>
                       <Mic size={32}/>
                     </div>
                     <h3 className="text-xl font-bold mb-2">Sound Check</h3>
                     <p className="text-slate-400 text-sm mb-6">Connect mic or mixer, then go live.</p>
-                    <button onClick={toggleLive} className="px-8 py-3 text-white font-bold rounded-lg shadow-lg flex items-center gap-2 mx-auto hover:opacity-90" style={{background:'#F59E0B'}}>
+                    <button onClick={toggleLive} className="px-8 py-3 text-white font-bold rounded-lg shadow-lg flex items-center gap-2 mx-auto hover:opacity-90" style={{background:'var(--accent)'}}>
                       <Play size={18} fill="currentColor"/> Go Live
                     </button>
                   </div>
@@ -3591,7 +3591,7 @@ const AudioProcessor = ({ goHome }) => {
               )}
               {isLive && recordingState === 'review' && (
                 <div className="absolute bottom-14 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-1">
-                  <span className="text-[9px] text-[#F59E0B] font-bold tracking-widest">LIVE MIC MUTED • REVIEWING</span>
+                  <span className="text-[9px] text-[var(--accent)] font-bold tracking-widest">LIVE MIC MUTED • REVIEWING</span>
                   {isPlayingBack && <span className="text-[9px] font-mono text-slate-400">{formatTime(playbackPosition)} / {playbackDuration ? formatTime(playbackDuration) : '--:--'}</span>}
                   {!isPlayingBack && playbackDuration && <span className="text-[9px] font-mono text-slate-400">Ready • {formatTime(playbackDuration)}</span>}
                 </div>
@@ -3614,22 +3614,22 @@ const AudioProcessor = ({ goHome }) => {
                 <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 w-[min(760px,95%)]">
                   <div className="border border-slate-700 rounded-xl px-4 py-3 backdrop-blur" style={{background:'rgba(13,20,40,0.95)'}}>
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-[9px] font-semibold text-slate-300 flex items-center gap-1.5"><Sliders className="w-3 h-3" style={{color:'#F59E0B'}}/> Trim Sermon Section</span>
+                      <span className="text-[9px] font-semibold text-slate-300 flex items-center gap-1.5"><Sliders className="w-3 h-3" style={{color:'var(--accent)'}}/> Trim Sermon Section</span>
                       <span className="text-[9px] font-mono text-slate-500">Total: {formatTime(Math.floor(fileDuration))}</span>
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <div className="flex justify-between text-[9px] text-slate-500 mb-1"><span>Start</span><span>{formatTime(Math.floor(trimStart || 0))}</span></div>
-                        <input type="range" min="0" max={fileDuration || 0} step="0.1" value={trimStart} onChange={handleTrimStartChange} className="w-full h-0.5 rounded appearance-none cursor-pointer" style={{background:'rgba(245,158,11,0.3)'}}/>
+                        <input type="range" min="0" max={fileDuration || 0} step="0.1" value={trimStart} onChange={handleTrimStartChange} className="w-full h-0.5 rounded appearance-none cursor-pointer" style={{background:'rgba(var(--accent-rgb),0.3)'}}/>
                       </div>
                       <div>
                         <div className="flex justify-between text-[9px] text-slate-500 mb-1"><span>End</span><span>{formatTime(Math.floor(trimEnd || fileDuration || 0))}</span></div>
-                        <input type="range" min="0" max={fileDuration || 0} step="0.1" value={trimEnd} onChange={handleTrimEndChange} className="w-full h-0.5 rounded appearance-none cursor-pointer" style={{background:'rgba(245,158,11,0.3)'}}/>
+                        <input type="range" min="0" max={fileDuration || 0} step="0.1" value={trimEnd} onChange={handleTrimEndChange} className="w-full h-0.5 rounded appearance-none cursor-pointer" style={{background:'rgba(var(--accent-rgb),0.3)'}}/>
                       </div>
                     </div>
                     <div className="flex items-center gap-2 mt-2">
-                      <button onClick={previewTrimSegment} disabled={isPreviewingTrim} className="px-3 py-1 rounded text-[9px] font-semibold border border-[#F59E0B]/40 text-[#F59E0B] hover:bg-[#F59E0B]/10 flex items-center gap-1">
-                        {isPreviewingTrim ? <span className="w-2 h-2 rounded-full border border-[#F59E0B] border-t-transparent animate-spin"/> : <Play className="w-2.5 h-2.5"/>}
+                      <button onClick={previewTrimSegment} disabled={isPreviewingTrim} className="px-3 py-1 rounded text-[9px] font-semibold border border-[var(--accent)]/40 text-[var(--accent)] hover:bg-[var(--accent)]/10 flex items-center gap-1">
+                        {isPreviewingTrim ? <span className="w-2 h-2 rounded-full border border-[var(--accent)] border-t-transparent animate-spin"/> : <Play className="w-2.5 h-2.5"/>}
                         {isPreviewingTrim ? 'Previewing...' : 'Preview'}
                       </button>
                       <button onClick={clearTrim} className="px-3 py-1 rounded text-[9px] font-semibold border border-slate-700 text-slate-400 hover:bg-slate-800">Full File</button>
@@ -3682,7 +3682,7 @@ const AudioProcessor = ({ goHome }) => {
               </div>
               <div className="p-2.5">
                 <p className="text-[10px] text-slate-300 font-medium truncate">{broadcastLabel}</p>
-                <button onClick={cycleOutputTarget} className="mt-1 flex items-center gap-1.5 text-[9px] text-[#F59E0B] hover:text-amber-300 transition-colors">
+                <button onClick={cycleOutputTarget} className="mt-1 flex items-center gap-1.5 text-[9px] text-[var(--accent)] hover:text-amber-300 transition-colors">
                   {outputTargets.find(t => t.name === outputTarget)?.icon || <Cpu size={10}/>}
                   <span>{outputTarget}</span>
                 </button>
@@ -3701,7 +3701,7 @@ const AudioProcessor = ({ goHome }) => {
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-slate-500">Target</span>
-                  <span className="font-mono text-[#F59E0B]">{loudnessTarget} LUFS</span>
+                  <span className="font-mono text-[var(--accent)]">{loudnessTarget} LUFS</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-slate-500">Current</span>
@@ -3754,7 +3754,7 @@ const AudioProcessor = ({ goHome }) => {
           className="w-11 h-11 rounded-full flex items-center justify-center transition-all"
           style={isLive
             ? {background:'#FF5252', boxShadow:'0 0 20px rgba(255,82,82,0.4)'}
-            : {background:'#F59E0B', boxShadow:'0 0 20px rgba(245,158,11,0.4)'}}>
+            : {background:'var(--accent)', boxShadow:'0 0 20px rgba(var(--accent-rgb),0.4)'}}>
           {isLive ? <Square size={16} fill="currentColor"/> : <Play size={16} fill="currentColor" className="ml-0.5"/>}
         </button>
         {/* Status */}
@@ -3782,7 +3782,7 @@ const AudioProcessor = ({ goHome }) => {
             <div className="flex items-end gap-0.5 h-9">
               {[...Array(8)].map((_,i) => (
                 <div key={i} className="w-1.5 rounded-sm transition-all duration-75"
-                  style={{height:`${(i+1)*12}%`, background: isLive && recordingState !== 'review' ? (isBypassed ? '#64748b' : i < 6 ? '#F59E0B' : '#FF5252') : '#1e293b'}}/>
+                  style={{height:`${(i+1)*12}%`, background: isLive && recordingState !== 'review' ? (isBypassed ? '#64748b' : i < 6 ? 'var(--accent)' : '#FF5252') : '#1e293b'}}/>
               ))}
             </div>
             <span className="text-[8px] text-slate-600" style={{fontFamily:'JetBrains Mono, monospace'}}>OUT L</span>
@@ -3792,7 +3792,7 @@ const AudioProcessor = ({ goHome }) => {
         {/* Gain Rider */}
         <div>
           <div className="text-[8px] font-bold uppercase tracking-wider text-slate-600 mb-0.5">Gain Rider</div>
-          <span className={`text-[11px] font-mono ${features.smartMixing ? 'text-[#F59E0B]' : 'text-slate-700'}`} style={{fontFamily:'JetBrains Mono, monospace'}}>
+          <span className={`text-[11px] font-mono ${features.smartMixing ? 'text-[var(--accent)]' : 'text-slate-700'}`} style={{fontFamily:'JetBrains Mono, monospace'}}>
             {features.smartMixing ? `${gainRiderDb >= 0 ? '+' : ''}${gainRiderDb.toFixed(1)} dB` : 'OFF'}
           </span>
         </div>
@@ -3806,7 +3806,7 @@ const AudioProcessor = ({ goHome }) => {
           </button>
           <button onClick={() => setIsMonitoring(!isMonitoring)} disabled={recordingState === 'review'}
             className="p-1.5 rounded-lg border relative transition-all"
-            style={isMonitoring ? {background:'rgba(245,158,11,0.15)', borderColor:'rgba(245,158,11,0.4)', color:'#F59E0B'} : {background:'#0D1428', borderColor:'#1e293b', color:'#94a3b8'}}>
+            style={isMonitoring ? {background:'rgba(var(--accent-rgb),0.15)', borderColor:'rgba(var(--accent-rgb),0.4)', color:'var(--accent)'} : {background:'#0D1428', borderColor:'#1e293b', color:'#94a3b8'}}>
             <Headphones size={16}/>
             {isMonitoring && recordingState !== 'review' && <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full animate-pulse" style={{background:'#00E676'}}/>}
           </button>
@@ -3825,7 +3825,7 @@ const AudioProcessor = ({ goHome }) => {
             </button>
           )}
           <button onClick={hardReset} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[9px] font-semibold hover:opacity-80"
-            style={{background:'#0D1428', borderColor:'rgba(245,158,11,0.3)', color:'#fbbf24'}}>
+            style={{background:'#0D1428', borderColor:'rgba(var(--accent-rgb),0.3)', color:'#fbbf24'}}>
             <RefreshCw className="w-3 h-3"/> Reset
           </button>
           {mode === 'file' && fileInfo && (
@@ -3846,7 +3846,7 @@ const AudioProcessor = ({ goHome }) => {
       {/* Mobile fallback for very small screens */}
       <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 border-t border-slate-800 px-3 py-2 flex justify-between items-center" style={{background:'#030710'}}>
         <button onClick={mode === 'live' ? toggleLive : null} className="w-10 h-10 rounded-full flex items-center justify-center"
-          style={isLive ? {background:'#FF5252'} : {background:'#F59E0B'}}>
+          style={isLive ? {background:'#FF5252'} : {background:'var(--accent)'}}>
           {isLive ? <Square size={14} fill="currentColor"/> : <Play size={14} fill="currentColor"/>}
         </button>
         <span className={`text-[10px] font-semibold ${isLive ? 'text-[#00E676]' : 'text-slate-500'}`}>{isLive ? 'Live' : 'Standby'}</span>
@@ -3862,12 +3862,12 @@ const AudioProcessor = ({ goHome }) => {
         title="TIWATON AI — Claude powered"
         className="fixed bottom-4 left-4 z-50 w-10 h-10 rounded-full flex items-center justify-center shadow-lg border transition-all hover:scale-105"
         style={showAI
-          ? { background: '#F59E0B', borderColor: '#F59E0B' }
-          : { background: '#0D1428', borderColor: 'rgba(245,158,11,0.4)' }}
+          ? { background: 'var(--accent)', borderColor: 'var(--accent)' }
+          : { background: '#0D1428', borderColor: 'rgba(var(--accent-rgb),0.4)' }}
       >
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
           <path d="M8 1.5C4.41 1.5 1.5 4.41 1.5 8s2.91 6.5 6.5 6.5 6.5-2.91 6.5-6.5S11.59 1.5 8 1.5zm0 2a1 1 0 110 2 1 1 0 010-2zm1 8H7v-4h2v4z"
-            fill={showAI ? '#fff' : '#F59E0B'}/>
+            fill={showAI ? '#fff' : 'var(--accent)'}/>
         </svg>
       </button>
 
@@ -3893,7 +3893,7 @@ const FeatureToggle = ({ icon, label, desc, active, onClick }) => (
     onClick={onClick}
     className={`p-3 rounded-xl border cursor-pointer transition-all group ${
       active
-        ? 'bg-amber-900/30 border-amber-500/50 shadow-[0_0_15px_rgba(245,158,11,0.2)]'
+        ? 'bg-amber-900/30 border-amber-500/50 shadow-[0_0_15px_rgba(var(--accent-rgb),0.2)]'
         : 'bg-slate-900 border-slate-800 hover:border-slate-700 opacity-60 hover:opacity-100'
     }`}
   >
@@ -3996,7 +3996,7 @@ function ChecklistPanel({ checklist }) {
         <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
           <div
             className="h-full rounded-full transition-all duration-500"
-            style={{ width: `${(doneCount / checklist.length) * 100}%`, background: allDone ? '#00E676' : '#F59E0B' }}
+            style={{ width: `${(doneCount / checklist.length) * 100}%`, background: allDone ? '#00E676' : 'var(--accent)' }}
           />
         </div>
       </div>
@@ -4102,7 +4102,7 @@ function HelpCorner() {
 
   const setupSteps = [
     {
-      num: '1', title: 'Physical Connection', color: '#F59E0B',
+      num: '1', title: 'Physical Connection', color: 'var(--accent)',
       items: [
         'Pastor mic → Mixer / Audio Interface (NOT directly into laptop)',
         'One clean USB cable from interface into computer',
@@ -4138,7 +4138,7 @@ function HelpCorner() {
         data-help-button
         onClick={() => setIsOpen(true)}
         className="fixed bottom-4 left-16 z-40 flex items-center gap-2 rounded-full px-3 py-2 text-[11px] font-semibold text-slate-100 shadow-lg border transition-all hover:scale-105"
-        style={{ background: '#0D1428', borderColor: 'rgba(245,158,11,0.35)' }}
+        style={{ background: '#0D1428', borderColor: 'rgba(var(--accent-rgb),0.35)' }}
         title="Audio help & Sunday checklist"
       >
         <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-black">?</span>
@@ -4159,7 +4159,7 @@ function HelpCorner() {
 
             {/* Header */}
             <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-800 shrink-0" style={{ background: '#030710' }}>
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm text-black" style={{ background: '#F59E0B' }}>?</div>
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm text-black" style={{ background: 'var(--accent)' }}>?</div>
               <div className="flex-1">
                 <p className="text-[13px] font-bold text-slate-100">Audio Help Center</p>
                 <p className="text-[10px] text-slate-500">Quick fixes · Setup guide · Sunday checklist</p>
@@ -4226,7 +4226,7 @@ function HelpCorner() {
                   ))}
 
                   {/* Golden Rule */}
-                  <div className="rounded-xl border px-4 py-3" style={{ background: 'rgba(245,158,11,0.07)', borderColor: 'rgba(245,158,11,0.25)' }}>
+                  <div className="rounded-xl border px-4 py-3" style={{ background: 'rgba(var(--accent-rgb),0.07)', borderColor: 'rgba(var(--accent-rgb),0.25)' }}>
                     <p className="text-[11px] font-bold text-amber-400 mb-1">Golden Rule</p>
                     <p className="text-[11px] text-slate-300 leading-relaxed">
                       TIWATON replaces ALL microphones in OBS. Only the <span className="text-amber-400 font-semibold">Broadcast Output</span> virtual cable from TIWATON goes into OBS — never a raw physical mic.

@@ -33,7 +33,7 @@ function createWindow() {
   // Load the app
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173');
-    mainWindow.webContents.openDevTools({ mode: 'detach' });
+    // DevTools only when explicitly requested via F12 in the View menu
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   }
