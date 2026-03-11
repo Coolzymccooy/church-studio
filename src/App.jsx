@@ -381,7 +381,7 @@ const AudioProcessor = ({ goHome }) => {
   // UPDATED: selectedDevices now holds:
   // - inputId           → mic / mixer
   // - outputId          → monitoring output (AirPods, speakers) – used by setSinkId
-  // - broadcastBus      → conceptual “broadcast output” (VB-Cable, Loopback, etc)
+  // - broadcastBus      → conceptual "broadcast output" (VB-Cable, Loopback, etc)
   const [selectedDevices, setSelectedDevices] = useState(() => {
     try {
       const saved = window.localStorage.getItem('tiwaton:devices');
@@ -3840,202 +3840,323 @@ const Badge = ({ active, text }) => (
   </div>
 );
 
+// Expandable quick-fix card
+function ExpandableCard({ icon, title, content }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div
+      className={`rounded-xl border overflow-hidden transition-all ${open ? 'border-amber-500/40' : 'border-slate-800 hover:border-slate-700'}`}
+      style={{ background: '#0D1428' }}
+    >
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center gap-3 px-4 py-3 text-left"
+      >
+        <span className="text-xl leading-none shrink-0">{icon}</span>
+        <span className="flex-1 text-[12px] font-semibold text-slate-200">{title}</span>
+        <span className={`text-slate-500 text-lg leading-none transition-transform duration-200 ${open ? 'rotate-90' : ''}`}>›</span>
+      </button>
+      {open && (
+        <div className="px-4 pb-3 pt-0 border-t border-slate-800/80">
+          <p className="text-[11px] text-slate-400 leading-relaxed mt-2">{content}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Interactive Sunday checklist
+function ChecklistPanel({ checklist }) {
+  const [checked, setChecked] = useState({});
+  const groups = [...new Set(checklist.map(c => c.group))];
+  const toggle = step => setChecked(prev => ({ ...prev, [step]: !prev[step] }));
+  const doneCount = checklist.filter(c => checked[c.step]).length;
+  const allDone = doneCount === checklist.length;
+
+  return (
+    <div className="p-4 space-y-5">
+      {/* Progress bar */}
+      <div>
+        <div className="flex items-center justify-between mb-1.5">
+          <p className="text-[10px] text-slate-500 uppercase tracking-wider font-bold">Sunday Pre-Service Checklist</p>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-mono text-slate-500">{doneCount}/{checklist.length}</span>
+            <button onClick={() => setChecked({})} className="text-[9px] text-slate-700 hover:text-slate-400 transition-colors">Reset</button>
+          </div>
+        </div>
+        <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+          <div
+            className="h-full rounded-full transition-all duration-500"
+            style={{ width: `${(doneCount / checklist.length) * 100}%`, background: allDone ? '#00E676' : '#F59E0B' }}
+          />
+        </div>
+      </div>
+
+      {groups.map(group => (
+        <div key={group}>
+          <p className="text-[9px] font-bold text-slate-600 uppercase tracking-widest mb-2">{group}</p>
+          <div className="space-y-2">
+            {checklist.filter(c => c.group === group).map(({ step }) => (
+              <label
+                key={step}
+                onClick={() => toggle(step)}
+                className="flex items-start gap-3 cursor-pointer group"
+              >
+                <div
+                  className={`mt-0.5 w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-all ${
+                    checked[step]
+                      ? 'bg-[#00E676] border-[#00E676]'
+                      : 'border-slate-700 bg-slate-900 group-hover:border-slate-500'
+                  }`}
+                >
+                  {checked[step] && <Check size={10} className="text-black" strokeWidth={3} />}
+                </div>
+                <span className={`text-[11px] leading-snug transition-colors ${checked[step] ? 'text-slate-600 line-through' : 'text-slate-300 group-hover:text-slate-200'}`}>
+                  {step}
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      {allDone && (
+        <div className="rounded-xl border border-emerald-500/30 px-4 py-3 text-center" style={{ background: 'rgba(0,230,118,0.07)' }}>
+          <p className="text-[13px] font-bold text-emerald-400">All clear! You're ready to go live.</p>
+          <p className="text-[10px] text-emerald-700 mt-0.5">Press the amber button to start the engine.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function HelpCorner() {
   const [isOpen, setIsOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState('fixes');
+
+  const quickFixes = [
+    {
+      icon: '🔇',
+      title: 'No sound on stream',
+      content: 'Make sure LIVE is ON (amber button → turns red). Then in OBS go to Audio Settings and set your mic source to VB-CABLE Input (or BlackHole on Mac) — not your physical microphone.',
+    },
+    {
+      icon: '😤',
+      title: 'Too much background noise / HVAC hum',
+      content: 'Enable Hyper-Gate and RNNoise in the features panel. Then go to Engine menu → Auto-Calibrate Gate while the room is at its normal noise level (congregation seated, AC running). This teaches TIWATON what "silence" sounds like.',
+    },
+    {
+      icon: '🔁',
+      title: 'Echo / hearing voice twice',
+      content: 'Two audio sources are active. In OBS, open Audio Mixer settings and remove every source except VB-CABLE / BlackHole. Delete the webcam mic, laptop mic, and any direct mixer input from OBS.',
+    },
+    {
+      icon: '✂️',
+      title: 'Voice getting cut off mid-sentence',
+      content: 'The noise gate threshold is too aggressive. Lower the Noise Threshold slider in the settings panel, or run Auto-Calibrate Gate again. If the problem persists, disable Hyper-Gate temporarily.',
+    },
+    {
+      icon: '📻',
+      title: 'Audio sounds thin or tinny',
+      content: 'Enable Sermon Warmth and Voice Polish features. For post-processing, go to the Audio Editor tab, import your recording, and click Sermon Master → choose "Sermon (Warm)" preset, then Export WAV.',
+    },
+    {
+      icon: '🔴',
+      title: 'Red clipping — levels too hot',
+      content: 'Reduce the gain on your physical mixer or audio interface first. Then lower the input gain in TIWATON settings. Aim for peak levels around −12 dBFS during normal speech.',
+    },
+    {
+      icon: '💻',
+      title: 'App crashed or frozen',
+      content: 'Click Reset in the footer bar (bottom of the screen). Wait 3 seconds, then press the Live button again. Do not switch audio input devices while Live is running.',
+    },
+    {
+      icon: '🎙',
+      title: 'Making a sermon recording sound podcast-quality',
+      content: 'Go to the Audio Editor tab → Import your WAV or MP3 recording → Select the preset (Sermon Warm / Podcast Crisp / Broadcast Punchy) → Click "Sermon Master" → wait a few seconds → Export WAV. Done.',
+    },
+  ];
+
+  const checklist = [
+    { step: 'Mic plugged into mixer or USB interface', group: 'Before You Start' },
+    { step: 'Gain set correctly — no red clipping on input', group: 'Before You Start' },
+    { step: 'System mic enhancements turned OFF (Windows: Sound → Properties → Enhancements)', group: 'Before You Start' },
+    { step: 'TIWATON input source set to your interface', group: 'TIWATON Setup' },
+    { step: 'Broadcast Output set to VB-CABLE or BlackHole', group: 'TIWATON Setup' },
+    { step: 'Hyper-Gate, Voice Isolation, Warmth, Auto-Mix all enabled', group: 'TIWATON Setup' },
+    { step: 'Auto-Calibrate Gate run (Engine menu) with normal room noise', group: 'TIWATON Setup' },
+    { step: 'OBS audio source set to VB-CABLE / BlackHole (not physical mic)', group: 'OBS / Streaming' },
+    { step: 'All raw microphone inputs removed from OBS', group: 'OBS / Streaming' },
+    { step: '10-second test recording sounds clear', group: 'Sound Check' },
+    { step: 'Press LIVE — status shows green "Live Processing"', group: 'Go Live' },
+  ];
+
+  const setupSteps = [
+    {
+      num: '1', title: 'Physical Connection', color: '#F59E0B',
+      items: [
+        'Pastor mic → Mixer / Audio Interface (NOT directly into laptop)',
+        'One clean USB cable from interface into computer',
+        'Disable Windows / Mac system noise suppression & AGC',
+        'Sound engineer monitors on headphones, not speakers',
+      ],
+    },
+    {
+      num: '2', title: 'Inside TIWATON', color: '#00E676',
+      items: [
+        'Settings → select your interface as the input',
+        'Set Broadcast Output → VB-CABLE Input (Windows) or BlackHole (Mac)',
+        'Enable: Hyper-Gate · Voice Isolation · Warmth · Auto-Mix',
+        'Engine menu → Auto-Calibrate Gate (room at normal noise)',
+      ],
+    },
+    {
+      num: '3', title: 'In OBS / StreamYard', color: '#60a5fa',
+      items: [
+        'Add Audio Input Capture → choose VB-CABLE or BlackHole',
+        'Remove all physical mic sources (webcam, laptop, interface direct)',
+        'Rule: if TIWATON says "Broadcast: VB-CABLE" → OBS must also use VB-CABLE',
+        'Check OBS audio meter shows activity when pastor speaks',
+      ],
+    },
+  ];
 
   return (
     <>
-      {/* Floating Help Button */}
+      {/* Floating Help Button — left side so it never blocks signal flow */}
       <button
         type="button"
         data-help-button
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-20 right-4 z-40 flex items-center gap-2 rounded-full bg-slate-900/95 px-4 py-2 text-xs font-semibold text-slate-100 shadow-lg border border-slate-700 hover:bg-slate-800"
+        className="fixed bottom-4 left-16 z-40 flex items-center gap-2 rounded-full px-3 py-2 text-[11px] font-semibold text-slate-100 shadow-lg border transition-all hover:scale-105"
+        style={{ background: '#0D1428', borderColor: 'rgba(245,158,11,0.35)' }}
+        title="Audio help & Sunday checklist"
       >
-        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-500 text-[11px] font-bold">
-          ?
-        </span>
-        <span className="hidden sm:inline">Need help with audio?</span>
-        <span className="sm:hidden">Help</span>
+        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-black">?</span>
+        <span className="hidden sm:inline text-slate-400">Help</span>
       </button>
 
-      {/* Help Panel */}
+      {/* Slide-in right drawer */}
       {isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
-          <div className="flex max-h-[80vh] w-full max-w-lg flex-col rounded-2xl border border-slate-700 bg-slate-950 shadow-2xl">
-            {/* Header */}
-            <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
-              <div className="flex items-center gap-2">
-                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-amber-600 text-xs font-bold text-white">
-                  ?
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-slate-100">
-                    TIWATON Sunday Service Assistant
-                  </p>
-                  <p className="text-[11px] text-slate-400">
-                    Routing, setup & quick fixes for clean livestream audio.
-                  </p>
-                </div>
-              </div>
+        <div className="fixed inset-0 z-50 flex justify-end">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setIsOpen(false)}
+          />
 
-              <button
-                onClick={() => setIsOpen(false)}
-                className="rounded-full p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white"
-              >
+          {/* Panel */}
+          <div className="relative flex flex-col w-full max-w-md h-full border-l border-slate-700 shadow-2xl overflow-hidden" style={{ background: '#080E1F' }}>
+
+            {/* Header */}
+            <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-800 shrink-0" style={{ background: '#030710' }}>
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm text-black" style={{ background: '#F59E0B' }}>?</div>
+              <div className="flex-1">
+                <p className="text-[13px] font-bold text-slate-100">Audio Help Center</p>
+                <p className="text-[10px] text-slate-500">Quick fixes · Setup guide · Sunday checklist</p>
+              </div>
+              <button onClick={() => setIsOpen(false)} className="p-1.5 rounded-lg text-slate-500 hover:text-white hover:bg-slate-800 transition-colors">
                 <X className="h-4 w-4" />
               </button>
             </div>
 
-            {/* Body – upgraded routing guide */}
-            <div className="flex-1 space-y-4 overflow-y-auto px-4 py-3 text-[11px] leading-relaxed text-slate-300">
-              {/* SECTION: Title */}
-              <p className="font-semibold text-slate-100 text-sm">
-                🎚 TIWATON + OBS Routing Guide
-              </p>
-              <p className="text-[11px] text-slate-400">
-                Follow this quick workflow every Sunday to get clean, consistent livestream audio.
-              </p>
+            {/* Tabs */}
+            <div className="flex border-b border-slate-800 shrink-0" style={{ background: '#030710' }}>
+              {[
+                { id: 'fixes',     label: '⚡ Quick Fixes' },
+                { id: 'setup',     label: '🔧 Setup Guide' },
+                { id: 'checklist', label: '✅ Checklist'   },
+              ].map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`flex-1 py-2.5 text-[11px] font-semibold transition-colors ${
+                    activeTab === tab.id
+                      ? 'text-amber-400 border-b-2 border-amber-500'
+                      : 'text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
 
-              {/* SECTION 1: Physical Setup */}
-              <div className="rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 space-y-1">
-                <p className="font-semibold text-slate-100">1️⃣ Physical Setup</p>
-                <ul className="ml-4 list-disc space-y-1">
-                  <li>Pastor mic → Mixer / Audio Interface (correct gain, no clipping).</li>
-                  <li>
-                    Only <span className="font-semibold text-amber-300">one</span> clean feed to the computer (USB preferred).
-                  </li>
-                  <li>Turn off system Noise Suppression / AGC.</li>
-                  <li>Sound engineer monitors with AirPods / headphones.</li>
-                </ul>
-              </div>
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto">
 
-              {/* SECTION 2: TIWATON INPUT */}
-              <div>
-                <p className="font-semibold text-slate-100">2️⃣ Inside TIWATON Studio</p>
-
-                <div className="mt-1 ml-4">
-                  <p className="font-semibold text-slate-200">A. Input Source</p>
-                  <ul className="ml-4 list-disc space-y-1">
-                    <li>Select mixer or USB interface (e.g. Scarlett, Behringer, Yamaha AG06).</li>
-                    <li>Confirm levels are healthy but not clipping.</li>
-                  </ul>
+              {/* ── Quick Fixes ── */}
+              {activeTab === 'fixes' && (
+                <div className="p-4 space-y-2">
+                  <p className="text-[10px] text-slate-600 uppercase tracking-wider mb-3">Tap your problem for an instant fix</p>
+                  {quickFixes.map(card => (
+                    <ExpandableCard key={card.title} icon={card.icon} title={card.title} content={card.content} />
+                  ))}
                 </div>
+              )}
 
-                <div className="mt-2 ml-4">
-                  <p className="font-semibold text-slate-200">B. Outputs</p>
-                  <ul className="ml-4 list-disc space-y-1">
-                    <li>
-                      <span className="text-amber-300 font-semibold">Monitoring Output</span>{' '}
-                      → AirPods / Headphones (what you listen on).
-                    </li>
-                    <li>
-                      <span className="text-amber-300 font-semibold">Broadcast Output</span>{' '}
-                      → Virtual Cable (what OBS / YouTube hears).
-                    </li>
-                    <li>
-                      Footer will show something like:
-                      <br />
-                      <span className="text-slate-400 ml-4">
-                        Monitor: AirPods Max · Broadcast: VB-CABLE Input
-                      </span>
-                    </li>
-                  </ul>
+              {/* ── Setup Guide ── */}
+              {activeTab === 'setup' && (
+                <div className="p-4 space-y-4">
+                  <p className="text-[10px] text-slate-600 uppercase tracking-wider mb-1">Follow these 3 steps every Sunday</p>
+
+                  {setupSteps.map(({ num, title, color, items }) => (
+                    <div key={num} className="rounded-xl border border-slate-800 overflow-hidden" style={{ background: '#0D1428' }}>
+                      <div className="flex items-center gap-2.5 px-3 py-2.5 border-b border-slate-800" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                        <div className="w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold text-black shrink-0" style={{ background: color }}>{num}</div>
+                        <span className="font-bold text-[12px] text-slate-100">{title}</span>
+                      </div>
+                      <ul className="px-4 py-3 space-y-2">
+                        {items.map(item => (
+                          <li key={item} className="flex items-start gap-2 text-[11px] text-slate-400 leading-snug">
+                            <span className="text-slate-700 mt-0.5 shrink-0">›</span>
+                            <span>{item}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+
+                  {/* Golden Rule */}
+                  <div className="rounded-xl border px-4 py-3" style={{ background: 'rgba(245,158,11,0.07)', borderColor: 'rgba(245,158,11,0.25)' }}>
+                    <p className="text-[11px] font-bold text-amber-400 mb-1">Golden Rule</p>
+                    <p className="text-[11px] text-slate-300 leading-relaxed">
+                      TIWATON replaces ALL microphones in OBS. Only the <span className="text-amber-400 font-semibold">Broadcast Output</span> virtual cable from TIWATON goes into OBS — never a raw physical mic.
+                    </p>
+                  </div>
+
+                  {/* Keyboard shortcuts */}
+                  <div className="rounded-xl border border-slate-800 overflow-hidden" style={{ background: '#0D1428' }}>
+                    <div className="px-3 py-2 border-b border-slate-800" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Keyboard Shortcuts</span>
+                    </div>
+                    <div className="px-3 py-2 space-y-1.5">
+                      {[
+                        ['Ctrl + Enter', 'Start / Stop Live engine'],
+                        ['B', 'Toggle AI Bypass'],
+                        ['Ctrl + 1', 'Switch to Live view'],
+                        ['Ctrl + 2', 'Switch to Audio Editor'],
+                        ['Ctrl + S', 'Save session snapshot'],
+                        ['F12', 'Developer tools'],
+                      ].map(([key, action]) => (
+                        <div key={key} className="flex items-center justify-between">
+                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">{key}</span>
+                          <span className="text-[10px] text-slate-500">{action}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
+              )}
 
-                <div className="mt-2 ml-4">
-                  <p className="font-semibold text-slate-200">C. Processing Checklist</p>
-                  <ul className="ml-4 list-disc space-y-1">
-                    <li>Enable Hyper-Gate, Voice Isolation, Warmth, Auto-Mixing.</li>
-                    <li>
-                      Run{' '}
-                      <span className="font-semibold text-amber-300">
-                        Auto-Calibrate Gate
-                      </span>{' '}
-                      once when the room is at normal noise level.
-                    </li>
-                    <li>
-                      Use <span className="font-semibold">Record Check</span> to confirm clarity
-                      before going live.
-                    </li>
-                  </ul>
-                </div>
-              </div>
-
-              {/* SECTION 3: OBS Setup */}
-              <div>
-                <p className="font-semibold text-slate-100">3️⃣ In OBS / Streaming Apps</p>
-
-                <ul className="ml-4 list-disc space-y-1 mt-1">
-                  <li>
-                    Add{' '}
-                    <span className="font-semibold text-amber-300">
-                      Audio Input Capture
-                    </span>{' '}
-                    → Choose:{' '}
-                    <span className="font-semibold">VB-CABLE / BlackHole / Loopback</span>.
-                  </li>
-                  <li>
-                    Remove all raw mics (webcam, laptop mic, mixer direct, built-in mic,
-                    etc).
-                  </li>
-                  <li>
-                    Rule:
-                    <br />
-                    <span className="ml-4 text-amber-300 font-semibold">
-                      If TIWATON says “Broadcast: VB-CABLE”, OBS must also use VB-CABLE.
-                    </span>
-                  </li>
-                </ul>
-              </div>
-
-              {/* SECTION 4: Troubleshooting */}
-              <div>
-                <p className="font-semibold text-slate-100">4️⃣ Troubleshooting (Live)</p>
-
-                <ul className="ml-4 list-disc space-y-1 mt-1">
-                  <li>
-                    <span className="text-red-400 font-semibold">
-                      No sound on stream?
-                    </span>{' '}
-                    Check Live is ON and OBS is using the Virtual Cable device.
-                  </li>
-                  <li>
-                    <span className="text-red-400 font-semibold">
-                      Echo / double audio?
-                    </span>{' '}
-                    Two mics active. In OBS, keep only the virtual cable input.
-                  </li>
-                  <li>
-                    <span className="text-amber-300 font-semibold">
-                      Gate too strong?
-                    </span>{' '}
-                    Lower Noise Threshold in TIWATON (move the slider left).
-                  </li>
-                  <li>
-                    <span className="text-amber-300 font-semibold">
-                      TIWATON acting strange?
-                    </span>{' '}
-                    Use Reset in the footer and restart Live.
-                  </li>
-                </ul>
-              </div>
-
-              {/* GOLDEN RULE CARD */}
-              <div className="mt-2 rounded-xl border border-slate-800 bg-slate-900 px-3 py-2">
-                <p className="text-[11px] text-slate-400">
-                  <span className="font-semibold text-amber-300">Golden Rule:</span>{' '}
-                  TIWATON replaces all mics in OBS. Only the{' '}
-                  <span className="font-semibold text-amber-300">Broadcast Output</span> from
-                  TIWATON should be selected as the mic in OBS / streaming apps.
-                </p>
-              </div>
+              {/* ── Checklist ── */}
+              {activeTab === 'checklist' && (
+                <ChecklistPanel checklist={checklist} />
+              )}
             </div>
 
             {/* Footer */}
-            <div className="flex items-center justify-between border-t border-slate-800 px-4 py-2 text-[10px] text-slate-500">
-              <span>Checklist tuned for your TIWATON studio.</span>
-              <span className="hidden sm:inline">Your audio co-pilot is here.</span>
+            <div className="border-t border-slate-800 px-4 py-2 shrink-0 text-center" style={{ background: '#030710' }}>
+              <p className="text-[9px] text-slate-700">TIWATON Audio Help · Built for churches & live streamers</p>
             </div>
           </div>
         </div>
