@@ -4,9 +4,9 @@ import './index.css';
 import App from './App.jsx';
 import LandingPage from './LandingPage.jsx';
 import { ThemeProvider } from './contexts/ThemeContext.jsx';
+import { isDesktopApp } from './lib/platform.js';
 
 // Detect desktop app — Tauri sets window.__TAURI__, Electron sets electronAPI.isElectron
-const isDesktopApp = Boolean(window.__TAURI__) || Boolean(window.electronAPI?.isElectron);
 // Allow deep-linking to app via ?app or #app
 const wantsApp = window.location.search.includes('app') || window.location.hash === '#app';
 

@@ -8,10 +8,15 @@
  */
 
 // ── Environment detection ──────────────────────────────────────────────────
-export const isTauri = Boolean(window.__TAURI__);
+const hasWindow = typeof window !== 'undefined';
+const tauriInternals =
+  hasWindow
+  && (window.__TAURI__ || window.__TAURI_INTERNALS__ || window.__TAURI_METADATA__);
+
+export const isTauri = Boolean(tauriInternals);
 
 // Legacy Electron compatibility (unused after migration but kept for safety)
-export const isElectron = Boolean(window.electronAPI?.isElectron);
+export const isElectron = hasWindow && Boolean(window.electronAPI?.isElectron);
 
 export const isDesktopApp = isTauri || isElectron;
 
