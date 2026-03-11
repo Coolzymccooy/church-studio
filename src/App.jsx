@@ -2,6 +2,9 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import WaveformEditor from './components/WaveformEditor';
 import MenuBar from './components/MenuBar';
 import AIAssistant from './components/AIAssistant';
+import ThemeSelector from './components/ThemeSelector';
+import AnalyticsDashboard from './components/AnalyticsDashboard';
+import { trackEvent, startSession, endSession } from './utils/analytics';
 import {
   Mic,
   Settings,
@@ -592,8 +595,14 @@ const AudioProcessor = ({ goHome }) => {
   }, [resetDeviceState]);
 
   useEffect(() => {
-    if (showSettings) getDevices();
+    if (showSettings) { getDevices(); trackEvent('settings_open'); }
   }, [showSettings, getDevices]);
+
+  // Session-level analytics
+  useEffect(() => {
+    startSession();
+    return () => endSession();
+  }, []);
 
   useEffect(() => {
     noiseFloorThresholdRef.current = noiseFloorThreshold;
@@ -1105,7 +1114,7 @@ const AudioProcessor = ({ goHome }) => {
 
   const toggleLive = async () => {
     if (isLive) {
-      // turning OFF live
+      trackEvent('engine_stop');
       cleanupAudio();
       return;
     }
@@ -1136,6 +1145,7 @@ const AudioProcessor = ({ goHome }) => {
       // Only mark as live if engine actually started
       if (contextRef.current) {
         setIsLive(true);
+        trackEvent('engine_start', { preset: speakerPreset });
       } else {
         setIsLive(false);
       }
@@ -1194,6 +1204,7 @@ const AudioProcessor = ({ goHome }) => {
   }, []);
 
   const startAutoCalibrate = () => {
+    trackEvent('noise_calibrate');
     // Needs an active audio engine
     if (!processingRefs.current.analyser || !audioContext) {
       alert('Start Live or play a file first so I can listen to the room.');
@@ -1305,6 +1316,7 @@ const AudioProcessor = ({ goHome }) => {
   // --- RECORD CHECK ---
   const toggleRecording = () => {
     if (recordingState === 'idle') {
+      trackEvent('recording_start');
       if (!destNodeRef.current || !destNodeRef.current.stream) {
         alert('Start Live or load a file first so I have a processed stream to record.');
         return;
@@ -1514,6 +1526,7 @@ const AudioProcessor = ({ goHome }) => {
       alert('Go Live first so TIWATON can capture the processed audio stream.');
       return;
     }
+    trackEvent('export_mp4');
 
     // Combine canvas video track + processed audio track
     const canvasStream = canvas.captureStream(30); // 30fps
@@ -2890,6 +2903,7 @@ const AudioProcessor = ({ goHome }) => {
       : selectedDevices.broadcastBus || 'Not set';
 
   const handleSnapshotSave = () => {
+    trackEvent('snapshot_save');
     const nextId = snapshotCounterRef.current;
     snapshotCounterRef.current += 1;
     const label = `Snapshot ${nextId}`;
@@ -2983,6 +2997,7 @@ const AudioProcessor = ({ goHome }) => {
       <MenuBar
         onGoHome={goHome}
         onShowSettings={() => setShowSettings(true)}
+        themeSelector={<ThemeSelector />}
         onToggleLive={toggleLive}
         onHardReset={hardReset}
         onStartAutoCalibrate={startAutoCalibrate}
@@ -3405,6 +3420,44 @@ const AudioProcessor = ({ goHome }) => {
             {/* ── SESSION TAB ── */}
             {controlTab === 'session' && (
               <div className="space-y-3">
+
+                {/* VB-CABLE Routing Status */}
+                {selectedDevices.broadcastBus && selectedDevices.broadcastBus !== 'Not set' && (
+                  <div className="rounded-lg border overflow-hidden" style={{background:'#080E1F', borderColor: isLive ? 'rgba(0,230,118,0.3)' : 'rgba(255,255,255,0.06)'}}>
+                    <div className="px-3 py-1.5 border-b border-slate-800 flex items-center justify-between" style={{background:'rgba(255,255,255,0.03)'}}>
+                      <span className="text-[9px] font-bold tracking-[0.1em] text-slate-500 uppercase">Broadcast Routing</span>
+                      {isLive && <span className="w-1.5 h-1.5 rounded-full bg-[#00E676] animate-pulse"/>}
+                    </div>
+                    <div className="p-3">
+                      <div className="flex items-center gap-1.5 text-[9px] font-mono flex-wrap">
+                        <span className="px-2 py-1 rounded border border-slate-700 text-slate-400" style={{background:'#0D1428'}}>MIC</span>
+                        <span className="text-slate-700">→</span>
+                        <span className="px-2 py-1 rounded border text-amber-400 font-bold" style={{background:'rgba(245,158,11,0.08)', borderColor:'rgba(245,158,11,0.3)'}}>TIWATON DSP</span>
+                        <span className="text-slate-700">→</span>
+                        <span className={`px-2 py-1 rounded border font-bold ${isLive ? 'text-[#00E676] border-[#00E676]/30' : 'text-slate-500 border-slate-700'}`} style={{background: isLive ? 'rgba(0,230,118,0.07)' : 'transparent'}}>
+                          {selectedDevices.broadcastBus}
+                        </span>
+                        <span className="text-slate-700">→</span>
+                        <span className="px-2 py-1 rounded border border-slate-700 text-slate-400" style={{background:'#0D1428'}}>OBS</span>
+                      </div>
+                      {isLive
+                        ? <p className="text-[9px] text-[#00E676] mt-2">TIWATON signal active — OBS is receiving processed audio</p>
+                        : <p className="text-[9px] text-slate-600 mt-2">Start LIVE to activate this routing chain</p>
+                      }
+                    </div>
+                  </div>
+                )}
+
+                {/* Analytics */}
+                <div className="rounded-lg border border-slate-800 overflow-hidden" style={{background:'#080E1F'}}>
+                  <div className="px-3 py-1.5 border-b border-slate-800" style={{background:'rgba(255,255,255,0.03)'}}>
+                    <span className="text-[9px] font-bold tracking-[0.15em] text-slate-500 uppercase">Session Analytics</span>
+                  </div>
+                  <div className="p-2">
+                    <AnalyticsDashboard />
+                  </div>
+                </div>
+
                 <div className="rounded-lg border border-slate-800 overflow-hidden" style={{background:'#080E1F'}}>
                   <div className="px-3 py-1.5 border-b border-slate-800 flex items-center justify-between" style={{background:'rgba(255,255,255,0.03)'}}>
                     <span className="text-[9px] font-bold tracking-[0.15em] text-slate-500 uppercase">A/B Compare</span>

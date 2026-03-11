@@ -26,3 +26,58 @@ body {
 canvas {
   display: block;
 }
+
+/* ─── Theme CSS variables ─────────────────────────────────── */
+:root {
+  --accent: #F59E0B;
+  --accent-rgb: 245,158,11;
+  --accent-dark: #D97706;
+  --accent-darker: #92400E;
+}
+
+/* Override Tailwind amber classes per theme */
+[data-theme="cyan"] {
+  --color-amber-300: #67E8F9;
+  --color-amber-400: #22D3EE;
+  --color-amber-500: #06B6D4;
+  --color-amber-600: #0891B2;
+  --color-amber-700: #0E7490;
+  --color-amber-800: #155E75;
+  --color-amber-900: #164E63;
+}
+[data-theme="emerald"] {
+  --color-amber-300: #6EE7B7;
+  --color-amber-400: #34D399;
+  --color-amber-500: #10B981;
+  --color-amber-600: #059669;
+  --color-amber-700: #047857;
+  --color-amber-800: #065F46;
+  --color-amber-900: #064E3B;
+}
+[data-theme="violet"] {
+  --color-amber-300: #C4B5FD;
+  --color-amber-400: #A78BFA;
+  --color-amber-500: #8B5CF6;
+  --color-amber-600: #7C3AED;
+  --color-amber-700: #6D28D9;
+  --color-amber-800: #5B21B6;
+  --color-amber-900: #4C1D95;
+}
+[data-theme="rose"] {
+  --color-amber-300: #FDA4AF;
+  --color-amber-400: #FB7185;
+  --color-amber-500: #F43F5E;
+  --color-amber-600: #E11D48;
+  --color-amber-700: #BE123C;
+  --color-amber-800: #9F1239;
+  --color-amber-900: #881337;
+}
+[data-theme="slate"] {
+  --color-amber-300: #CBD5E1;
+  --color-amber-400: #94A3B8;
+  --color-amber-500: #64748B;
+  --color-amber-600: #475569;
+  --color-amber-700: #334155;
+  --color-amber-800: #1E293B;
+  --color-amber-900: #0F172A;
+}

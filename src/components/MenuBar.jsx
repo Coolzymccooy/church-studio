@@ -76,6 +76,7 @@ export default function MenuBar({
   // Callbacks from parent
   onGoHome,
   onShowSettings,
+  themeSelector,
   onToggleLive,
   onHardReset,
   onStartAutoCalibrate,
@@ -219,8 +220,9 @@ export default function MenuBar({
         />
       ))}
 
-      {/* Right side — mode switcher */}
+      {/* Right side — theme selector + mode switcher */}
       <div className="ml-auto flex items-center gap-2">
+        {themeSelector}
         <div
           className="flex items-center rounded p-0.5 border border-slate-800 gap-0.5"
           style={{ background: '#050A1C' }}
