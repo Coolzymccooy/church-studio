@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(node_modules/.bin/electron c:/tmp/minimal-e)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(cp -r c:/Users/segun/church-studio/node_modules/electron c:/tmp/minimal-e/node_modules/)",
+      "Bash(mkdir -p c:/tmp/minimal-e/node_modules)",
+      "Bash(where electron:*)",
+      "Bash(electron --version)"
+    ]
+  }
+}

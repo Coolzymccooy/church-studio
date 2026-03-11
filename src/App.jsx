@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import WaveformEditor from './components/WaveformEditor';
+import MenuBar from './components/MenuBar';
+import AIAssistant from './components/AIAssistant';
 import {
   Mic,
   Settings,
@@ -327,6 +329,7 @@ const AudioProcessor = ({ goHome }) => {
   const [outputTarget, setOutputTarget] = useState('OBS Studio');
 
   const [showSettings, setShowSettings] = useState(false);
+  const [showAI, setShowAI] = useState(false);
   const [isMonitoring, setIsMonitoring] = useState(false);
   const [isBypassed, setIsBypassed] = useState(false);
   const [exportStatus, setExportStatus] = useState(null);
@@ -602,7 +605,7 @@ const AudioProcessor = ({ goHome }) => {
       isBypassed: isBypassed
     };
 
-    // Sync HyperGate AudioWorklet with current settings
+    // Sync HyperGate AudioWorklet with current settings + mic fingerprint
     const hgNode = processingRefs.current.hyperGateNode;
     if (hgNode) {
       hgNode.port.postMessage({
@@ -612,6 +615,17 @@ const AudioProcessor = ({ goHome }) => {
         enabled: features.denoise,
         bypassed: isBypassed,
       });
+      // Push fingerprint to worklet whenever it's learned
+      const fp = micFingerprintRef.current;
+      if (fp.learned && fp.bandMeans) {
+        hgNode.port.postMessage({
+          type: 'fingerprint',
+          bandMeans: Array.from(fp.bandMeans),
+          bandStdDevs: Array.from(fp.bandM2).map((m2, i) =>
+            fp.frames > 1 ? Math.sqrt(m2 / (fp.frames - 1)) : 0.5
+          ),
+        });
+      }
     }
 
     // Sync RNNoise worklet enable/disable
@@ -1141,6 +1155,42 @@ const AudioProcessor = ({ goHome }) => {
     }
   };
 
+  // ── Electron native menu IPC bridge ─────────────────────────────────────
+  // Use a stable ref so the one-time IPC listener always calls the latest handlers
+  const electronHandlersRef = useRef(null);
+  useEffect(() => {
+    electronHandlersRef.current = {
+      toggleLive, hardReset, startAutoCalibrate, startMicLearn,
+      setMainTab, setIsBypassed, shareRecording, exportMp4,
+      downloadWaveform, handleSnapshotSave, handleNoiseProfileCapture,
+    };
+  });
+  useEffect(() => {
+    if (!window.electronAPI?.onMenuCommand) return;
+    const cleanup = window.electronAPI.onMenuCommand((event, ...args) => {
+      const h = electronHandlersRef.current;
+      if (!h) return;
+      switch (event) {
+        case 'menu:toggle-live':      h.toggleLive(); break;
+        case 'menu:hard-reset':       h.hardReset(); break;
+        case 'menu:show-settings':    setShowSettings(true); break;
+        case 'menu:calibrate':        h.startAutoCalibrate(); break;
+        case 'menu:learn-mic':        h.startMicLearn(); break;
+        case 'menu:capture-noise':    h.handleNoiseProfileCapture(); break;
+        case 'menu:set-tab':          h.setMainTab(args[0]); break;
+        case 'menu:toggle-bypass':    h.setIsBypassed(b => !b); break;
+        case 'menu:export-wav':       h.shareRecording('wav'); break;
+        case 'menu:export-webm':      h.shareRecording('webm'); break;
+        case 'menu:export-mp4':       h.exportMp4(); break;
+        case 'menu:snapshot':         h.downloadWaveform(); break;
+        case 'menu:save-snapshot':    h.handleSnapshotSave(); break;
+        default: break;
+      }
+    });
+    return cleanup;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const startAutoCalibrate = () => {
     // Needs an active audio engine
     if (!processingRefs.current.analyser || !audioContext) {
@@ -1453,6 +1503,62 @@ const AudioProcessor = ({ goHome }) => {
       URL.revokeObjectURL(url);
     }, 'image/png');
   };
+
+  // --- MP4 EXPORT: Canvas waveform visualization + processed audio ---
+  const exportMp4 = useCallback(async () => {
+    const canvas = canvasRef.current;
+    const dest = destNodeRef.current;
+    if (!canvas || !dest || !dest.stream) {
+      alert('Go Live first so TIWATON can capture the processed audio stream.');
+      return;
+    }
+
+    // Combine canvas video track + processed audio track
+    const canvasStream = canvas.captureStream(30); // 30fps
+    const audioTracks = dest.stream.getAudioTracks();
+    const combinedStream = new MediaStream([
+      ...canvasStream.getVideoTracks(),
+      ...audioTracks,
+    ]);
+
+    // Prefer WebM/VP8 (universal), fallback to whatever browser supports
+    const mimeTypes = [
+      'video/webm;codecs=vp8,opus',
+      'video/webm;codecs=vp9,opus',
+      'video/webm',
+      'video/mp4',
+    ];
+    const mimeType = mimeTypes.find(t => MediaRecorder.isTypeSupported(t)) || 'video/webm';
+
+    const recorder = new MediaRecorder(combinedStream, { mimeType, videoBitsPerSecond: 2500000 });
+    const chunks = [];
+
+    recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+    recorder.onstop = () => {
+      const blob = new Blob(chunks, { type: mimeType });
+      const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `TIWATON_session_${Date.now()}.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setExportStatus('done');
+      setTimeout(() => setExportStatus(null), 3000);
+    };
+
+    recorder.start(100);
+    setExportStatus('sharing');
+
+    // Record for 10 seconds then auto-stop (user can also stop manually)
+    setTimeout(() => {
+      if (recorder.state === 'recording') recorder.stop();
+    }, 10000);
+
+    return recorder; // caller can stop early with recorder.stop()
+  }, []);
 
   // --- FILE MODE: PROCESS & EXPORT (AI MASTER) ---
   const processAndExportFile = () => {
@@ -2872,38 +2978,29 @@ const AudioProcessor = ({ goHome }) => {
       />
 
       {/* ─── MENU BAR ─── */}
-      <div className="h-9 shrink-0 flex items-center px-3 gap-5 text-[11px] font-medium text-slate-400 z-30 border-b border-slate-800/60" style={{background:'#030710'}}>
-        {/* Logo */}
-        <div className="flex items-center gap-2 mr-2 cursor-pointer group" onClick={goHome}>
-          <div className="w-5 h-5 bg-indigo-600 rounded flex items-center justify-center shadow-[0_0_8px_rgba(79,70,229,0.6)]">
-            <Waves size={11} className="text-white" />
-          </div>
-          <span className="text-slate-200 font-bold text-[11px] tracking-[0.2em]">TIWATON</span>
-          <span className="text-slate-600 text-[10px]">AI STUDIO v1.1</span>
-        </div>
-        <div className="h-4 w-px bg-slate-800" />
-        {/* File menu */}
-        <button onClick={() => setShowSettings(true)} className="hover:text-white transition-colors">File</button>
-        {/* Engine menu */}
-        <button onClick={toggleLive} className="hover:text-white transition-colors">Engine</button>
-        {/* View menu */}
-        <div className="flex items-center gap-2">
-          <button onClick={() => setMainTab('live')} className={`hover:text-white transition-colors ${mainTab === 'live' ? 'text-white' : ''}`}>Live</button>
-          <span className="text-slate-700">|</span>
-          <button onClick={() => setMainTab('editor')} className={`hover:text-white transition-colors ${mainTab === 'editor' ? 'text-white' : ''}`}>Editor</button>
-        </div>
-        {/* Tools */}
-        <button onClick={startAutoCalibrate} className="hover:text-white transition-colors">Calibrate</button>
-        <button onClick={startMicLearn} className="hover:text-white transition-colors">Learn Mic</button>
-        {/* Mode switch */}
-        <div className="ml-auto flex items-center gap-1 bg-slate-900/60 rounded p-0.5 border border-slate-800">
-          <button onClick={() => handleModeSwitch('live')} className={`px-2.5 py-0.5 rounded text-[10px] font-semibold transition-all ${mode === 'live' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-white'}`}>Live Input</button>
-          <button onClick={() => handleModeSwitch('file')} className={`px-2.5 py-0.5 rounded text-[10px] font-semibold transition-all ${mode === 'file' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-white'}`}>File Upload</button>
-        </div>
-        <button onClick={() => setShowSettings(true)} className={`ml-2 p-1 rounded hover:bg-slate-800 ${audioStats.sampleRate > 0 && audioStats.sampleRate < 44100 ? 'text-amber-400 animate-pulse' : 'text-slate-500 hover:text-white'}`}>
-          {audioStats.sampleRate > 0 && audioStats.sampleRate < 44100 ? <AlertTriangle size={14}/> : <Settings size={14}/>}
-        </button>
-      </div>
+      <MenuBar
+        onGoHome={goHome}
+        onShowSettings={() => setShowSettings(true)}
+        onToggleLive={toggleLive}
+        onHardReset={hardReset}
+        onStartAutoCalibrate={startAutoCalibrate}
+        onStartMicLearn={startMicLearn}
+        onCaptureNoise={handleNoiseProfileCapture}
+        onHandleModeSwitch={handleModeSwitch}
+        onSetMainTab={setMainTab}
+        onSnapshotSave={handleSnapshotSave}
+        onExportMp4={exportMp4}
+        onShareRecording={shareRecording}
+        onDownloadWaveform={downloadWaveform}
+        isLive={isLive}
+        mode={mode}
+        mainTab={mainTab}
+        recordingState={recordingState}
+        isBypassed={isBypassed}
+        setIsBypassed={setIsBypassed}
+        features={features}
+        setFeatures={setFeatures}
+      />
 
       {/* ─── ENGINE STATUS BAR ─── */}
       <div className="h-9 shrink-0 flex items-center px-4 gap-4 text-[10px] z-20 border-b border-slate-800/40" style={{background:'#030710', fontFamily:'JetBrains Mono, monospace'}}>
@@ -3328,7 +3425,9 @@ const AudioProcessor = ({ goHome }) => {
                       <div className="w-px h-3 bg-slate-600"/>
                       <button onClick={() => shareRecording('wav')} className="px-2 py-1 hover:bg-slate-700 font-bold text-amber-400 flex items-center gap-1"><Waves size={9}/>WAV</button>
                       <div className="w-px h-3 bg-slate-600"/>
-                      <button onClick={downloadWaveform} className="px-2 py-1 hover:bg-slate-700 rounded-r-full font-bold text-cyan-400 flex items-center gap-1"><Activity size={9}/>PNG</button>
+                      <button onClick={downloadWaveform} className="px-2 py-1 hover:bg-slate-700 font-bold text-cyan-400 flex items-center gap-1"><Activity size={9}/>PNG</button>
+                      <div className="w-px h-3 bg-slate-600"/>
+                      <button onClick={exportMp4} className="px-2 py-1 hover:bg-slate-700 rounded-r-full font-bold text-purple-400 flex items-center gap-1"><Video size={9}/>MP4</button>
                     </div>
                   )}
                 </div>
@@ -3606,6 +3705,14 @@ const AudioProcessor = ({ goHome }) => {
               <Activity className="w-3 h-3"/> Snapshot
             </button>
           )}
+          {isLive && (
+            <button onClick={exportMp4} disabled={exportStatus === 'sharing'} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[9px] font-semibold hover:opacity-80 disabled:opacity-40"
+              style={{background:'#0D1428', borderColor:'rgba(168,85,247,0.4)', color:'#c084fc'}}
+              title="Record 10s of canvas + processed audio as MP4/WebM">
+              {exportStatus === 'sharing' ? <span className="w-2.5 h-2.5 rounded-full border border-purple-400 border-t-transparent animate-spin"/> : <Video className="w-3 h-3"/>}
+              {exportStatus === 'done' ? 'Saved!' : exportStatus === 'sharing' ? 'Recording...' : 'MP4'}
+            </button>
+          )}
           <button onClick={hardReset} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[9px] font-semibold hover:opacity-80"
             style={{background:'#0D1428', borderColor:'rgba(245,158,11,0.3)', color:'#fbbf24'}}>
             <RefreshCw className="w-3 h-3"/> Reset
@@ -3637,6 +3744,32 @@ const AudioProcessor = ({ goHome }) => {
         </button>
         <button onClick={() => setShowSettings(true)} className="p-2 text-slate-400"><Settings size={16}/></button>
       </div>
+
+      {/* AI Assistant floating button */}
+      <button
+        onClick={() => setShowAI(p => !p)}
+        title="TIWATON AI — Claude powered"
+        className="fixed bottom-4 left-4 z-50 w-10 h-10 rounded-full flex items-center justify-center shadow-lg border transition-all hover:scale-105"
+        style={showAI
+          ? { background: '#4F7BFF', borderColor: '#4F7BFF' }
+          : { background: '#0D1428', borderColor: 'rgba(79,123,255,0.4)' }}
+      >
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M8 1.5C4.41 1.5 1.5 4.41 1.5 8s2.91 6.5 6.5 6.5 6.5-2.91 6.5-6.5S11.59 1.5 8 1.5zm0 2a1 1 0 110 2 1 1 0 010-2zm1 8H7v-4h2v4z"
+            fill={showAI ? '#fff' : '#4F7BFF'}/>
+        </svg>
+      </button>
+
+      {/* AI Assistant panel */}
+      <AIAssistant
+        isOpen={showAI}
+        onClose={() => setShowAI(false)}
+        isLive={isLive}
+        features={features}
+        setFeatures={setFeatures}
+        currentPreset={speakerPreset}
+        spectrumData={null}
+      />
 
     </div>
   );   // ✅ end of JSX returned from AudioProcessor
@@ -3713,6 +3846,7 @@ function HelpCorner() {
       {/* Floating Help Button */}
       <button
         type="button"
+        data-help-button
         onClick={() => setIsOpen(true)}
         className="fixed bottom-20 right-4 z-40 flex items-center gap-2 rounded-full bg-slate-900/95 px-4 py-2 text-xs font-semibold text-slate-100 shadow-lg border border-slate-700 hover:bg-slate-800"
       >

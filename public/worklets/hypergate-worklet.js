@@ -84,6 +84,9 @@ class HyperGateProcessor extends AudioWorkletProcessor {
       this.hannWindow[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (this.fftSize - 1)));
     }
 
+    // Mic fingerprint (sent from main thread after learning session)
+    this.micFingerprint = null; // { bandMeans: Float32Array(8), bandStdDevs: Float32Array(8) }
+
     // Listen for config updates from main thread
     this.port.onmessage = (event) => {
       const data = event.data;
@@ -92,6 +95,13 @@ class HyperGateProcessor extends AudioWorkletProcessor {
         if (data.gateMode !== undefined) this.gateMode = data.gateMode;
         if (data.enabled !== undefined) this.enabled = data.enabled;
         if (data.bypassed !== undefined) this.bypassed = data.bypassed;
+      }
+      // Receive learned mic fingerprint from main thread
+      if (data.type === 'fingerprint') {
+        this.micFingerprint = {
+          bandMeans: new Float32Array(data.bandMeans),
+          bandStdDevs: new Float32Array(data.bandStdDevs),
+        };
       }
     };
   }
@@ -276,7 +286,39 @@ class HyperGateProcessor extends AudioWorkletProcessor {
     const hasFormants = this.formantScore > 0;
     const hasVoiceEnergy = this.voiceEnergy > 15 && this.voiceRatio > 1.15;
 
-    // Scoring system
+    // Mic fingerprint match score (worklet-side)
+    let micMatchScore = 0.5; // neutral if no fingerprint yet
+    if (this.micFingerprint && this.sampleBuffer) {
+      const { bandMeans, bandStdDevs } = this.micFingerprint;
+      const n = this.fftSize;
+      const binHz = (sampleRate / 2) / (n / 2);
+      // Compute same 8-band energy as main thread
+      const bandRanges = [[40,180],[180,400],[400,900],[900,2000],[2000,3500],[3500,5000],[5000,8000],[8000,12000]];
+      let totalDev = 0;
+      let matched = 0;
+      for (let b = 0; b < bandRanges.length; b++) {
+        const [lo, hi] = bandRanges[b];
+        const startBin = Math.floor(lo / binHz);
+        const endBin = Math.min(Math.ceil(hi / binHz), n / 2);
+        let sum = 0; let count = 0;
+        for (let i = startBin; i < endBin; i++) {
+          sum += Math.abs(this.sampleBuffer[i] || 0);
+          count++;
+        }
+        const bandVal = count > 0 ? sum / count : 0;
+        const mean = bandMeans[b] || 0;
+        const std = bandStdDevs[b] || 1;
+        if (std > 0.0001) {
+          const dev = Math.abs(bandVal - mean) / std;
+          totalDev += dev;
+          if (dev < 2) matched++;
+        }
+      }
+      const matchRatio = matched / bandRanges.length;
+      micMatchScore = matchRatio * (1 - Math.min(1, totalDev / (bandRanges.length * 3)));
+    }
+
+    // Scoring system (matches main-thread logic)
     let voiceScore = 0;
     if (this.db > threshold) voiceScore += 1;
     if (this.db > openThreshold) voiceScore += 1;
@@ -286,6 +328,10 @@ class HyperGateProcessor extends AudioWorkletProcessor {
     if (hasVoiceEnergy) voiceScore += 2;
     if (this.voiceRatio > 1.0) voiceScore += 1;
     if (!this.highOnlyNoise) voiceScore += 1;
+    // Mic fingerprint bonus/penalty
+    if (micMatchScore > 0.7) voiceScore += 2;
+    else if (micMatchScore > 0.4) voiceScore += 1;
+    if (micMatchScore < 0.3) voiceScore -= 2;
 
     const speechOnlyMode = this.gateMode === 'speech';
     const scoreThreshold = speechOnlyMode ? 6 : 4;
