@@ -97,6 +97,11 @@ export default function WaveformEditor({ audioContext, onExport }) {
   // Tool mode
   const [tool, setTool] = useState('select'); // select, cut, zoom
 
+  // Sermon Master
+  const [masterProgress, setMasterProgress] = useState(0);
+  const [masterStage, setMasterStage] = useState(null);
+  const [masterPreset, setMasterPreset] = useState('sermon');
+
   // --- File Loading ---
   const handleFileLoad = useCallback(async (file) => {
     if (!file) return;
@@ -710,6 +715,163 @@ export default function WaveformEditor({ audioContext, onExport }) {
     setTracks(t => t.map((tr, i) => i === activeTrackIdx ? { ...tr, buffer: newBuf } : tr));
   }, [audioBuffer, noiseProfile, noiseReduction, pushUndo, createBuffer, activeTrackIdx]);
 
+  // --- SERMON MASTER: One-click podcast mastering pipeline ---
+  const sermonMaster = useCallback(async () => {
+    if (!audioBuffer) return;
+    pushUndo();
+
+    const sr = audioBuffer.sampleRate;
+    const nch = audioBuffer.numberOfChannels;
+
+    try {
+      // === Stage 1: Auto noise removal from first 500ms ===
+      setMasterStage('Removing background noise...');
+      setMasterProgress(5);
+
+      let processedBuffer = audioBuffer;
+      const noiseFrames = Math.min(Math.floor(sr * 0.5), audioBuffer.length);
+      const fftSize = 2048;
+
+      if (noiseFrames > fftSize) {
+        const autoNoiseProfile = new Float32Array(fftSize);
+        const data0 = audioBuffer.getChannelData(0);
+        const numNoiseFrames = Math.floor(noiseFrames / fftSize);
+
+        if (numNoiseFrames > 0) {
+          for (let frame = 0; frame < numNoiseFrames; frame++) {
+            const offset = frame * fftSize;
+            for (let i = 0; i < fftSize; i++) {
+              const val = offset + i < data0.length ? data0[offset + i] : 0;
+              autoNoiseProfile[i] += val * val;
+            }
+          }
+          for (let i = 0; i < fftSize; i++) autoNoiseProfile[i] /= numNoiseFrames;
+
+          const reductionFactor = Math.pow(10, 12 / 20);
+          const hopSize = fftSize / 2;
+          const resultChs = [];
+
+          for (let ch = 0; ch < nch; ch++) {
+            const input = audioBuffer.getChannelData(ch);
+            const output = new Float32Array(input.length);
+            const hann = new Float32Array(fftSize);
+            for (let i = 0; i < fftSize; i++) hann[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / (fftSize - 1)));
+
+            for (let pos = 0; pos + fftSize <= input.length; pos += hopSize) {
+              const frame = new Float32Array(fftSize);
+              for (let i = 0; i < fftSize; i++) frame[i] = input[pos + i] * hann[i];
+              for (let i = 0; i < fftSize; i++) {
+                const noisePow = autoNoiseProfile[i] * reductionFactor;
+                const sigPow = frame[i] * frame[i];
+                if (sigPow < noisePow) {
+                  frame[i] *= 0.05;
+                } else {
+                  frame[i] *= Math.sqrt(Math.max(0, sigPow - noisePow) / (sigPow + 1e-10));
+                }
+              }
+              for (let i = 0; i < fftSize; i++) {
+                if (pos + i < output.length) output[pos + i] += frame[i] * hann[i];
+              }
+            }
+            const normFactor = hopSize / fftSize * 2;
+            for (let i = 0; i < output.length; i++) output[i] *= normFactor;
+            resultChs.push(output);
+          }
+          processedBuffer = createBuffer(resultChs, sr);
+        }
+      }
+
+      setMasterProgress(30);
+
+      // === Stage 2: OfflineAudioContext DSP chain (EQ + Compression + Limiting) ===
+      setMasterStage('Applying EQ + dynamics...');
+
+      const PRESETS = {
+        sermon:    { hpfHz: 80, bassHz: 150, bassG: 3,   presHz: 2800, presG: 2,   airHz: 10000, airG: 1.5, deEssHz: 7500, deEssG: -3, deEssQ: 2.5, compThresh: -18, compRatio: 2.5, compKnee: 8, compAtk: 0.005, compRel: 0.3  },
+        podcast:   { hpfHz: 80, bassHz: 120, bassG: 2,   presHz: 3500, presG: 3,   airHz: 10000, airG: 2,   deEssHz: 8000, deEssG: -4, deEssQ: 3,   compThresh: -16, compRatio: 3,   compKnee: 6, compAtk: 0.003, compRel: 0.25 },
+        broadcast: { hpfHz: 100,bassHz: 100, bassG: 1.5, presHz: 4000, presG: 2.5, airHz: 12000, airG: 2.5, deEssHz: 8500, deEssG: -5, deEssQ: 3.5, compThresh: -14, compRatio: 4,   compKnee: 4, compAtk: 0.002, compRel: 0.2  },
+      };
+      const p = PRESETS[masterPreset] || PRESETS.sermon;
+
+      const offlineCtx = new OfflineAudioContext(nch, processedBuffer.length, sr);
+      const source = offlineCtx.createBufferSource();
+      source.buffer = processedBuffer;
+
+      const hpf = offlineCtx.createBiquadFilter();
+      hpf.type = 'highpass'; hpf.frequency.value = p.hpfHz; hpf.Q.value = 0.7;
+
+      const bass = offlineCtx.createBiquadFilter();
+      bass.type = 'peaking'; bass.frequency.value = p.bassHz; bass.gain.value = p.bassG; bass.Q.value = 0.8;
+
+      const presence = offlineCtx.createBiquadFilter();
+      presence.type = 'peaking'; presence.frequency.value = p.presHz; presence.gain.value = p.presG; presence.Q.value = 1.0;
+
+      const air = offlineCtx.createBiquadFilter();
+      air.type = 'highshelf'; air.frequency.value = p.airHz; air.gain.value = p.airG;
+
+      const deEsser = offlineCtx.createBiquadFilter();
+      deEsser.type = 'peaking'; deEsser.frequency.value = p.deEssHz; deEsser.gain.value = p.deEssG; deEsser.Q.value = p.deEssQ;
+
+      const comp = offlineCtx.createDynamicsCompressor();
+      comp.threshold.value = p.compThresh; comp.knee.value = p.compKnee;
+      comp.ratio.value = p.compRatio; comp.attack.value = p.compAtk; comp.release.value = p.compRel;
+
+      const limiter = offlineCtx.createDynamicsCompressor();
+      limiter.threshold.value = -1; limiter.knee.value = 0;
+      limiter.ratio.value = 20; limiter.attack.value = 0.001; limiter.release.value = 0.1;
+
+      source.connect(hpf);
+      hpf.connect(bass);
+      bass.connect(presence);
+      presence.connect(air);
+      air.connect(deEsser);
+      deEsser.connect(comp);
+      comp.connect(limiter);
+      limiter.connect(offlineCtx.destination);
+      source.start(0);
+
+      setMasterProgress(50);
+      const rendered = await offlineCtx.startRendering();
+
+      // === Stage 3: Normalize to -3dBFS ===
+      setMasterStage('Normalizing to -3 dBFS...');
+      setMasterProgress(80);
+
+      let maxPeak = 0;
+      for (let ch = 0; ch < rendered.numberOfChannels; ch++) {
+        const data = rendered.getChannelData(ch);
+        for (let i = 0; i < data.length; i++) {
+          const abs = Math.abs(data[i]);
+          if (abs > maxPeak) maxPeak = abs;
+        }
+      }
+      const targetPeak = Math.pow(10, -3 / 20); // -3 dBFS
+      const finalGain = maxPeak > 0 ? Math.min(targetPeak / maxPeak, 4) : 1;
+
+      const finalChannels = [];
+      for (let ch = 0; ch < rendered.numberOfChannels; ch++) {
+        const data = new Float32Array(rendered.getChannelData(ch));
+        for (let i = 0; i < data.length; i++) {
+          data[i] = Math.max(-1, Math.min(1, data[i] * finalGain));
+        }
+        finalChannels.push(data);
+      }
+
+      const finalBuf = createBuffer(finalChannels, sr);
+      setAudioBuffer(finalBuf);
+      setTracks(t => t.map((tr, i) => i === activeTrackIdx ? { ...tr, buffer: finalBuf } : tr));
+
+      setMasterProgress(100);
+      setMasterStage('Master complete! Ready for export.');
+      setTimeout(() => { setMasterProgress(0); setMasterStage(null); }, 4000);
+
+    } catch (err) {
+      console.error('Sermon Master failed:', err);
+      setMasterStage('Error: ' + err.message);
+      setTimeout(() => { setMasterProgress(0); setMasterStage(null); }, 4000);
+    }
+  }, [audioBuffer, masterPreset, pushUndo, createBuffer, activeTrackIdx]);
+
   // --- Multi-track: Add Track ---
   const addTrack = useCallback(async (file) => {
     if (!file) return;
@@ -893,6 +1055,39 @@ export default function WaveformEditor({ audioContext, onExport }) {
         </select>
         <div className="w-px h-5 bg-slate-700 mx-1" />
 
+        {/* Sermon Master */}
+        <div className="w-px h-5 bg-slate-700 mx-1" />
+        <select
+          value={masterPreset}
+          onChange={e => setMasterPreset(e.target.value)}
+          disabled={!!masterStage}
+          className="bg-[#1a0a00] text-amber-300 rounded px-1.5 py-1 text-[10px] border border-amber-800/60 disabled:opacity-40"
+        >
+          <option value="sermon">Sermon (Warm)</option>
+          <option value="podcast">Podcast (Crisp)</option>
+          <option value="broadcast">Broadcast (Punchy)</option>
+        </select>
+        <button
+          onClick={sermonMaster}
+          disabled={!audioBuffer || !!masterStage}
+          className="px-3 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white font-bold text-[11px] disabled:opacity-40 whitespace-nowrap shadow-[0_0_10px_rgba(245,158,11,0.35)]"
+          title="One-click podcast mastering: noise reduction → EQ warmth → compression → limiting → normalize"
+        >
+          {masterStage ? '⏳ Processing...' : '🎙 Sermon Master'}
+        </button>
+        {masterProgress > 0 && (
+          <div className="flex items-center gap-1.5">
+            <div className="w-24 h-1.5 bg-slate-700 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-amber-500 rounded-full transition-all duration-300"
+                style={{ width: `${masterProgress}%` }}
+              />
+            </div>
+            <span className="text-[10px] text-amber-400 font-mono">{masterProgress}%</span>
+          </div>
+        )}
+        <div className="w-px h-5 bg-slate-700 mx-1" />
+
         {/* Multi-track */}
         <button onClick={() => trackInputRef.current?.click()} className="px-2 py-1 rounded bg-cyan-900/40 hover:bg-cyan-800/50 text-cyan-300 disabled:opacity-30">+ Track</button>
         <input ref={trackInputRef} type="file" accept="audio/*" className="hidden" onChange={(e) => { if (e.target.files[0]) addTrack(e.target.files[0]); e.target.value = ''; }} />
@@ -946,6 +1141,7 @@ export default function WaveformEditor({ audioContext, onExport }) {
           <span className="text-amber-400">Sel: {Math.min(selStart, selEnd).toFixed(2)}s → {Math.max(selStart, selEnd).toFixed(2)}s ({Math.abs(selEnd - selStart).toFixed(2)}s)</span>
         )}
         {noiseProfile && <span className="text-amber-400">Noise profile captured</span>}
+        {masterStage && <span className="text-amber-400 animate-pulse">{masterStage}</span>}
         <span className="ml-auto">Undo: {undoStack.length} | Redo: {redoStack.length}</span>
       </div>
     </div>
