@@ -11,6 +11,25 @@ import MenuBar from './components/MenuBar';
 import AIAssistant from './components/AIAssistant';
 import ThemeSelector from './components/ThemeSelector';
 import AnalyticsDashboard from './components/AnalyticsDashboard';
+import HelpCorner from './components/HelpCorner';
+import LandingPage from './components/LandingPage';
+import { getExportAvailability } from './lib/exportFlow';
+import {
+  buildNativeEngineArgs,
+  describeBroadcastRoute,
+  normalizeTauriDevices,
+  reconcileSelectedDevices,
+  resolveBroadcastLabel,
+  resolveDeviceLabel,
+} from './lib/audioRouting';
+import {
+  captureNativeNoiseProfile,
+  getNativeEngineStatus,
+  startNativeEngine,
+  stopNativeEngine,
+  subscribeToNativeMeters,
+  syncNativeParams,
+} from './lib/nativeEngine';
 import { trackEvent, startSession, endSession } from './utils/analytics';
 import {
   Mic,
@@ -37,8 +56,6 @@ import {
   Share2,
   Trash2,
   Check,
-  ArrowRight,
-  Waves,
   Speaker,
   RefreshCw,
   Menu,
@@ -78,255 +95,6 @@ const TiwatonApp = () => {
       <AudioProcessor goHome={isDesktopApp ? null : () => setView('landing')} />
       <HelpCorner />
     </>
-  );
-};
-
-// --- LANDING PAGE ---
-const LandingPage = ({ onEnter }) => {
-  return (
-    <div className="min-h-[100dvh] bg-slate-950 text-white relative overflow-hidden font-sans selection:bg-amber-500 selection:text-white">
-      <div className="absolute inset-0 z-0 opacity-20 pointer-events-none">
-        <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] bg-amber-600 rounded-full blur-[120px] animate-pulse" />
-        <div
-          className="absolute bottom-[-25%] right-[-15%] w-[520px] h-[520px] bg-purple-600 rounded-full blur-[140px]"
-          style={{ animationDuration: '4s' }}
-        />
-      </div>
-
-      <header className="relative z-10">
-        <div className="mx-auto max-w-6xl px-6 pt-10 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-tr from-amber-500 to-yellow-600 rounded-xl flex items-center justify-center shadow-[0_0_15px_rgba(var(--accent-rgb),0.6)]">
-              <Waves size={22} className="text-white" />
-            </div>
-            <div className="text-sm uppercase tracking-[0.3em] text-slate-400">
-              Tiwaton AI Studio
-            </div>
-          </div>
-          <button
-            onClick={onEnter}
-            className="hidden md:inline-flex items-center gap-2 px-5 py-2 text-sm font-semibold bg-white text-slate-950 rounded-full hover:bg-amber-50 transition-colors"
-          >
-            Enter Studio <ArrowRight size={16} />
-          </button>
-        </div>
-      </header>
-
-      <main className="relative z-10">
-        <section className="mx-auto max-w-6xl px-6 pt-14 pb-16 grid lg:grid-cols-[1.1fr_0.9fr] gap-12 items-center">
-          <div className="text-left">
-            <p className="text-sm uppercase tracking-[0.4em] text-amber-300 mb-4">
-              Human-first audio automation
-            </p>
-            <h1 className="text-5xl md:text-7xl font-black tracking-tight leading-[1.05] mb-6 bg-clip-text text-transparent bg-gradient-to-r from-white via-amber-50 to-slate-400">
-              The AI sound engineer that never misses a word.
-            </h1>
-            <p className="text-lg md:text-xl text-slate-300 leading-relaxed max-w-2xl mb-8">
-              TIWATON turns chaotic church audio into a warm, consistent stream.
-              Hyper-Gate keeps speech present, Echo/Reverb Cleaner controls room
-              wash, and Smart Auto-Mixing delivers a broadcast-ready level every
-              service.
-            </p>
-            <div className="flex flex-col sm:flex-row gap-4">
-              <button
-                onClick={onEnter}
-                className="group relative px-8 py-4 bg-white text-slate-950 font-bold text-lg rounded-full overflow-hidden hover:scale-[1.02] transition-transform duration-300 shadow-[0_0_30px_rgba(255,255,255,0.25)]"
-              >
-                <div className="absolute inset-0 bg-gradient-to-r from-amber-400 to-yellow-500 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                <span className="relative z-10 flex items-center gap-3 group-hover:text-white transition-colors">
-                  Enter Studio <ArrowRight size={20} />
-                </span>
-              </button>
-              <button className="px-8 py-4 rounded-full border border-slate-700 text-slate-200 hover:border-amber-400 hover:text-white transition-colors">
-                Watch how it works
-              </button>
-            </div>
-            <div className="mt-8 flex flex-wrap gap-6 text-sm text-slate-400">
-              <span className="flex items-center gap-2">
-                <CheckCircle2 size={16} className="text-emerald-400" />
-                Built for live + file processing
-              </span>
-              <span className="flex items-center gap-2">
-                <CheckCircle2 size={16} className="text-emerald-400" />
-                OBS + vMix ready
-              </span>
-              <span className="flex items-center gap-2">
-                <CheckCircle2 size={16} className="text-emerald-400" />
-                AI-guided controls
-              </span>
-            </div>
-          </div>
-
-          <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-6 shadow-[0_20px_70px_rgba(15,23,42,0.6)]">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <p className="text-sm text-slate-400">Live service snapshot</p>
-                <h2 className="text-2xl font-semibold">Audio clarity panel</h2>
-              </div>
-              <span className="px-3 py-1 text-xs rounded-full bg-emerald-500/20 text-emerald-200 border border-emerald-400/40">
-                Live
-              </span>
-            </div>
-            <div className="grid gap-4">
-              {[
-                {
-                  icon: <Mic size={18} />,
-                  title: 'Hyper-Gate',
-                  description: 'Voice-first gating keeps speech in front.',
-                },
-                {
-                  icon: <Waves size={18} />,
-                  title: 'Echo / Reverb Cleaner',
-                  description: 'Tames room wash and reflections instantly.',
-                },
-                {
-                  icon: <Headphones size={18} />,
-                  title: 'Pastor Voice Isolation',
-                  description: 'Focuses on the lead mic and removes bleed.',
-                },
-                {
-                  icon: <Speaker size={18} />,
-                  title: 'Sermon Warmth',
-                  description: 'Adds fullness without mud or rumble.',
-                },
-                {
-                  icon: <Sliders size={18} />,
-                  title: 'Smart Auto-Mixing',
-                  description: 'Smooths levels for a broadcast-ready mix.',
-                },
-                {
-                  icon: <Cpu size={18} />,
-                  title: 'AI Mastering',
-                  description: 'Consistent output every week, every device.',
-                },
-              ].map((item) => (
-                <div
-                  key={item.title}
-                  className="flex items-start gap-4 p-4 rounded-2xl bg-slate-950/60 border border-slate-800/80"
-                >
-                  <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-200 flex items-center justify-center">
-                    {item.icon}
-                  </div>
-                  <div>
-                    <p className="text-base font-semibold text-white">
-                      {item.title}
-                    </p>
-                    <p className="text-sm text-slate-400 leading-relaxed">
-                      {item.description}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <section className="mx-auto max-w-6xl px-6 pb-14 grid md:grid-cols-3 gap-6">
-          {[
-            {
-              title: 'Human-designed flow',
-              description:
-                'Clear steps and visible feedback. Every control is labeled with a reason so volunteers feel confident.',
-            },
-            {
-              title: 'AI that serves people',
-              description:
-                'Enhance the sermon, not the noise. TIWATON prioritizes speech intelligibility above everything.',
-            },
-            {
-              title: 'Massive impact, minimal setup',
-              description:
-                'Connect a mic, select a mode, and go live. Your mix locks in within seconds.',
-            },
-          ].map((card) => (
-            <div
-              key={card.title}
-              className="p-6 rounded-2xl bg-slate-900/70 border border-slate-800"
-            >
-              <h3 className="text-lg font-semibold text-white mb-2">
-                {card.title}
-              </h3>
-              <p className="text-sm text-slate-400 leading-relaxed">
-                {card.description}
-              </p>
-            </div>
-          ))}
-        </section>
-
-        <section className="mx-auto max-w-6xl px-6 pb-16">
-          <div className="rounded-3xl border border-slate-800 bg-gradient-to-r from-slate-900/80 via-slate-900/40 to-slate-900/80 p-10">
-            <div className="grid lg:grid-cols-[1.2fr_0.8fr] gap-10 items-center">
-              <div>
-                <p className="text-sm uppercase tracking-[0.3em] text-amber-300 mb-3">
-                  How it works
-                </p>
-                <h2 className="text-3xl md:text-4xl font-semibold text-white mb-4">
-                  A clean, predictable path to broadcast-ready audio.
-                </h2>
-                <p className="text-base text-slate-300 leading-relaxed mb-6">
-                  TIWATON follows a human-centered workflow: capture, enhance,
-                  stabilize, and deliver. Every feature is stacked so speech
-                  feels natural and the mix stays balanced even when volunteers
-                  change week to week.
-                </p>
-                <div className="flex flex-wrap gap-6 text-sm text-slate-300">
-                  <span className="flex items-center gap-2">
-                    <Zap size={16} className="text-amber-300" />
-                    Instant voice detection
-                  </span>
-                  <span className="flex items-center gap-2">
-                    <Volume2 size={16} className="text-amber-300" />
-                    Adaptive leveling
-                  </span>
-                  <span className="flex items-center gap-2">
-                    <Radio size={16} className="text-amber-300" />
-                    Stream-ready output
-                  </span>
-                </div>
-              </div>
-              <div className="space-y-4">
-                {[
-                  'Connect mic or mixer feed.',
-                  'Enable Hyper-Gate + AI processors.',
-                  'Watch voice clarity meters lock in.',
-                  'Send to OBS, Zoom, or your stream encoder.',
-                ].map((step, index) => (
-                  <div
-                    key={step}
-                    className="flex items-center gap-4 p-4 rounded-2xl bg-slate-950/60 border border-slate-800"
-                  >
-                    <div className="w-10 h-10 rounded-full bg-amber-500/20 text-amber-200 flex items-center justify-center font-semibold">
-                      {index + 1}
-                    </div>
-                    <p className="text-sm text-slate-300">{step}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section className="mx-auto max-w-6xl px-6 pb-20">
-          <div className="rounded-3xl bg-slate-900/70 border border-slate-800 p-10 flex flex-col lg:flex-row items-center justify-between gap-8">
-            <div>
-              <h3 className="text-3xl font-semibold text-white mb-2">
-                Ready to hear the difference?
-              </h3>
-              <p className="text-slate-400 max-w-xl">
-                Start a live session or upload your sermon. TIWATON will guide you
-                through the right settings and deliver a polished mix.
-              </p>
-            </div>
-            <button
-              onClick={onEnter}
-              className="px-8 py-4 rounded-full bg-amber-500 hover:bg-amber-400 text-white font-semibold shadow-[0_0_15px_rgba(var(--accent-rgb),0.4)]"
-            >
-              Launch Studio
-            </button>
-          </div>
-        </section>
-      </main>
-    </div>
   );
 };
 
@@ -402,6 +170,11 @@ const AudioProcessor = ({ goHome }) => {
   const [audioStats, setAudioStats] = useState({
     sampleRate: 0,
     bufferSize: 0,
+    latencyMs: null,
+    callbackAvgMs: null,
+    callbackPeakMs: null,
+    cpuLoadPct: null,
+    droppedOutputSamples: 0,
     state: 'suspended',
   });
 
@@ -518,6 +291,8 @@ const AudioProcessor = ({ goHome }) => {
   const [selectedNoiseProfileId, setSelectedNoiseProfileId] = useState(() => {
     return window.localStorage.getItem('tiwaton:selectedNoiseProfileId') || '';
   });
+  const [nativeNoiseProfileCaptured, setNativeNoiseProfileCaptured] = useState(false);
+  const [nativeRouteStatus, setNativeRouteStatus] = useState(null);
   const [roomName, setRoomName] = useState(() => {
     return window.localStorage.getItem('tiwaton:roomName') || 'Main Sanctuary';
   });
@@ -600,6 +375,19 @@ const AudioProcessor = ({ goHome }) => {
 
   const getDevices = useCallback(async () => {
     try {
+      if (isTauri) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const [inputs, outputs] = await Promise.all([
+          invoke('list_input_devices'),
+          invoke('list_output_devices'),
+        ]);
+        setAvailableDevices({
+          inputs: normalizeTauriDevices(inputs),
+          outputs: normalizeTauriDevices(outputs),
+        });
+        return;
+      }
+
       await navigator.mediaDevices.getUserMedia({ audio: true });
       const devices = await navigator.mediaDevices.enumerateDevices();
       setAvailableDevices({
@@ -611,6 +399,17 @@ const AudioProcessor = ({ goHome }) => {
       resetDeviceState();
     }
   }, [resetDeviceState]);
+
+  useEffect(() => {
+    setSelectedDevices((prev) => {
+      const next = reconcileSelectedDevices(prev, availableDevices);
+      return (
+        next.inputId === prev.inputId
+        && next.outputId === prev.outputId
+        && next.broadcastBus === prev.broadcastBus
+      ) ? prev : next;
+    });
+  }, [availableDevices]);
 
   useEffect(() => {
     if (showSettings) { getDevices(); trackEvent('settings_open'); }
@@ -675,7 +474,13 @@ const AudioProcessor = ({ goHome }) => {
     }
   }, [features.denoise, features.voicePattern, noiseFloorThreshold, gateMode, isBypassed, audioContext]);
 
-  const cleanupAudio = useCallback(() => {
+  const stopTauriEngine = useCallback(async () => {
+    if (!isTauri) return;
+    const { invoke } = await import('@tauri-apps/api/core');
+    await stopNativeEngine(invoke);
+  }, []);
+
+  const cleanupAudio = useCallback(({ stopNative = true } = {}) => {
     if (contextRef.current) {
       try {
         contextRef.current.close();
@@ -695,10 +500,8 @@ const AudioProcessor = ({ goHome }) => {
       tauriUnlistenRef.current();
       tauriUnlistenRef.current = null;
     }
-    if (isTauri) {
-      import('@tauri-apps/api/core').then(({ invoke }) => {
-        invoke('stop_audio_engine').catch(() => {});
-      });
+    if (stopNative && isTauri) {
+      stopTauriEngine().catch(() => {});
     }
 
     // stop media elements
@@ -742,7 +545,16 @@ const AudioProcessor = ({ goHome }) => {
     setAudioContext(null);
     setIsLive(false);
     setIsPlayingFile(false);
-    setAudioStats({ sampleRate: 0, bufferSize: 0, state: 'suspended' });
+    setAudioStats({
+      sampleRate: 0,
+      bufferSize: 0,
+      latencyMs: null,
+      callbackAvgMs: null,
+      callbackPeakMs: null,
+      cpuLoadPct: null,
+      droppedOutputSamples: 0,
+      state: 'suspended',
+    });
     setExportStatus(null);
     setFileExportStatus(null);
     setFileInfo(null);
@@ -758,8 +570,10 @@ const AudioProcessor = ({ goHome }) => {
     setVoiceActive(false);
     setVisualizerGateStatus(false);
     setGainRiderDb(0);
+    setNativeNoiseProfileCaptured(false);
+    setNativeRouteStatus(null);
     setAudioEngineError(null);
-  }, []);
+  }, [stopTauriEngine]);
 
   useEffect(() => {
     return () => cleanupAudio();
@@ -850,6 +664,11 @@ const AudioProcessor = ({ goHome }) => {
       setAudioStats({
         sampleRate: ctx.sampleRate,
         bufferSize: 128,
+        latencyMs: null,
+        callbackAvgMs: null,
+        callbackPeakMs: null,
+        cpuLoadPct: null,
+        droppedOutputSamples: 0,
         state: ctx.state,
       });
 
@@ -1318,19 +1137,38 @@ const AudioProcessor = ({ goHome }) => {
   const toggleLive = async () => {
     if (isLive) {
       trackEvent('engine_stop');
-      cleanupAudio();
+      if (isTauri && mode === 'live') {
+        await stopTauriEngine().catch(() => {});
+        cleanupAudio({ stopNative: false });
+      } else {
+        cleanupAudio();
+      }
       return;
     }
 
     // ── Tauri native Rust engine (CPAL — sub-5ms, direct hardware audio) ──────
     if (isTauri && mode === 'live') {
       try {
+        await stopTauriEngine().catch(() => {});
+        cleanupAudio({ stopNative: false });
         const { invoke } = await import('@tauri-apps/api/core');
-        const info = await invoke('start_audio_engine', {
-          inputDevice:  selectedDevices.inputId  !== 'default' ? selectedDevices.inputId  : null,
-          outputDevice: selectedDevices.outputId !== 'default' ? selectedDevices.outputId : null,
+        const info = await startNativeEngine(invoke, selectedDevices);
+        setAudioStats({
+          sampleRate: info.sample_rate,
+          bufferSize: info.buffer_frames || 256,
+          latencyMs: info.latency_ms ?? null,
+          callbackAvgMs: info.callback_avg_ms ?? null,
+          callbackPeakMs: info.callback_peak_ms ?? null,
+          cpuLoadPct: info.cpu_load_pct ?? null,
+          droppedOutputSamples: info.dropped_output_samples ?? 0,
+          state: 'running',
         });
-        setAudioStats({ sampleRate: info.sample_rate, bufferSize: 256, state: 'running' });
+        setNativeRouteStatus({
+          input: info.input_device_name || info.device_name || null,
+          monitor: info.monitor_output_name || null,
+          broadcast: info.broadcast_output_name || null,
+        });
+        setNativeNoiseProfileCaptured(false);
 
         // Fake Web Audio analyser shim so visualizeAndGate() works unchanged.
         // Spectrum data is injected from 'audio-meters' Tauri events into tauriSpectrumRef.
@@ -1347,7 +1185,12 @@ const AudioProcessor = ({ goHome }) => {
 
         setIsLive(true);
         setAudioEngineError(null);
-        trackEvent('engine_start', { preset: 'tauri-rust', sr: info.sample_rate });
+        trackEvent('engine_start', {
+          preset: 'tauri-rust',
+          sr: info.sample_rate,
+          monitor: info.monitor_output_name || 'default',
+          broadcast: info.broadcast_output_name || 'not-set',
+        });
         visualizeAndGate();
       } catch (err) {
         console.error('Tauri engine start failed', err);
@@ -3181,10 +3024,9 @@ const AudioProcessor = ({ goHome }) => {
   // ── Tauri: listen for audio-meters events → React state ────────────────────
   useEffect(() => {
     if (!isTauri || !isLive) return;
-    let unlisten = null;
+    let subscription = null;
     import('@tauri-apps/api/event').then(({ listen }) => {
-      listen('audio-meters', (e) => {
-        const m = e.payload;
+      subscription = subscribeToNativeMeters(listen, (m) => {
         if (m.spectrum && m.spectrum.length > 0) {
           tauriSpectrumRef.current = new Float32Array(m.spectrum);
         }
@@ -3203,43 +3045,91 @@ const AudioProcessor = ({ goHome }) => {
         if (typeof m.gate_gain === 'number') {
           setVisualizerGateStatus(m.gate_gain < 0.5);
         }
-      }).then(fn => { unlisten = fn; tauriUnlistenRef.current = () => { fn(); unlisten = null; }; });
+      });
+      tauriUnlistenRef.current = () => {
+        subscription?.dispose();
+      };
     });
-    return () => { if (unlisten) { unlisten(); } tauriUnlistenRef.current = null; };
+    return () => {
+      subscription?.dispose();
+      tauriUnlistenRef.current = null;
+    };
   }, [isLive]);
 
   // ── Tauri: sync DSP params to Rust engine when settings change ─────────────
   useEffect(() => {
     if (!isTauri || !isLive) return;
     import('@tauri-apps/api/core').then(({ invoke }) => {
-      const p = (k, v) => invoke('set_param',      { key: k, value: v }).catch(() => {});
-      const b = (k, v) => invoke('set_param_bool', { key: k, value: v }).catch(() => {});
-      b('gate_enabled',     features.denoise);
-      b('noise_enabled',    features.denoise);
-      b('comp_enabled',     true);
-      b('deess_enabled',    features.dynamicDeEsser !== false);
-      b('dereverb_enabled', features.dereverb);
-      b('bypass',           isBypassed);
-      p('gate_threshold_db', noiseFloorThreshold);
-      p('gain_db',           inputGainValue > 0 ? 20 * Math.log10(inputGainValue) : -60);
+      syncNativeParams(invoke, {
+        features,
+        isBypassed,
+        noiseFloorThreshold,
+        inputGainValue,
+      }).catch(() => {});
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLive, features.denoise, features.dereverb, features.dynamicDeEsser,
       isBypassed, noiseFloorThreshold, inputGainValue]);
 
-  // --- Helper: Resolve labels for Output Router panel ---//
-  const resolveOutputLabel = (id) => {
-    if (id === 'default') return 'System Default';
-    const found = availableDevices.outputs.find((d) => d.deviceId === id);
-    if (found?.label) return found.label;
-    return 'Custom Device';
-  };
+  useEffect(() => {
+    if (!isTauri || !isLive) return;
+    let cancelled = false;
+    let intervalId = null;
 
-  const monitorLabel = resolveOutputLabel(selectedDevices.outputId);
-  const broadcastLabel =
-    selectedDevices.broadcastBus === 'Same as monitor'
-      ? monitorLabel
-      : selectedDevices.broadcastBus || 'Not set';
+    import('@tauri-apps/api/core').then(({ invoke }) => {
+      const poll = async () => {
+        try {
+          const status = await getNativeEngineStatus(invoke);
+          if (cancelled || !status?.running) return;
+
+          setAudioStats((prev) => ({
+            ...prev,
+            sampleRate: status.sample_rate ?? prev.sampleRate,
+            bufferSize: status.buffer_frames ?? prev.bufferSize,
+            latencyMs: status.latency_ms ?? prev.latencyMs,
+            callbackAvgMs: status.callback_avg_ms ?? prev.callbackAvgMs,
+            callbackPeakMs: status.callback_peak_ms ?? prev.callbackPeakMs,
+            cpuLoadPct: status.cpu_load_pct ?? prev.cpuLoadPct,
+            droppedOutputSamples: status.dropped_output_samples ?? prev.droppedOutputSamples,
+            state: 'running',
+          }));
+          setNativeNoiseProfileCaptured(Boolean(status.noise_profile_ready));
+          setNativeRouteStatus({
+            input: status.input_device_name || status.device_name || null,
+            monitor: status.monitor_output_name || null,
+            broadcast: status.broadcast_output_name || null,
+          });
+        } catch {
+          // Ignore transient polling failures while the engine is being restarted.
+        }
+      };
+
+      void poll();
+      intervalId = window.setInterval(() => {
+        void poll();
+      }, 1000);
+    });
+
+    return () => {
+      cancelled = true;
+      if (intervalId) {
+        window.clearInterval(intervalId);
+      }
+    };
+  }, [isLive]);
+
+  // --- Helper: Resolve labels for Output Router panel ---//
+  const monitorLabel = resolveDeviceLabel(availableDevices.outputs, selectedDevices.outputId);
+  const broadcastLabel = resolveBroadcastLabel(selectedDevices, availableDevices.outputs);
+  const broadcastRoute = describeBroadcastRoute(selectedDevices, availableDevices.outputs);
+  const exportAvailability = getExportAvailability({
+    isLive,
+    recordingState,
+    exportStatus,
+    fileExportStatus,
+    hasRecordedAudio: Boolean(recordedUrl),
+    hasLoadedFile: Boolean(fileInfo),
+  });
 
   const handleSnapshotSave = () => {
     trackEvent('snapshot_save');
@@ -3268,7 +3158,19 @@ const AudioProcessor = ({ goHome }) => {
     setInputGainValue(snapshot.inputGainValue);
   };
 
-  const handleNoiseProfileCapture = () => {
+  const handleNoiseProfileCapture = async () => {
+    if (isTauri && isLive) {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        await captureNativeNoiseProfile(invoke);
+        setNativeNoiseProfileCaptured(true);
+        setAudioEngineError(null);
+      } catch (err) {
+        setAudioEngineError(err?.message || 'Could not capture the native noise profile.');
+      }
+      return;
+    }
+
     const spectrum = latestSpectrumRef.current;
     if (!spectrum || spectrum.length === 0) return;
     const sampleRate = audioContext?.sampleRate || 48000;
@@ -3365,9 +3267,11 @@ const AudioProcessor = ({ goHome }) => {
           {isLive ? 'ENGINE ACTIVE' : isPlayingFile ? 'FILE PLAYBACK' : 'STANDBY'}
         </span>
         <div className="h-3 w-px bg-slate-800"/>
-        <span className="text-slate-600">SR: <span className="text-slate-300">{audioStats.sampleRate > 0 ? (audioStats.sampleRate/1000).toFixed(0)+'kHz' : '--'}</span></span>
-        <span className="text-slate-600">BUFFER: <span className="text-slate-300">{audioStats.bufferSize || '128'}</span></span>
-        <span className="text-slate-600">LATENCY: <span className="text-slate-300">{audioStats.sampleRate > 0 ? ((audioStats.bufferSize || 128) / audioStats.sampleRate * 1000).toFixed(1)+'ms' : '--'}</span></span>
+        <span className="text-slate-600">SR: <span className="text-slate-300">{audioStats.sampleRate > 0 ? (audioStats.sampleRate/1000).toFixed(1)+'kHz' : '--'}</span></span>
+        <span className="text-slate-600">BUFFER: <span className="text-slate-300">{audioStats.bufferSize || '--'}</span></span>
+        <span className="text-slate-600">LATENCY: <span className="text-slate-300">{audioStats.latencyMs !== null ? `${audioStats.latencyMs.toFixed(1)}ms` : '--'}</span></span>
+        <span className="text-slate-600">CPU: <span className={`${audioStats.cpuLoadPct !== null && audioStats.cpuLoadPct > 70 ? 'text-[#FFB020]' : 'text-slate-300'}`}>{audioStats.cpuLoadPct !== null ? `${audioStats.cpuLoadPct.toFixed(0)}%` : '--'}</span></span>
+        <span className="text-slate-600">CB AVG: <span className="text-slate-300">{audioStats.callbackAvgMs !== null ? `${audioStats.callbackAvgMs.toFixed(2)}ms` : '--'}</span></span>
         <div className="h-3 w-px bg-slate-800"/>
         <span className={features.denoise && isLive ? 'text-[var(--accent)]' : 'text-slate-700'}>HYPERGATE:{features.denoise ? 'ON' : 'OFF'}</span>
         <span className={features.pastorIsolation && isLive ? 'text-[var(--accent)]' : 'text-slate-700'}>ISOLATION:{features.pastorIsolation ? 'ON' : 'OFF'}</span>
@@ -3530,7 +3434,7 @@ const AudioProcessor = ({ goHome }) => {
                 <option value="Not set">Not set yet</option>
                 <option value="Same as monitor">Same as monitor output</option>
                 {availableDevices.outputs.map((d) => (
-                  <option key={d.deviceId} value={d.label || d.deviceId}>
+                  <option key={d.deviceId} value={d.deviceId}>
                     {d.label || `Bus ${d.deviceId.slice(0, 5)}...`}
                   </option>
                 ))}
@@ -3751,12 +3655,27 @@ const AudioProcessor = ({ goHome }) => {
                     <input type="text" value={roomName} onChange={(e) => setRoomName(e.target.value)} placeholder="e.g. Main Sanctuary" className="w-full border border-slate-700 rounded p-1.5 text-[10px] text-slate-200 placeholder-slate-600" style={{background:'#050A1C'}} />
                     <div className="flex items-center justify-between">
                       <span className="text-[9px] text-slate-500">Noise Profile</span>
-                      <button onClick={handleNoiseProfileCapture} disabled={!latestSpectrumRef.current} className={`px-2 py-0.5 rounded text-[9px] border ${latestSpectrumRef.current ? 'border-[var(--accent)]/40 text-[var(--accent)]' : 'border-slate-700 text-slate-600'}`} style={latestSpectrumRef.current ? {background:'rgba(var(--accent-rgb),0.1)'} : {}}>Capture</button>
+                      <button
+                        onClick={() => { void handleNoiseProfileCapture(); }}
+                        disabled={isTauri ? !isLive : !latestSpectrumRef.current}
+                        className={`px-2 py-0.5 rounded text-[9px] border ${(isTauri ? isLive : latestSpectrumRef.current) ? 'border-[var(--accent)]/40 text-[var(--accent)]' : 'border-slate-700 text-slate-600'}`}
+                        style={(isTauri ? isLive : latestSpectrumRef.current) ? {background:'rgba(var(--accent-rgb),0.1)'} : {}}
+                      >
+                        Capture
+                      </button>
                     </div>
-                    <select className="w-full border border-slate-700 rounded p-1.5 text-[10px] text-slate-200" style={{background:'#050A1C'}} value={selectedNoiseProfileId} onChange={(e) => setSelectedNoiseProfileId(e.target.value)}>
-                      <option value="">No profile</option>
-                      {noiseProfiles.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
-                    </select>
+                    {isTauri ? (
+                      <div className="rounded border border-slate-700 px-2 py-1.5 text-[10px] text-slate-400" style={{background:'#050A1C'}}>
+                        {nativeNoiseProfileCaptured
+                          ? 'Native live noise profile captured for the current engine session.'
+                          : 'Desktop live mode captures a native noise profile from recent input audio.'}
+                      </div>
+                    ) : (
+                      <select className="w-full border border-slate-700 rounded p-1.5 text-[10px] text-slate-200" style={{background:'#050A1C'}} value={selectedNoiseProfileId} onChange={(e) => setSelectedNoiseProfileId(e.target.value)}>
+                        <option value="">No profile</option>
+                        {noiseProfiles.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+                      </select>
+                    )}
                   </div>
                 </div>
                 <div className="rounded-lg border border-slate-800 overflow-hidden" style={{background:'#080E1F'}}>
@@ -3816,7 +3735,7 @@ const AudioProcessor = ({ goHome }) => {
               <div className="space-y-3">
 
                 {/* VB-CABLE Routing Status */}
-                {selectedDevices.broadcastBus && selectedDevices.broadcastBus !== 'Not set' && (
+                {broadcastRoute.mode !== 'monitor-only' && (
                   <div className="rounded-lg border overflow-hidden" style={{background:'#080E1F', borderColor: isLive ? 'rgba(0,230,118,0.3)' : 'rgba(255,255,255,0.06)'}}>
                     <div className="px-3 py-1.5 border-b border-slate-800 flex items-center justify-between" style={{background:'rgba(255,255,255,0.03)'}}>
                       <span className="text-[9px] font-bold tracking-[0.1em] text-slate-500 uppercase">Broadcast Routing</span>
@@ -3829,18 +3748,67 @@ const AudioProcessor = ({ goHome }) => {
                         <span className="px-2 py-1 rounded border text-amber-400 font-bold" style={{background:'rgba(var(--accent-rgb),0.08)', borderColor:'rgba(var(--accent-rgb),0.3)'}}>TIWATON DSP</span>
                         <span className="text-slate-700">→</span>
                         <span className={`px-2 py-1 rounded border font-bold ${isLive ? 'text-[#00E676] border-[#00E676]/30' : 'text-slate-500 border-slate-700'}`} style={{background: isLive ? 'rgba(0,230,118,0.07)' : 'transparent'}}>
-                          {selectedDevices.broadcastBus}
+                          {broadcastLabel}
                         </span>
                         <span className="text-slate-700">→</span>
                         <span className="px-2 py-1 rounded border border-slate-700 text-slate-400" style={{background:'#0D1428'}}>OBS</span>
                       </div>
+                      <div className="mt-2 grid grid-cols-1 gap-1.5 text-[9px]">
+                        <div className="flex items-center justify-between text-slate-500">
+                          <span>Monitor</span>
+                          <span className="text-slate-300">{nativeRouteStatus?.monitor || monitorLabel}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-slate-500">
+                          <span>Broadcast</span>
+                          <span className="text-slate-300">{nativeRouteStatus?.broadcast || broadcastLabel}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-slate-500">
+                          <span>Input</span>
+                          <span className="text-slate-300">{nativeRouteStatus?.input || 'Waiting for engine'}</span>
+                        </div>
+                      </div>
                       {isLive
-                        ? <p className="text-[9px] text-[#00E676] mt-2">TIWATON signal active — OBS is receiving processed audio</p>
-                        : <p className="text-[9px] text-slate-600 mt-2">Start LIVE to activate this routing chain</p>
+                        ? <p className="text-[9px] text-[#00E676] mt-2">TIWATON signal active on the native desktop routing graph.</p>
+                        : <p className="text-[9px] text-slate-600 mt-2">Start LIVE to activate the monitor and broadcast outputs.</p>
                       }
                     </div>
                   </div>
                 )}
+
+                <div className="rounded-lg border border-slate-800 overflow-hidden" style={{background:'#080E1F'}}>
+                  <div className="px-3 py-1.5 border-b border-slate-800 flex items-center justify-between" style={{background:'rgba(255,255,255,0.03)'}}>
+                    <span className="text-[9px] font-bold tracking-[0.15em] text-slate-500 uppercase">Engine Telemetry</span>
+                    <span className={`text-[9px] font-bold ${audioStats.cpuLoadPct !== null && audioStats.cpuLoadPct > 70 ? 'text-[#FFB020]' : 'text-slate-400'}`}>
+                      {audioStats.state?.toUpperCase() || 'IDLE'}
+                    </span>
+                  </div>
+                  <div className="p-3 grid grid-cols-2 gap-2 text-[10px]">
+                    <div className="rounded border border-slate-800 p-2" style={{background:'#050A1C'}}>
+                      <div className="text-slate-500">Latency</div>
+                      <div className="text-slate-200 font-mono">{audioStats.latencyMs !== null ? `${audioStats.latencyMs.toFixed(1)} ms` : '--'}</div>
+                    </div>
+                    <div className="rounded border border-slate-800 p-2" style={{background:'#050A1C'}}>
+                      <div className="text-slate-500">CPU Load</div>
+                      <div className="text-slate-200 font-mono">{audioStats.cpuLoadPct !== null ? `${audioStats.cpuLoadPct.toFixed(0)}%` : '--'}</div>
+                    </div>
+                    <div className="rounded border border-slate-800 p-2" style={{background:'#050A1C'}}>
+                      <div className="text-slate-500">Callback Avg</div>
+                      <div className="text-slate-200 font-mono">{audioStats.callbackAvgMs !== null ? `${audioStats.callbackAvgMs.toFixed(2)} ms` : '--'}</div>
+                    </div>
+                    <div className="rounded border border-slate-800 p-2" style={{background:'#050A1C'}}>
+                      <div className="text-slate-500">Callback Peak</div>
+                      <div className="text-slate-200 font-mono">{audioStats.callbackPeakMs !== null ? `${audioStats.callbackPeakMs.toFixed(2)} ms` : '--'}</div>
+                    </div>
+                    <div className="rounded border border-slate-800 p-2 col-span-2" style={{background:'#050A1C'}}>
+                      <div className="flex items-center justify-between">
+                        <div className="text-slate-500">Dropped Output Samples</div>
+                        <div className={`${audioStats.droppedOutputSamples > 0 ? 'text-[#FF5252]' : 'text-[#00E676]'} font-mono`}>
+                          {audioStats.droppedOutputSamples}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
 
                 {/* Analytics */}
                 <div className="rounded-lg border border-slate-800 overflow-hidden" style={{background:'#080E1F'}}>
@@ -3907,7 +3875,11 @@ const AudioProcessor = ({ goHome }) => {
               {features.mastering && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-[var(--accent)]/30 text-[var(--accent)] whitespace-nowrap" style={{background:'rgba(var(--accent-rgb),0.08)'}}>POLISH</span>}
               {features.musicDucking && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-amber-500/30 text-amber-400 whitespace-nowrap" style={{background:'rgba(var(--accent-rgb),0.08)'}}>DUCKING</span>}
               {features.streamingSafe && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-amber-500/30 text-amber-400 whitespace-nowrap" style={{background:'rgba(var(--accent-rgb),0.08)'}}>STREAM SAFE</span>}
-              {selectedNoiseProfileId && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-slate-600 text-slate-400 whitespace-nowrap">NOISE PROFILE</span>}
+              {((isTauri && nativeNoiseProfileCaptured) || (!isTauri && selectedNoiseProfileId)) && !isBypassed && (
+                <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-slate-600 text-slate-400 whitespace-nowrap">
+                  NOISE PROFILE
+                </span>
+              )}
             </div>
             {/* Recording check — right side of center bar */}
             {isLive && mainTab === 'live' && (
@@ -4214,7 +4186,7 @@ const AudioProcessor = ({ goHome }) => {
             </button>
           )}
           {isLive && (
-            <button onClick={exportMp4} disabled={exportStatus === 'sharing'} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[9px] font-semibold hover:opacity-80 disabled:opacity-40"
+            <button onClick={exportMp4} disabled={!exportAvailability.canExportMp4} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[9px] font-semibold hover:opacity-80 disabled:opacity-40"
               style={{background:'#0D1428', borderColor:'rgba(168,85,247,0.4)', color:'#c084fc'}}
               title="Record 10s of canvas + processed audio as MP4/WebM">
               {exportStatus === 'sharing' ? <span className="w-2.5 h-2.5 rounded-full border border-purple-400 border-t-transparent animate-spin"/> : <Video className="w-3 h-3"/>}
@@ -4226,7 +4198,7 @@ const AudioProcessor = ({ goHome }) => {
             <RefreshCw className="w-3 h-3"/> Reset
           </button>
           {mode === 'file' && fileInfo && (
-            <button onClick={processAndExportFile} disabled={fileExportStatus === 'processing' || !destNodeRef.current || !destNodeRef.current.stream}
+            <button onClick={processAndExportFile} disabled={!exportAvailability.canExportFileWav || !destNodeRef.current || !destNodeRef.current.stream}
               className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[9px] font-semibold hover:opacity-80 disabled:opacity-30"
               style={{background:'#0D1428', borderColor:'rgba(0,230,118,0.3)', color:'#00E676'}}>
               {fileExportStatus === 'processing' ? <span className="w-2.5 h-2.5 rounded-full border border-[#00E676] border-t-transparent animate-spin"/> : fileExportStatus === 'done' ? <Check className="w-3 h-3"/> : <Upload className="w-3 h-3"/>}
@@ -4346,7 +4318,7 @@ const Badge = ({ active, text }) => (
   </div>
 );
 
-// Expandable quick-fix card
+// Legacy help drawer moved to src/components/HelpCorner.jsx.
 function ExpandableCard({ icon, title, content }) {
   const [open, setOpen] = useState(false);
   return (
@@ -4436,7 +4408,7 @@ function ChecklistPanel({ checklist }) {
   );
 }
 
-function HelpCorner() {
+function LegacyHelpCorner() {
   const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('fixes');
 

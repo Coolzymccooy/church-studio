@@ -8,7 +8,6 @@ pub mod lufs;
 pub mod noise;
 
 pub use chain::DspChain;
-pub use lufs::LufsReadings;
 
 use atomic_float::AtomicF32;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -80,6 +79,7 @@ pub struct MetersPayload {
 /// Device info returned to React
 #[derive(serde::Serialize, Clone)]
 pub struct AudioDeviceInfo {
+    pub id: String,
     pub name: String,
     pub is_default: bool,
 }

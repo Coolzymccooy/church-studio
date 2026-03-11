@@ -9,7 +9,6 @@ const MOM_MS: f64 = 400.0;     // momentary window
 const ST_MS: f64 = 3000.0;     // short-term window
 
 pub struct LufsMeter {
-    sr: f64,
     stage1: Biquad,    // high-shelf pre-filter
     stage2: Biquad,    // RLB highpass
 
@@ -36,7 +35,6 @@ impl LufsMeter {
         let int_blocks = st_blocks * 40; // ~2 minutes of history
 
         LufsMeter {
-            sr,
             stage1,
             stage2,
             blocks: vec![0.0; mom_blocks.max(st_blocks)],
@@ -104,17 +102,6 @@ impl LufsMeter {
         ms_to_lufs(pass2.iter().sum::<f64>() / pass2.len() as f64)
     }
 
-    pub fn reset(&mut self) {
-        self.blocks.fill(0.0);
-        self.int_blocks.fill(0.0);
-        self.block_pos = 0;
-        self.int_pos = 0;
-        self.int_count = 0;
-        self.current_sum = 0.0;
-        self.sample_count = 0;
-        self.stage1.reset();
-        self.stage2.reset();
-    }
 }
 
 #[derive(serde::Serialize, Clone)]

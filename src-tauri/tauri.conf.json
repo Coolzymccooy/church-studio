@@ -6,7 +6,7 @@
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "npm run dev:tauri",
     "beforeBuildCommand": "npm run build"
   },
   "app": {
@@ -19,8 +19,9 @@
         "minWidth": 1024,
         "minHeight": 700,
         "resizable": true,
+        "maximizable": true,
         "fullscreen": false,
-        "decorations": false,
+        "decorations": true,
         "backgroundColor": "#050A1C"
       }
     ],

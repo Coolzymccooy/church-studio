@@ -13,10 +13,6 @@ impl Biquad {
         Biquad { b0: b0/a0, b1: b1/a0, b2: b2/a0, a1: a1/a0, a2: a2/a0, s1: 0.0, s2: 0.0 }
     }
 
-    pub fn identity() -> Self {
-        Biquad { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0, s1: 0.0, s2: 0.0 }
-    }
-
     /// High-pass filter (Butterworth, Q=0.707)
     pub fn hpf(freq: f64, sr: f64) -> Self {
         let q = std::f64::consts::FRAC_1_SQRT_2; // 0.7071 = Butterworth
@@ -25,18 +21,6 @@ impl Biquad {
         let cw = w0.cos();
         Self::from_coeffs(
             (1.0 + cw) / 2.0, -(1.0 + cw), (1.0 + cw) / 2.0,
-            1.0 + alpha, -2.0 * cw, 1.0 - alpha,
-        )
-    }
-
-    /// Low-pass filter (Butterworth)
-    pub fn lpf(freq: f64, sr: f64) -> Self {
-        let q = std::f64::consts::FRAC_1_SQRT_2;
-        let w0 = 2.0 * std::f64::consts::PI * freq / sr;
-        let alpha = w0.sin() / (2.0 * q);
-        let cw = w0.cos();
-        Self::from_coeffs(
-            (1.0 - cw) / 2.0, 1.0 - cw, (1.0 - cw) / 2.0,
             1.0 + alpha, -2.0 * cw, 1.0 - alpha,
         )
     }
@@ -106,6 +90,4 @@ impl Biquad {
         self.s2 = self.b2 * x - self.a2 * y;
         y as f32
     }
-
-    pub fn reset(&mut self) { self.s1 = 0.0; self.s2 = 0.0; }
 }

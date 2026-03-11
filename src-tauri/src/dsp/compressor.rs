@@ -1,6 +1,5 @@
 /// Soft-knee feed-forward compressor + true-peak brick-wall limiter.
 pub struct Compressor {
-    sr: f64,
     threshold: f32,   // dBFS
     ratio: f32,
     knee: f32,        // knee width in dB (soft knee)
@@ -13,7 +12,6 @@ pub struct Compressor {
 impl Compressor {
     pub fn new(sr: f64) -> Self {
         Compressor {
-            sr,
             threshold: -18.0,
             ratio: 3.0,
             knee: 6.0,
@@ -25,8 +23,6 @@ impl Compressor {
 
     pub fn set_threshold(&mut self, db: f32) { self.threshold = db; }
     pub fn set_ratio(&mut self, r: f32) { self.ratio = r.max(1.0); }
-    pub fn set_attack_ms(&mut self, ms: f64) { self.attack_coef = coef(ms, self.sr); }
-    pub fn set_release_ms(&mut self, ms: f64) { self.release_coef = coef(ms, self.sr); }
 
     pub fn process_block(&mut self, buf: &mut [f32]) {
         for s in buf.iter_mut() {

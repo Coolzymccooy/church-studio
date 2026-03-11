@@ -40,14 +40,25 @@ export const getPlatform = () => _platform;
  */
 export function onMenuCommand(callback) {
   if (isTauri) {
+    let disposed = false;
     let unlisten = null;
     import('@tauri-apps/api/event').then(({ listen }) => {
+      if (disposed) return;
       listen('menu-event', (e) => {
         const { event, args = [] } = e.payload;
         callback(event, ...args);
-      }).then(fn => { unlisten = fn; });
+      }).then(fn => {
+        if (disposed) {
+          fn();
+          return;
+        }
+        unlisten = fn;
+      });
     });
-    return () => { if (unlisten) unlisten(); };
+    return () => {
+      disposed = true;
+      if (unlisten) unlisten();
+    };
   }
 
   if (isElectron && window.electronAPI?.onMenuCommand) {

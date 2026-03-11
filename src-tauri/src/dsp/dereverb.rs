@@ -19,7 +19,6 @@ pub struct SpectralDereverb {
 
     // OLA I/O
     in_hist: Vec<f32>,    // last (N-HOP) input samples
-    out_buf: Vec<f32>,    // overlap-add accumulator
 
     pub strength: f32,    // 0.0–1.0
     pub floor: f32,       // spectral floor (prevent over-suppression)
@@ -38,7 +37,6 @@ impl SpectralDereverb {
             fast_age: vec![0; HALF],
             slow_age: vec![0; HALF],
             in_hist: vec![0.0; N - HOP],
-            out_buf: vec![0.0; N + HOP],
             strength: 0.6,
             floor: 0.08,
             enabled: true,

@@ -11,7 +11,9 @@
   },
   "scripts": {
     "dev": "vite",
+    "dev:tauri": "vite --host 127.0.0.1 --strictPort",
     "build": "vite build",
+    "test": "node --test src/lib/*.test.js",
     "lint": "eslint .",
     "preview": "vite preview",
     "tauri": "tauri",

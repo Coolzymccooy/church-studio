@@ -11,6 +11,7 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    open: false,
     // On Tauri, the Rust sidecar opens the WebView to this URL
     host: isTauri ? '127.0.0.1' : 'localhost',
   },

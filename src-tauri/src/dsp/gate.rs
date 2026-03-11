@@ -2,12 +2,10 @@
 /// Delays the signal by `lookahead_ms` so the gate opens *before* speech arrives.
 /// Uses RMS detection with attack / hold / release envelope.
 pub struct Gate {
-    sr: f64,
     threshold_lin: f32,   // linear amplitude threshold
     attack_coef: f32,
     release_coef: f32,
     hold_samples: usize,
-    lookahead: usize,
 
     // State
     rms_buf: Vec<f32>,    // circular buffer for RMS window
@@ -25,12 +23,10 @@ impl Gate {
         let lookahead = (sr * lookahead_ms / 1000.0) as usize;
         let rms_window = (sr * 0.005) as usize; // 5ms RMS window
         Gate {
-            sr,
             threshold_lin: db_to_lin(-45.0),
             attack_coef: coef(2.0, sr),
             release_coef: coef(250.0, sr),
             hold_samples: (sr * 0.2) as usize, // 200ms hold
-            lookahead,
             rms_buf: vec![0.0; rms_window.max(1)],
             rms_pos: 0,
             rms_sum: 0.0,
@@ -43,14 +39,6 @@ impl Gate {
 
     pub fn set_threshold_db(&mut self, db: f32) {
         self.threshold_lin = db_to_lin(db);
-    }
-
-    pub fn set_attack_ms(&mut self, ms: f64) {
-        self.attack_coef = coef(ms, self.sr);
-    }
-
-    pub fn set_release_ms(&mut self, ms: f64) {
-        self.release_coef = coef(ms, self.sr);
     }
 
     /// Process one sample. Returns (delayed_sample × gate_gain, gate_gain).

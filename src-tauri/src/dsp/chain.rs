@@ -12,12 +12,14 @@ use super::{
     noise::SpectralDenoiser,
     DspParams,
 };
-use atomic_float::AtomicF32;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 pub struct DspChain {
     sr: f64,
+    input_gain_db: f32,
+    gate_enabled: bool,
+    compressor_enabled: bool,
 
     // Pre-processing
     hpf: Biquad,
@@ -40,7 +42,6 @@ pub struct DspChain {
     dereverb: SpectralDereverb,
 
     // Auto gain state
-    rms_env: f32,
     auto_gain: f32,
 
     // Output meter
@@ -60,6 +61,9 @@ impl DspChain {
     pub fn new(sr: f64) -> Self {
         DspChain {
             sr,
+            input_gain_db: 0.0,
+            gate_enabled: true,
+            compressor_enabled: true,
             hpf: Biquad::hpf(80.0, sr),
             gate: Gate::new(sr),
             noise: SpectralDenoiser::new(),
@@ -70,7 +74,6 @@ impl DspChain {
             limiter: Limiter::new(sr),
             lufs: LufsMeter::new(sr),
             dereverb: SpectralDereverb::new(),
-            rms_env: 0.0,
             auto_gain: 1.0,
             out_peak_env: 0.0,
             out_peak_coef: coef(300.0, sr),
@@ -87,10 +90,14 @@ impl DspChain {
     pub fn sync_params(&mut self, p: &Arc<DspParams>) {
         use Ordering::Relaxed;
 
+        self.input_gain_db = p.gain_db.load(Relaxed);
+
         // Gate
+        self.gate_enabled = p.gate_enabled.load(Relaxed);
         self.gate.set_threshold_db(p.gate_threshold_db.load(Relaxed));
 
         // Compressor
+        self.compressor_enabled = p.comp_enabled.load(Relaxed);
         self.compressor.set_threshold(p.comp_threshold_db.load(Relaxed));
         self.compressor.set_ratio(p.comp_ratio.load(Relaxed));
 
@@ -109,10 +116,10 @@ impl DspChain {
 
     /// Process one block of mono samples in-place.
     /// Returns the latest LUFS readings if a new 100ms block completed.
-    pub fn process_block(&mut self, buf: &mut Vec<f32>, gate_enabled: bool, bypass: bool) {
+    pub fn process_block(&mut self, buf: &mut Vec<f32>, bypass: bool) {
         if bypass || buf.is_empty() { return; }
 
-        let gain_lin = db_to_lin(self.gain_db_from_auto());
+        let gain_lin = db_to_lin(self.input_gain_db);
 
         // ── Input level ──────────────────────────────────────────────────────
         let in_rms = rms(buf);
@@ -125,7 +132,7 @@ impl DspChain {
         for s in buf.iter_mut() { *s = self.hpf.tick(*s); }
 
         // 3. Gate
-        let gate_gain = if gate_enabled {
+        let gate_gain = if self.gate_enabled {
             self.gate.process_block(buf)
         } else { 1.0 };
         self.last_gate_gain = gate_gain;
@@ -147,7 +154,9 @@ impl DspChain {
         self.last_deess_gr = gr;
 
         // 8. Compressor
-        self.compressor.process_block(buf);
+        if self.compressor_enabled {
+            self.compressor.process_block(buf);
+        }
 
         // 9. Auto gain rider (keep RMS ~= -18 dBFS)
         self.update_auto_gain(rms(buf));
@@ -171,7 +180,9 @@ impl DspChain {
         self.last_output_db = lin_to_db(self.out_peak_env.max(1e-9));
     }
 
-    fn gain_db_from_auto(&self) -> f32 { 0.0 } // input gain from params
+    pub fn capture_noise_profile(&mut self, samples: &[f32]) {
+        self.noise.capture_profile(samples);
+    }
 
     fn update_auto_gain(&mut self, rms_in: f32) {
         if rms_in < 1e-6 { return; }

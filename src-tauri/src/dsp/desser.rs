@@ -4,7 +4,6 @@
 use super::biquad::Biquad;
 
 pub struct DeEsser {
-    sr: f64,
     sidechain_bp: Biquad,   // bandpass for detection
     threshold_lin: f32,
     ratio: f32,
@@ -18,7 +17,6 @@ pub struct DeEsser {
 impl DeEsser {
     pub fn new(sr: f64) -> Self {
         DeEsser {
-            sr,
             sidechain_bp: Biquad::bpf(7500.0, 3000.0, sr),
             threshold_lin: db_to_lin(-24.0),
             ratio: 8.0,
@@ -31,11 +29,6 @@ impl DeEsser {
     }
 
     pub fn set_threshold_db(&mut self, db: f32) { self.threshold_lin = db_to_lin(db); }
-    pub fn set_ratio(&mut self, r: f32) { self.ratio = r.max(1.0); }
-
-    pub fn set_frequency(&mut self, freq: f64, bw: f64) {
-        self.sidechain_bp = Biquad::bpf(freq, bw, self.sr);
-    }
 
     /// Process block, returns peak GR (dB, negative = gain reduction)
     pub fn process_block(&mut self, buf: &mut [f32]) -> f32 {
