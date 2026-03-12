@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   captureNativeNoiseProfile,
   createNativeEngineController,
+  describeNativeEngineError,
   getNativeEngineStatus,
   subscribeToNativeMeters,
   syncNativeParams,
@@ -91,4 +92,19 @@ test('native engine helpers proxy capture and status commands', async () => {
 
   assert.deepEqual(commands, ['engine_status', 'capture_noise_profile']);
   assert.equal(status.running, true);
+});
+
+test('describeNativeEngineError prefers useful native error text', () => {
+  assert.equal(
+    describeNativeEngineError({ message: 'No common sample rate is available' }),
+    'No common sample rate is available',
+  );
+  assert.equal(
+    describeNativeEngineError({ error: 'monitor output device not found' }),
+    'monitor output device not found',
+  );
+  assert.equal(
+    describeNativeEngineError({}, 'Could not start Rust audio engine.'),
+    'Could not start Rust audio engine.',
+  );
 });

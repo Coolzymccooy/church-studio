@@ -4,6 +4,19 @@ export async function startNativeEngine(invoke, selectedDevices) {
   return invoke('start_audio_engine', buildNativeEngineArgs(selectedDevices));
 }
 
+export function describeNativeEngineError(err, fallback = 'Could not start Rust audio engine.') {
+  if (!err) return fallback;
+  if (typeof err === 'string' && err.trim()) return err;
+  if (typeof err.message === 'string' && err.message.trim()) return err.message;
+  if (typeof err.error === 'string' && err.error.trim()) return err.error;
+  if (typeof err.cause === 'string' && err.cause.trim()) return err.cause;
+  if (typeof err.toString === 'function') {
+    const text = err.toString();
+    if (text && text !== '[object Object]') return text;
+  }
+  return fallback;
+}
+
 export async function stopNativeEngine(invoke) {
   return invoke('stop_audio_engine');
 }

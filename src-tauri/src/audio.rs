@@ -251,116 +251,133 @@ impl AudioEngine {
             })
             .collect();
 
+        let mut on_input = move |mono: Vec<f32>| {
+            let callback_started = Instant::now();
+
+            shared_cb.push_recent_input(&mono);
+
+            if shared_cb.capture_requested.swap(false, Ordering::AcqRel) {
+                let snapshot = shared_cb.capture_recent_snapshot();
+                let result = if snapshot.len() < 1024 {
+                    Err("Need at least a short burst of live audio before capturing a noise profile".to_string())
+                } else {
+                    dsp.capture_noise_profile(&snapshot);
+                    shared_cb
+                        .noise_profile_ready
+                        .store(true, Ordering::Release);
+                    Ok(())
+                };
+
+                if let Some(reply) = shared_cb.capture_reply.lock().take() {
+                    let _ = reply.send(result);
+                }
+            }
+
+            let mut block = mono;
+
+            dsp.sync_params(&params_cb);
+            let bypass = params_cb.bypass.load(Ordering::Relaxed);
+            dsp.process_block(&mut block, bypass);
+
+            let monitor_gain =
+                db_to_lin(params_cb.monitor_gain_db.load(Ordering::Relaxed));
+            for sample in &mut block {
+                *sample *= monitor_gain;
+            }
+
+            for (i, &sample) in block.iter().enumerate().take(256) {
+                spec_buf[i] = Complex32::new(sample * spec_win[i], 0.0);
+            }
+            spec_fft.process(&mut spec_buf);
+            for (acc, bin) in spec_acc.iter_mut().zip(spec_buf.iter().take(128)) {
+                *acc += bin.norm();
+            }
+            spec_count += 1;
+
+            let mut dropped_this_callback = 0u64;
+            for (producer, cfg) in ring_producers
+                .iter_mut()
+                .zip(output_stream_cfgs.iter())
+            {
+                let output_channels = cfg.channels as usize;
+                for &sample in &block {
+                    for _ in 0..output_channels {
+                        if producer.try_push(sample).is_err() {
+                            dropped_this_callback += 1;
+                        }
+                    }
+                }
+            }
+
+            if dropped_this_callback > 0 {
+                let total = shared_cb
+                    .dropped_output_samples
+                    .fetch_add(dropped_this_callback, Ordering::Relaxed)
+                    + dropped_this_callback;
+                if total % 2048 <= dropped_this_callback {
+                    log::warn!(
+                        "Dropping output samples because the playback ring buffer is full (total dropped: {total})"
+                    );
+                }
+            }
+
+            let spectrum = if spec_count >= 4 {
+                let bins: Vec<f32> = spec_acc
+                    .iter()
+                    .map(|&value| {
+                        let db =
+                            20.0 * (value / spec_count as f32 / 128.0).max(1e-9).log10();
+                        ((db + 90.0) / 90.0).clamp(0.0, 1.0)
+                    })
+                    .collect();
+                spec_acc.fill(0.0);
+                spec_count = 0;
+                bins
+            } else {
+                vec![]
+            };
+
+            let _ = meters_tx.try_send(MetersPayload {
+                input_db: dsp.last_input_db,
+                output_db: dsp.last_output_db,
+                gate_gain: dsp.last_gate_gain,
+                lufs_m: dsp.last_lufs.momentary,
+                lufs_st: dsp.last_lufs.short_term,
+                lufs_i: dsp.last_lufs.integrated,
+                deess_gr_db: dsp.last_deess_gr,
+                auto_gain_db: dsp.last_auto_gain_db,
+                spectrum,
+            });
+
+            shared_cb.record_callback_time(callback_started.elapsed());
+        };
+
         let in_stream = match in_cfg.sample_format() {
             SampleFormat::F32 => in_dev
                 .build_input_stream(
                     &in_stream_cfg,
                     move |data: &[f32], _| {
-                        let callback_started = Instant::now();
-                        let mono: Vec<f32> = if in_channels == 1 {
-                            data.to_vec()
-                        } else {
-                            data.chunks(in_channels)
-                                .map(|ch| ch.iter().sum::<f32>() / in_channels as f32)
-                                .collect()
-                        };
-
-                        shared_cb.push_recent_input(&mono);
-
-                        if shared_cb.capture_requested.swap(false, Ordering::AcqRel) {
-                            let snapshot = shared_cb.capture_recent_snapshot();
-                            let result = if snapshot.len() < 1024 {
-                                Err("Need at least a short burst of live audio before capturing a noise profile".to_string())
-                            } else {
-                                dsp.capture_noise_profile(&snapshot);
-                                shared_cb
-                                    .noise_profile_ready
-                                    .store(true, Ordering::Release);
-                                Ok(())
-                            };
-
-                            if let Some(reply) = shared_cb.capture_reply.lock().take() {
-                                let _ = reply.send(result);
-                            }
-                        }
-
-                        let mut block = mono;
-
-                        dsp.sync_params(&params_cb);
-                        let bypass = params_cb.bypass.load(Ordering::Relaxed);
-                        dsp.process_block(&mut block, bypass);
-
-                        let monitor_gain =
-                            db_to_lin(params_cb.monitor_gain_db.load(Ordering::Relaxed));
-                        for sample in &mut block {
-                            *sample *= monitor_gain;
-                        }
-
-                        for (i, &sample) in block.iter().enumerate().take(256) {
-                            spec_buf[i] = Complex32::new(sample * spec_win[i], 0.0);
-                        }
-                        spec_fft.process(&mut spec_buf);
-                        for (acc, bin) in spec_acc.iter_mut().zip(spec_buf.iter().take(128)) {
-                            *acc += bin.norm();
-                        }
-                        spec_count += 1;
-
-                        let mut dropped_this_callback = 0u64;
-                        for (producer, cfg) in ring_producers
-                            .iter_mut()
-                            .zip(output_stream_cfgs.iter())
-                        {
-                            let output_channels = cfg.channels as usize;
-                            for &sample in &block {
-                                for _ in 0..output_channels {
-                                    if producer.try_push(sample).is_err() {
-                                        dropped_this_callback += 1;
-                                    }
-                                }
-                            }
-                        }
-
-                        if dropped_this_callback > 0 {
-                            let total = shared_cb
-                                .dropped_output_samples
-                                .fetch_add(dropped_this_callback, Ordering::Relaxed)
-                                + dropped_this_callback;
-                            if total % 2048 <= dropped_this_callback {
-                                log::warn!(
-                                    "Dropping output samples because the playback ring buffer is full (total dropped: {total})"
-                                );
-                            }
-                        }
-
-                        let spectrum = if spec_count >= 4 {
-                            let bins: Vec<f32> = spec_acc
-                                .iter()
-                                .map(|&value| {
-                                    let db =
-                                        20.0 * (value / spec_count as f32 / 128.0).max(1e-9).log10();
-                                    ((db + 90.0) / 90.0).clamp(0.0, 1.0)
-                                })
-                                .collect();
-                            spec_acc.fill(0.0);
-                            spec_count = 0;
-                            bins
-                        } else {
-                            vec![]
-                        };
-
-                        let _ = meters_tx.try_send(MetersPayload {
-                            input_db: dsp.last_input_db,
-                            output_db: dsp.last_output_db,
-                            gate_gain: dsp.last_gate_gain,
-                            lufs_m: dsp.last_lufs.momentary,
-                            lufs_st: dsp.last_lufs.short_term,
-                            lufs_i: dsp.last_lufs.integrated,
-                            deess_gr_db: dsp.last_deess_gr,
-                            auto_gain_db: dsp.last_auto_gain_db,
-                            spectrum,
-                        });
-
-                        shared_cb.record_callback_time(callback_started.elapsed());
+                        on_input(interleaved_to_mono_f32(data, in_channels, |sample| sample));
+                    },
+                    |e| log::error!("Input stream error: {e}"),
+                    None,
+                )
+                .map_err(|e| e.to_string())?,
+            SampleFormat::I16 => in_dev
+                .build_input_stream(
+                    &in_stream_cfg,
+                    move |data: &[i16], _| {
+                        on_input(interleaved_to_mono_f32(data, in_channels, i16_to_f32));
+                    },
+                    |e| log::error!("Input stream error: {e}"),
+                    None,
+                )
+                .map_err(|e| e.to_string())?,
+            SampleFormat::U16 => in_dev
+                .build_input_stream(
+                    &in_stream_cfg,
+                    move |data: &[u16], _| {
+                        on_input(interleaved_to_mono_f32(data, in_channels, u16_to_f32));
                     },
                     |e| log::error!("Input stream error: {e}"),
                     None,
@@ -386,9 +403,27 @@ impl AudioEngine {
                     .build_output_stream(
                         &out_stream_cfg,
                         move |data: &mut [f32], _| {
-                            for sample in data.iter_mut() {
-                                *sample = ring_cons.try_pop().unwrap_or(0.0);
-                            }
+                            write_output_data(data, &mut ring_cons, |sample| sample);
+                        },
+                        |e| log::error!("Output stream error: {e}"),
+                        None,
+                    )
+                    .map_err(|e| e.to_string())?,
+                SampleFormat::I16 => out_dev
+                    .build_output_stream(
+                        &out_stream_cfg,
+                        move |data: &mut [i16], _| {
+                            write_output_data(data, &mut ring_cons, f32_to_i16);
+                        },
+                        |e| log::error!("Output stream error: {e}"),
+                        None,
+                    )
+                    .map_err(|e| e.to_string())?,
+                SampleFormat::U16 => out_dev
+                    .build_output_stream(
+                        &out_stream_cfg,
+                        move |data: &mut [u16], _| {
+                            write_output_data(data, &mut ring_cons, f32_to_u16);
                         },
                         |e| log::error!("Output stream error: {e}"),
                         None,
@@ -663,10 +698,9 @@ fn negotiate_stream_configs(
         .map(|device| device.default_output_config().map_err(|e| e.to_string()))
         .collect::<Result<_, _>>()?;
 
-    if in_default.sample_format() == SampleFormat::F32
-        && out_defaults
-            .iter()
-            .all(|cfg| cfg.sample_format() == SampleFormat::F32 && cfg.sample_rate() == in_default.sample_rate())
+    if out_defaults
+        .iter()
+        .all(|cfg| cfg.sample_rate() == in_default.sample_rate())
     {
         return Ok((in_default, out_defaults));
     }
@@ -674,7 +708,6 @@ fn negotiate_stream_configs(
     let in_ranges: Vec<SupportedStreamConfigRange> = in_dev
         .supported_input_configs()
         .map_err(|e| e.to_string())?
-        .filter(|cfg| cfg.sample_format() == SampleFormat::F32)
         .collect();
     let out_ranges_sets: Vec<Vec<SupportedStreamConfigRange>> = out_devs
         .iter()
@@ -682,18 +715,12 @@ fn negotiate_stream_configs(
             device
                 .supported_output_configs()
                 .map_err(|e| e.to_string())
-                .map(|iter| {
-                    iter.filter(|cfg| cfg.sample_format() == SampleFormat::F32)
-                        .collect::<Vec<_>>()
-                })
+                .map(|iter| iter.collect::<Vec<_>>())
         })
         .collect::<Result<_, _>>()?;
 
     if in_ranges.is_empty() || out_ranges_sets.iter().any(|ranges| ranges.is_empty()) {
-        return Err(
-            "Input, monitor output, and broadcast output must all support f32 audio streams"
-                .to_string(),
-        );
+        return Err("Selected input and output devices do not expose any supported audio stream configuration".to_string());
     }
 
     let mut preferred_rates = vec![in_default.sample_rate().0, 48_000, 44_100];
@@ -761,7 +788,7 @@ fn negotiate_stream_configs(
     }
 
     Err(
-        "No common f32 sample rate is available between the selected input, monitor output, and broadcast output devices"
+        "No common sample rate is available between the selected input, monitor output, and broadcast output devices"
             .to_string(),
     )
 }
@@ -793,4 +820,53 @@ fn format_device_id(index: usize, name: &str) -> String {
 #[inline]
 fn db_to_lin(db: f32) -> f32 {
     10f32.powf(db / 20.0)
+}
+
+fn interleaved_to_mono_f32<T>(
+    data: &[T],
+    channels: usize,
+    mut convert: impl FnMut(T) -> f32,
+) -> Vec<f32>
+where
+    T: Copy,
+{
+    if channels <= 1 {
+        return data.iter().copied().map(&mut convert).collect();
+    }
+
+    data.chunks(channels)
+        .map(|frame| {
+            frame.iter().copied().map(&mut convert).sum::<f32>() / channels as f32
+        })
+        .collect()
+}
+
+fn write_output_data<T>(
+    data: &mut [T],
+    consumer: &mut impl Consumer<Item = f32>,
+    mut convert: impl FnMut(f32) -> T,
+) {
+    for sample in data.iter_mut() {
+        *sample = convert(consumer.try_pop().unwrap_or(0.0));
+    }
+}
+
+#[inline]
+fn i16_to_f32(sample: i16) -> f32 {
+    sample as f32 / 32_768.0
+}
+
+#[inline]
+fn u16_to_f32(sample: u16) -> f32 {
+    sample as f32 / 65_535.0 * 2.0 - 1.0
+}
+
+#[inline]
+fn f32_to_i16(sample: f32) -> i16 {
+    (sample.clamp(-1.0, 1.0) * i16::MAX as f32).round() as i16
+}
+
+#[inline]
+fn f32_to_u16(sample: f32) -> u16 {
+    (((sample.clamp(-1.0, 1.0) + 1.0) * 0.5) * u16::MAX as f32).round() as u16
 }

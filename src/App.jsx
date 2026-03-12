@@ -26,6 +26,7 @@ import {
 } from './lib/audioRouting';
 import {
   captureNativeNoiseProfile,
+  describeNativeEngineError,
   getNativeEngineStatus,
   startNativeEngine,
   stopNativeEngine,
@@ -418,6 +419,12 @@ const AudioProcessor = ({ goHome }) => {
   useEffect(() => {
     if (showSettings) { getDevices(); trackEvent('settings_open'); }
   }, [showSettings, getDevices]);
+
+  useEffect(() => {
+    if (isTauri) {
+      getDevices();
+    }
+  }, [getDevices]);
 
   // Session-level analytics
   useEffect(() => {
@@ -1198,7 +1205,7 @@ const AudioProcessor = ({ goHome }) => {
         visualizeAndGate();
       } catch (err) {
         console.error('Tauri engine start failed', err);
-        setAudioEngineError(err?.message || 'Could not start Rust audio engine.');
+        setAudioEngineError(describeNativeEngineError(err));
       }
       return;
     }
@@ -3160,7 +3167,7 @@ const AudioProcessor = ({ goHome }) => {
         setNativeNoiseProfileCaptured(true);
         setAudioEngineError(null);
       } catch (err) {
-        setAudioEngineError(err?.message || 'Could not capture the native noise profile.');
+        setAudioEngineError(describeNativeEngineError(err, 'Could not capture the native noise profile.'));
       }
       return;
     }
