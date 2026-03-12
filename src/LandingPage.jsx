@@ -391,21 +391,24 @@ export default function LandingPage({ onLaunch }) {
               Available as a desktop app for Windows, macOS, and Linux. Or run it directly in your browser.
             </p>
             <div className="flex items-center justify-center gap-3 flex-wrap mb-6">
-              <a href={`${RELEASES}/download/v1.4.1/TIWATON-AI-Studio-Setup-1.4.1.exe`}
+              <a href={RELEASES}
                 className="flex items-center gap-2 px-5 py-2.5 rounded-xl border border-slate-700 text-[11px] font-bold text-white hover:border-amber-500/40 transition-all hover:scale-105"
-                style={{ background: 'rgba(255,255,255,0.05)' }}>
+                style={{ background: 'rgba(255,255,255,0.05)' }}
+                target="_blank" rel="noreferrer">
                 <Download size={12} />
                 Windows <span className="text-slate-500 font-normal">.exe</span>
               </a>
-              <a href={`${RELEASES}/download/v1.4.1/TIWATON-AI-Studio-1.4.1.dmg`}
+              <a href={RELEASES}
                 className="flex items-center gap-2 px-5 py-2.5 rounded-xl border border-slate-700 text-[11px] font-bold text-white hover:border-amber-500/40 transition-all hover:scale-105"
-                style={{ background: 'rgba(255,255,255,0.05)' }}>
+                style={{ background: 'rgba(255,255,255,0.05)' }}
+                target="_blank" rel="noreferrer">
                 <Download size={12} />
                 macOS <span className="text-slate-500 font-normal">.dmg</span>
               </a>
-              <a href={`${RELEASES}/download/v1.4.1/TIWATON-AI-Studio-1.4.1.AppImage`}
+              <a href={RELEASES}
                 className="flex items-center gap-2 px-5 py-2.5 rounded-xl border border-slate-700 text-[11px] font-bold text-white hover:border-amber-500/40 transition-all hover:scale-105"
-                style={{ background: 'rgba(255,255,255,0.05)' }}>
+                style={{ background: 'rgba(255,255,255,0.05)' }}
+                target="_blank" rel="noreferrer">
                 <Download size={12} />
                 Linux <span className="text-slate-500 font-normal">.AppImage</span>
               </a>

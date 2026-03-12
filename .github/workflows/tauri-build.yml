@@ -104,7 +104,7 @@ jobs:
 
             ### Changes
             See [commit history](https://github.com/Coolzymccooy/church-studio/commits)
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
           projectPath: .
