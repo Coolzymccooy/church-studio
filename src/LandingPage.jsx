@@ -152,7 +152,7 @@ export default function LandingPage({ onLaunch }) {
               <Mic size={10} className="text-amber-400" />
             </div>
             <span className="text-[11px] font-black tracking-[0.15em] text-white uppercase">TIWATON</span>
-            <span className="text-[9px] text-slate-600 font-mono border border-slate-800 px-1.5 py-0.5 rounded ml-1">v1.4.2</span>
+            <span className="text-[9px] text-slate-600 font-mono border border-slate-800 px-1.5 py-0.5 rounded ml-1">v1.4.3</span>
           </div>
           <div className="flex items-center gap-3">
             <a href={GITHUB} target="_blank" rel="noreferrer"
@@ -437,7 +437,7 @@ export default function LandingPage({ onLaunch }) {
               <Mic size={8} className="text-amber-400" />
             </div>
             <span className="text-[10px] font-black tracking-[0.15em] text-slate-400">TIWATON AI Studio</span>
-            <span className="text-[9px] font-mono text-slate-700">v1.4.2</span>
+            <span className="text-[9px] font-mono text-slate-700">v1.4.3</span>
           </div>
           <div className="flex items-center gap-4 text-[9px] text-slate-600">
             <a href={GITHUB} target="_blank" rel="noreferrer" className="hover:text-white transition-colors flex items-center gap-1">

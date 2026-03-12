@@ -2,7 +2,7 @@
   "name": "tiwaton-ai-studio",
   "productName": "TIWATON AI Studio",
   "private": true,
-  "version": "1.4.2",
+  "version": "1.4.3",
   "description": "AI-powered church audio processing workstation",
   "author": "TIWATON",
   "type": "module",
