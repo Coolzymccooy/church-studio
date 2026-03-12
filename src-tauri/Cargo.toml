@@ -1,6 +1,6 @@
 [package]
 name = "tiwaton-ai-studio"
-version = "1.2.0"
+version = "1.4.1"
 description = "AI-powered church audio processing workstation"
 authors = ["TIWATON"]
 license = "MIT"

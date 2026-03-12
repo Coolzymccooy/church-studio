@@ -152,7 +152,7 @@ export default function LandingPage({ onLaunch }) {
               <Mic size={10} className="text-amber-400" />
             </div>
             <span className="text-[11px] font-black tracking-[0.15em] text-white uppercase">TIWATON</span>
-            <span className="text-[9px] text-slate-600 font-mono border border-slate-800 px-1.5 py-0.5 rounded ml-1">v1.2.0</span>
+            <span className="text-[9px] text-slate-600 font-mono border border-slate-800 px-1.5 py-0.5 rounded ml-1">v1.4.1</span>
           </div>
           <div className="flex items-center gap-3">
             <a href={GITHUB} target="_blank" rel="noreferrer"
@@ -391,19 +391,19 @@ export default function LandingPage({ onLaunch }) {
               Available as a desktop app for Windows, macOS, and Linux. Or run it directly in your browser.
             </p>
             <div className="flex items-center justify-center gap-3 flex-wrap mb-6">
-              <a href={`${RELEASES}/download/v1.2.0/TIWATON-AI-Studio-Setup-1.2.0.exe`}
+              <a href={`${RELEASES}/download/v1.4.1/TIWATON-AI-Studio-Setup-1.4.1.exe`}
                 className="flex items-center gap-2 px-5 py-2.5 rounded-xl border border-slate-700 text-[11px] font-bold text-white hover:border-amber-500/40 transition-all hover:scale-105"
                 style={{ background: 'rgba(255,255,255,0.05)' }}>
                 <Download size={12} />
                 Windows <span className="text-slate-500 font-normal">.exe</span>
               </a>
-              <a href={`${RELEASES}/download/v1.2.0/TIWATON-AI-Studio-1.2.0.dmg`}
+              <a href={`${RELEASES}/download/v1.4.1/TIWATON-AI-Studio-1.4.1.dmg`}
                 className="flex items-center gap-2 px-5 py-2.5 rounded-xl border border-slate-700 text-[11px] font-bold text-white hover:border-amber-500/40 transition-all hover:scale-105"
                 style={{ background: 'rgba(255,255,255,0.05)' }}>
                 <Download size={12} />
                 macOS <span className="text-slate-500 font-normal">.dmg</span>
               </a>
-              <a href={`${RELEASES}/download/v1.2.0/TIWATON-AI-Studio-1.2.0.AppImage`}
+              <a href={`${RELEASES}/download/v1.4.1/TIWATON-AI-Studio-1.4.1.AppImage`}
                 className="flex items-center gap-2 px-5 py-2.5 rounded-xl border border-slate-700 text-[11px] font-bold text-white hover:border-amber-500/40 transition-all hover:scale-105"
                 style={{ background: 'rgba(255,255,255,0.05)' }}>
                 <Download size={12} />
@@ -434,7 +434,7 @@ export default function LandingPage({ onLaunch }) {
               <Mic size={8} className="text-amber-400" />
             </div>
             <span className="text-[10px] font-black tracking-[0.15em] text-slate-400">TIWATON AI Studio</span>
-            <span className="text-[9px] font-mono text-slate-700">v1.2.0</span>
+            <span className="text-[9px] font-mono text-slate-700">v1.4.1</span>
           </div>
           <div className="flex items-center gap-4 text-[9px] text-slate-600">
             <a href={GITHUB} target="_blank" rel="noreferrer" className="hover:text-white transition-colors flex items-center gap-1">
