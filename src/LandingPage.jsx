@@ -131,16 +131,14 @@ function Stat({ value, label }) {
 
 /* ── Main landing page ───────────────────────────────────────────────────*/
 export default function LandingPage({ onLaunch }) {
-  const [os, setOs] = useState('win');
-  useEffect(() => {
+  const [os] = useState(() => {
     const ua = navigator.platform.toLowerCase();
-    if (ua.includes('mac')) setOs('mac');
-    else if (ua.includes('linux')) setOs('linux');
-    else setOs('win');
-  }, []);
+    if (ua.includes('mac')) return 'mac';
+    if (ua.includes('linux')) return 'linux';
+    return 'win';
+  });
 
   const dlLabel = os === 'mac' ? 'Download for macOS' : os === 'linux' ? 'Download for Linux' : 'Download for Windows';
-  const dlExt   = os === 'mac' ? '.dmg' : os === 'linux' ? '.AppImage' : '-Setup.exe';
 
   return (
     <div className="min-h-screen text-white overflow-x-hidden" style={{ background: '#020617', fontFamily: "system-ui,-apple-system,'Segoe UI',sans-serif" }}>

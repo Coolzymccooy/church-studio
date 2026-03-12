@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import './index.css';
 import App from './App.jsx';
 import LandingPage from './LandingPage.jsx';
+import AppErrorBoundary from './components/AppErrorBoundary.jsx';
 import { ThemeProvider } from './contexts/ThemeContext.jsx';
 import { isDesktopApp } from './lib/platform.js';
 
@@ -31,6 +32,8 @@ function Root() {
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    <Root />
+    <AppErrorBoundary>
+      <Root />
+    </AppErrorBoundary>
   </StrictMode>,
 );

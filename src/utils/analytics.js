@@ -15,7 +15,9 @@ function getStore() {
 function saveStore(store) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
-  } catch {}
+  } catch {
+    /* Ignore local persistence failures. */
+  }
 }
 
 export function trackEvent(name, data = {}) {

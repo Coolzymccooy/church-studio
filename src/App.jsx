@@ -15,9 +15,9 @@ import HelpCorner from './components/HelpCorner';
 import LandingPage from './components/LandingPage';
 import StudioStatusBar from './components/StudioStatusBar';
 import DeviceSettingsModal from './components/DeviceSettingsModal';
+import InputRackAiTab from './components/InputRackAiTab';
 import { getExportAvailability } from './lib/exportFlow';
 import {
-  buildNativeEngineArgs,
   describeBroadcastRoute,
   normalizeTauriDevices,
   reconcileSelectedDevices,
@@ -58,8 +58,8 @@ import {
   Share2,
   Trash2,
   Check,
+  Waves,
   Speaker,
-  RefreshCw,
   Menu,
 } from 'lucide-react';
 
@@ -102,6 +102,8 @@ const TiwatonApp = () => {
 
 // --- STUDIO COMPONENT ---
 const AudioProcessor = ({ goHome }) => {
+  const SHOW_LEGACY_SETTINGS_MODAL = false;
+  const SHOW_LEGACY_AI_STACK = false;
   const [isLive, setIsLive] = useState(false);
   const [isPlayingFile, setIsPlayingFile] = useState(false);
   const [audioContext, setAudioContext] = useState(null);
@@ -116,7 +118,6 @@ const AudioProcessor = ({ goHome }) => {
   const [isBypassed, setIsBypassed] = useState(false);
   const [exportStatus, setExportStatus] = useState(null);
   const [inputGainValue, setInputGainValue] = useState(1.0);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [voiceActive, setVoiceActive] = useState(false);
   const [isAutoCalibrating, setIsAutoCalibrating] = useState(false);
   const [audioEngineError, setAudioEngineError] = useState(null);
@@ -318,26 +319,26 @@ const AudioProcessor = ({ goHome }) => {
 
   useEffect(() => {
     featuresRef.current = features;
-    try { window.localStorage.setItem('tiwaton:features', JSON.stringify(features)); } catch {}
+    try { window.localStorage.setItem('tiwaton:features', JSON.stringify(features)); } catch { /* Ignore local persistence failures. */ }
   }, [features]);
 
   useEffect(() => {
     gateModeRef.current = gateMode;
-    try { window.localStorage.setItem('tiwaton:gateMode', gateMode); } catch {}
+    try { window.localStorage.setItem('tiwaton:gateMode', gateMode); } catch { /* Ignore local persistence failures. */ }
   }, [gateMode]);
 
   useEffect(() => {
     noiseProfilesRef.current = noiseProfiles;
-    try { window.localStorage.setItem('tiwaton:noiseProfiles', JSON.stringify(noiseProfiles)); } catch {}
+    try { window.localStorage.setItem('tiwaton:noiseProfiles', JSON.stringify(noiseProfiles)); } catch { /* Ignore local persistence failures. */ }
   }, [noiseProfiles]);
 
   useEffect(() => {
     selectedNoiseProfileIdRef.current = selectedNoiseProfileId;
-    try { window.localStorage.setItem('tiwaton:selectedNoiseProfileId', selectedNoiseProfileId); } catch {}
+    try { window.localStorage.setItem('tiwaton:selectedNoiseProfileId', selectedNoiseProfileId); } catch { /* Ignore local persistence failures. */ }
   }, [selectedNoiseProfileId]);
 
   useEffect(() => {
-    try { window.localStorage.setItem('tiwaton:roomName', roomName); } catch {}
+    try { window.localStorage.setItem('tiwaton:roomName', roomName); } catch { /* Ignore local persistence failures. */ }
   }, [roomName]);
 
   useEffect(() => {
@@ -345,11 +346,11 @@ const AudioProcessor = ({ goHome }) => {
   }, [gainRiderDb]);
 
   useEffect(() => {
-    try { window.localStorage.setItem('tiwaton:devices', JSON.stringify(selectedDevices)); } catch {}
+    try { window.localStorage.setItem('tiwaton:devices', JSON.stringify(selectedDevices)); } catch { /* Ignore local persistence failures. */ }
   }, [selectedDevices]);
 
   useEffect(() => {
-    try { window.localStorage.setItem('tiwaton:speakerPreset', speakerPreset); } catch {}
+    try { window.localStorage.setItem('tiwaton:speakerPreset', speakerPreset); } catch { /* Ignore local persistence failures. */ }
   }, [speakerPreset]);
 
   const outputTargets = [
@@ -425,7 +426,7 @@ const AudioProcessor = ({ goHome }) => {
 
   useEffect(() => {
     noiseFloorThresholdRef.current = noiseFloorThreshold;
-    try { window.localStorage.setItem('tiwaton:threshold', String(noiseFloorThreshold)); } catch {}
+    try { window.localStorage.setItem('tiwaton:threshold', String(noiseFloorThreshold)); } catch { /* Ignore local persistence failures. */ }
   }, [noiseFloorThreshold]);
 
   useEffect(() => {
@@ -451,7 +452,7 @@ const AudioProcessor = ({ goHome }) => {
         hgNode.port.postMessage({
           type: 'fingerprint',
           bandMeans: Array.from(fp.bandMeans),
-          bandStdDevs: Array.from(fp.bandM2).map((m2, i) =>
+          bandStdDevs: Array.from(fp.bandM2).map((m2) =>
             fp.frames > 1 ? Math.sqrt(m2 / (fp.frames - 1)) : 0.5
           ),
         });
@@ -1285,8 +1286,17 @@ const AudioProcessor = ({ goHome }) => {
       }
     });
     return cleanup;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [
+    downloadWaveform,
+    exportMp4,
+    handleNoiseProfileCapture,
+    handleSnapshotSave,
+    hardReset,
+    shareRecording,
+    startAutoCalibrate,
+    startMicLearn,
+    toggleLive,
+  ]);
 
   const startAutoCalibrate = () => {
     trackEvent('noise_calibrate');
@@ -1947,10 +1957,10 @@ const AudioProcessor = ({ goHome }) => {
       lookaheadGateNode,
       dynamicDesserNode,
       dereverbNode,
-      mb_sub_comp, mb_sub_gain,
-      mb_lm_comp,  mb_lm_gain,
-      mb_mid_comp, mb_mid_gain,
-      mb_air_comp, mb_air_gain,
+      mb_sub_comp,
+      mb_lm_comp,
+      mb_mid_comp,
+      mb_air_comp,
     } = processingRefs.current;
     const now = audioContext.currentTime;
 
@@ -2221,7 +2231,7 @@ const AudioProcessor = ({ goHome }) => {
 
   // --- Visualizer + Gate + Smart Gain Rider ---
   const visualizeAndGate = () => {
-    const { analyser, gateGain, noiseBlend, noiseNotch } = processingRefs.current;
+    const { analyser, gateGain, noiseBlend, noiseNotch, noiseLowShelf, noiseHighShelf } = processingRefs.current;
     const canvas = canvasRef.current;
     if (!analyser || !canvas) return;
     if (animationRef.current) cancelAnimationFrame(animationRef.current);
@@ -2336,15 +2346,6 @@ const AudioProcessor = ({ goHome }) => {
       const highBias = highAvg / (lowAvg + 1e-6);
       const antiChildNoiseActive = featuresRef.current.denoise;
       const highOnlyNoise = antiChildNoiseActive && highBias > 1.8 && lowAvg < 35;
-      const harshHighNoise = highBias > 1.6 && lowAvg < 40;
-      const stackActive =
-        featuresRef.current.dereverb ||
-        featuresRef.current.voicePattern ||
-        featuresRef.current.musicDucking ||
-        featuresRef.current.pastorIsolation ||
-        featuresRef.current.sermonWarmth ||
-        featuresRef.current.smartMixing ||
-        featuresRef.current.mastering;
       let bandMetricsReady = false;
       let voiceEnergy = 0;
       let lowNoise = 0;
@@ -3284,7 +3285,7 @@ const AudioProcessor = ({ goHome }) => {
         audioStats={audioStats}
       />
 
-      {false && showSettings && (
+      {SHOW_LEGACY_SETTINGS_MODAL && showSettings && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center backdrop-blur-sm p-4">
           <div className="bg-slate-900 w-full max-w-lg rounded-2xl border border-slate-700 shadow-2xl p-6 space-y-6">
             <div className="flex justify-between items-center border-b border-slate-800 pb-4">
@@ -3576,6 +3577,14 @@ const AudioProcessor = ({ goHome }) => {
 
             {/* ── AI STACK TAB ── */}
             {controlTab === 'stack' && (
+              <InputRackAiTab
+                features={features}
+                setFeatures={setFeatures}
+                setGateMode={setGateMode}
+                setSpeakerPreset={setSpeakerPreset}
+              />
+            )}
+            {SHOW_LEGACY_AI_STACK && controlTab === 'stack' && (
               <div className="space-y-2">
                 <button onClick={() => { setFeatures({denoise:true,dereverb:true,voicePattern:true,musicDucking:true,pastorIsolation:true,sermonWarmth:true,smartMixing:true,mastering:true,streamingSafe:true,lookaheadGate:true,dynamicDeEsser:true,multibandComp:true}); setGateMode('speech'); setSpeakerPreset('pastor'); }}
                   className="w-full py-2 rounded-lg border border-[#00E676]/30 text-[#00E676] text-[9px] font-bold tracking-[0.15em] hover:opacity-90 transition-opacity" style={{background:'rgba(0,230,118,0.08)'}}>

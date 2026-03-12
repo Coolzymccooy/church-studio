@@ -177,7 +177,7 @@ class DereverbProcessor extends AudioWorkletProcessor {
     this.frameCount++;
   }
 
-  process(inputs, outputs, parameters) {
+  process(inputs, outputs) {
     const input  = inputs[0];
     const output = outputs[0];
     if (!input || !input[0] || !output || !output[0]) return true;

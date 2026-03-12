@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { getAnalytics, getTotals, getRecentEvents, clearAnalytics } from '../utils/analytics';
+import React, { useState } from 'react';
+import { getTotals, getRecentEvents, clearAnalytics } from '../utils/analytics';
 import { Activity, Trash2, RefreshCw } from 'lucide-react';
 
 const EVENT_LABELS = {
@@ -31,17 +31,14 @@ function formatTime(ts) {
 }
 
 export default function AnalyticsDashboard() {
-  const [totals, setTotals] = useState({});
-  const [recent, setRecent] = useState([]);
+  const [totals, setTotals] = useState(() => getTotals());
+  const [recent, setRecent] = useState(() => getRecentEvents(30));
   const [view, setView] = useState('summary'); // 'summary' | 'feed'
 
   const refresh = () => {
     setTotals(getTotals());
     setRecent(getRecentEvents(30));
   };
-
-  useEffect(() => { refresh(); }, []);
-
   const totalEvents = Object.values(totals).reduce((a, b) => a + b, 0);
   const engineStarts = totals.engine_start || 0;
   const recordings = totals.recording_start || 0;

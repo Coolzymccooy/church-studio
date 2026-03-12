@@ -72,7 +72,7 @@ class LUFSProcessor extends AudioWorkletProcessor {
     return y2;
   }
 
-  process(inputs, outputs, parameters) {
+  process(inputs, outputs) {
     const input  = inputs[0];
     const output = outputs[0];
     if (!input || !input[0]) return true;

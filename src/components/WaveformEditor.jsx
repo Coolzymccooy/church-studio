@@ -124,8 +124,6 @@ function spectralSubtract(input, noisePower, alpha, beta, N, win) {
     // ── Spectral subtraction per bin ─────────────────────────────────────────
     for (let k = 0; k < HALF; k++) {
       const mag   = Math.sqrt(re[k] * re[k] + im[k] * im[k]);
-      const phase = Math.atan2(im[k], re[k]);
-
       // Suppress: subtract scaled noise, never go below spectral floor
       const suppressed = Math.max(mag - alpha * noiseMag[k], beta * mag);
       const gain = mag > 1e-12 ? suppressed / mag : 0;
@@ -228,6 +226,7 @@ export default function WaveformEditor({ audioContext, onExport }) {
 
   // Clipboard
   const clipboardRef = useRef(null);
+  const [hasClipboardContent, setHasClipboardContent] = useState(false);
 
   // Undo/redo
   const [undoStack, setUndoStack] = useState([]);
@@ -237,16 +236,18 @@ export default function WaveformEditor({ audioContext, onExport }) {
   const [noiseProfile, setNoiseProfile] = useState(null);
   const [noiseReduction, setNoiseReduction] = useState(12); // dB
 
-  // Effects state
-  const [fadeDuration, setFadeDuration] = useState(0.5); // seconds
-
-  // Tool mode
-  const [tool, setTool] = useState('select'); // select, cut, zoom
-
   // Sermon Master
   const [masterProgress, setMasterProgress] = useState(0);
   const [masterStage, setMasterStage] = useState(null);
   const [masterPreset, setMasterPreset] = useState('sermon');
+
+  // --- Undo/Redo ---
+  const pushUndo = useCallback(() => {
+    if (audioBuffer) {
+      setUndoStack(prev => [...prev.slice(-20), audioBuffer]);
+      setRedoStack([]);
+    }
+  }, [audioBuffer]);
 
   // --- File Loading ---
   const handleFileLoad = useCallback(async (file) => {
@@ -273,15 +274,7 @@ export default function WaveformEditor({ audioContext, onExport }) {
       console.error('Failed to decode audio file:', err);
       alert('Could not decode this audio file. Try WAV or MP3.');
     }
-  }, [audioContext]);
-
-  // --- Undo/Redo ---
-  const pushUndo = useCallback(() => {
-    if (audioBuffer) {
-      setUndoStack(prev => [...prev.slice(-20), audioBuffer]);
-      setRedoStack([]);
-    }
-  }, [audioBuffer]);
+  }, [audioContext, pushUndo]);
 
   const undo = useCallback(() => {
     if (undoStack.length === 0) return;
@@ -485,7 +478,7 @@ export default function WaveformEditor({ audioContext, onExport }) {
     if (!audioBuffer) return;
     const ctx = audioContext || new (window.AudioContext || window.webkitAudioContext)();
     if (sourceNodeRef.current) {
-      try { sourceNodeRef.current.stop(); } catch {}
+      try { sourceNodeRef.current.stop(); } catch { /* Ignore stop races from completed sources. */ }
     }
     const source = ctx.createBufferSource();
     source.buffer = audioBuffer;
@@ -527,7 +520,7 @@ export default function WaveformEditor({ audioContext, onExport }) {
 
   const stopAudio = useCallback(() => {
     if (sourceNodeRef.current) {
-      try { sourceNodeRef.current.stop(); } catch {}
+      try { sourceNodeRef.current.stop(); } catch { /* Ignore stop races from completed sources. */ }
       sourceNodeRef.current = null;
     }
     setIsPlaying(false);
@@ -578,6 +571,7 @@ export default function WaveformEditor({ audioContext, onExport }) {
     }
 
     clipboardRef.current = { channels: clipChannels, sampleRate: sr };
+    setHasClipboardContent(true);
     const newBuf = createBuffer(resultChannels, sr);
     setAudioBuffer(newBuf);
     setTracks(t => t.map((tr, i) => i === activeTrackIdx ? { ...tr, buffer: newBuf } : tr));
@@ -595,6 +589,7 @@ export default function WaveformEditor({ audioContext, onExport }) {
       clipChannels.push(audioBuffer.getChannelData(ch).slice(sel.start, sel.end));
     }
     clipboardRef.current = { channels: clipChannels, sampleRate: audioBuffer.sampleRate };
+    setHasClipboardContent(true);
   }, [audioBuffer, getSelSamples]);
 
   // PASTE (insert at playhead or selection start)
@@ -957,7 +952,7 @@ export default function WaveformEditor({ audioContext, onExport }) {
       const arrayBuffer = await file.arrayBuffer();
       const decoded = await ctx.decodeAudioData(arrayBuffer);
       setTracks(prev => [...prev, { buffer: decoded, name: file.name, muted: false, solo: false, gain: 1.0 }]);
-    } catch (err) {
+    } catch {
       alert('Could not decode audio file for track.');
     }
   }, [audioContext]);
@@ -1107,7 +1102,7 @@ export default function WaveformEditor({ audioContext, onExport }) {
         <div className="w-px h-5 bg-slate-700 mx-1" />
         <button onClick={cutSelection} disabled={!audioBuffer} className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30" title="Cut (Ctrl+X)">Cut</button>
         <button onClick={copySelection} disabled={!audioBuffer} className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30" title="Copy (Ctrl+C)">Copy</button>
-        <button onClick={paste} disabled={!clipboardRef.current} className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30" title="Paste (Ctrl+V)">Paste</button>
+        <button onClick={paste} disabled={!hasClipboardContent} className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30" title="Paste (Ctrl+V)">Paste</button>
         <button onClick={deleteSelection} disabled={!audioBuffer} className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30" title="Delete">Delete</button>
         <button onClick={silenceSelection} disabled={!audioBuffer} className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30" title="Silence Selection">Silence</button>
         <div className="w-px h-5 bg-slate-700 mx-1" />
