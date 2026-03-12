@@ -6,21 +6,32 @@ export function normalizeTauriDevices(devices = []) {
   }));
 }
 
+function matchesDeviceSelection(selection, device) {
+  if (!selection) return false;
+  if (selection === device.deviceId || selection === device.label) return true;
+  const legacyLabel = selection.includes(':') ? selection.split(':').slice(1).join(':') : null;
+  return legacyLabel === device.label;
+}
+
+function resolveCurrentDeviceId(selection, devices, fallback) {
+  const matched = devices.find((device) => matchesDeviceSelection(selection, device));
+  return matched ? matched.deviceId : fallback;
+}
+
 export function reconcileSelectedDevices(selectedDevices, availableDevices) {
   const next = { ...selectedDevices };
   const { inputs = [], outputs = [] } = availableDevices;
 
-  const hasInput = next.inputId === 'default'
-    || inputs.some((device) => device.deviceId === next.inputId);
-  const hasOutput = next.outputId === 'default'
-    || outputs.some((device) => device.deviceId === next.outputId);
-  const hasBroadcast = next.broadcastBus === 'Not set'
-    || next.broadcastBus === 'Same as monitor'
-    || outputs.some((device) => device.deviceId === next.broadcastBus);
+  next.inputId = next.inputId === 'default'
+    ? 'default'
+    : resolveCurrentDeviceId(next.inputId, inputs, 'default');
+  next.outputId = next.outputId === 'default'
+    ? 'default'
+    : resolveCurrentDeviceId(next.outputId, outputs, 'default');
 
-  if (!hasInput) next.inputId = 'default';
-  if (!hasOutput) next.outputId = 'default';
-  if (!hasBroadcast) next.broadcastBus = 'Not set';
+  if (next.broadcastBus !== 'Not set' && next.broadcastBus !== 'Same as monitor') {
+    next.broadcastBus = resolveCurrentDeviceId(next.broadcastBus, outputs, 'Not set');
+  }
 
   return next;
 }
@@ -30,7 +41,7 @@ export function resolveDeviceLabel(devices, deviceId, {
   missingLabel = 'Custom Device',
 } = {}) {
   if (!deviceId || deviceId === 'default') return defaultLabel;
-  const found = devices.find((device) => device.deviceId === deviceId);
+  const found = devices.find((device) => matchesDeviceSelection(deviceId, device));
   return found?.label || missingLabel;
 }
 

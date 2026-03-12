@@ -814,7 +814,8 @@ fn preferred_rate_in_range(min_rate: u32, max_rate: u32) -> u32 {
 }
 
 fn format_device_id(index: usize, name: &str) -> String {
-    format!("{index}:{name}")
+    let _ = index;
+    name.to_string()
 }
 
 #[inline]

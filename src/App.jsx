@@ -380,28 +380,32 @@ const AudioProcessor = ({ goHome }) => {
 
   const getDevices = useCallback(async () => {
     try {
+      let nextDevices;
       if (isTauri) {
         const { invoke } = await import('@tauri-apps/api/core');
         const [inputs, outputs] = await Promise.all([
           invoke('list_input_devices'),
           invoke('list_output_devices'),
         ]);
-        setAvailableDevices({
+        nextDevices = {
           inputs: normalizeTauriDevices(inputs),
           outputs: normalizeTauriDevices(outputs),
-        });
-        return;
+        };
+      } else {
+        await navigator.mediaDevices.getUserMedia({ audio: true });
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        nextDevices = {
+          inputs: devices.filter((d) => d.kind === 'audioinput'),
+          outputs: devices.filter((d) => d.kind === 'audiooutput'),
+        };
       }
 
-      await navigator.mediaDevices.getUserMedia({ audio: true });
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      setAvailableDevices({
-        inputs: devices.filter((d) => d.kind === 'audioinput'),
-        outputs: devices.filter((d) => d.kind === 'audiooutput'),
-      });
+      setAvailableDevices(nextDevices);
+      return nextDevices;
     } catch (err) {
       console.warn('Permission needed', err);
       resetDeviceState();
+      return { inputs: [], outputs: [] };
     }
   }, [resetDeviceState]);
 
@@ -1163,7 +1167,17 @@ const AudioProcessor = ({ goHome }) => {
         await stopTauriEngine().catch(() => {});
         cleanupAudio({ stopNative: false });
         const { invoke } = await import('@tauri-apps/api/core');
-        const info = await startNativeEngine(invoke, selectedDevices);
+        const latestDevices = await getDevices();
+        const resolvedDevices = reconcileSelectedDevices(selectedDevices, latestDevices);
+        if (
+          resolvedDevices.inputId !== selectedDevices.inputId
+          || resolvedDevices.outputId !== selectedDevices.outputId
+          || resolvedDevices.broadcastBus !== selectedDevices.broadcastBus
+        ) {
+          setSelectedDevices(resolvedDevices);
+        }
+
+        const info = await startNativeEngine(invoke, resolvedDevices);
         setAudioStats({
           sampleRate: info.sample_rate,
           bufferSize: info.buffer_frames || 256,

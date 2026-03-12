@@ -7,6 +7,7 @@ import {
   normalizeTauriDevices,
   reconcileSelectedDevices,
   resolveBroadcastLabel,
+  resolveDeviceLabel,
 } from './audioRouting.js';
 
 test('normalizeTauriDevices maps native payload to UI device objects', () => {
@@ -39,6 +40,29 @@ test('reconcileSelectedDevices resets missing devices to safe defaults', () => {
   });
 });
 
+test('reconcileSelectedDevices migrates legacy tauri ids to current device ids', () => {
+  const next = reconcileSelectedDevices(
+    {
+      inputId: '2:USB Audio Codec',
+      outputId: '4:USB Audio Codec',
+      broadcastBus: '5:VB-CABLE Input',
+    },
+    {
+      inputs: [{ deviceId: 'USB Audio Codec', label: 'USB Audio Codec' }],
+      outputs: [
+        { deviceId: 'USB Audio Codec', label: 'USB Audio Codec' },
+        { deviceId: 'VB-CABLE Input', label: 'VB-CABLE Input' },
+      ],
+    },
+  );
+
+  assert.deepEqual(next, {
+    inputId: 'USB Audio Codec',
+    outputId: 'USB Audio Codec',
+    broadcastBus: 'VB-CABLE Input',
+  });
+});
+
 test('buildNativeEngineArgs preserves dedicated monitor and broadcast outputs', () => {
   const args = buildNativeEngineArgs({
     inputId: 'mic-1',
@@ -63,6 +87,12 @@ test('resolveBroadcastLabel mirrors monitor label when requested', () => {
     ),
     'Headphones',
   );
+});
+
+test('resolveDeviceLabel accepts legacy tauri ids that still contain the device label', () => {
+  const outputs = [{ deviceId: 'USB Headset', label: 'USB Headset' }];
+
+  assert.equal(resolveDeviceLabel(outputs, '7:USB Headset'), 'USB Headset');
 });
 
 test('describeBroadcastRoute reports a dedicated native broadcast route', () => {
