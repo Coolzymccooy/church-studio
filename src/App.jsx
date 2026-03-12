@@ -59,6 +59,7 @@ import {
   Trash2,
   Check,
   Waves,
+  RefreshCw,
   Speaker,
   Menu,
 } from 'lucide-react';
