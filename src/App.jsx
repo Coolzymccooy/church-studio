@@ -1286,17 +1286,7 @@ const AudioProcessor = ({ goHome }) => {
       }
     });
     return cleanup;
-  }, [
-    downloadWaveform,
-    exportMp4,
-    handleNoiseProfileCapture,
-    handleSnapshotSave,
-    hardReset,
-    shareRecording,
-    startAutoCalibrate,
-    startMicLearn,
-    toggleLive,
-  ]);
+  }, []);
 
   const startAutoCalibrate = () => {
     trackEvent('noise_calibrate');
