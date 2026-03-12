@@ -33,3 +33,6 @@ rustfft = "6"          # FFT for spectral processing
 atomic_float = "1.0"   # AtomicF32 for lock-free param sharing
 ringbuf = "0.4"        # Lock-free ring buffer (input→output)
 parking_lot = "0.12"   # Fast mutex for noise profile transfers
+
+[target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
+tauri-plugin-updater = "2"

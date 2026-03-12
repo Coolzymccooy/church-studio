@@ -6,9 +6,127 @@ use dsp::{AudioDeviceInfo, DspParams};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State};
+#[cfg(all(desktop, not(debug_assertions)))]
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+#[cfg(all(desktop, not(debug_assertions)))]
+use tauri_plugin_updater::UpdaterExt;
 
 /// Shared DSP parameters that persist across engine start/stop cycles.
 pub struct SharedParams(pub Arc<DspParams>);
+
+#[cfg(all(desktop, not(debug_assertions)))]
+const UPDATE_CHECK_TIMEOUT_SECS: u64 = 15;
+
+#[cfg(all(desktop, not(debug_assertions)))]
+async fn install_app_update(app: AppHandle) -> tauri_plugin_updater::Result<()> {
+    let Some(update) = app
+        .updater_builder()
+        .timeout(std::time::Duration::from_secs(UPDATE_CHECK_TIMEOUT_SECS))
+        .build()?
+        .check()
+        .await?
+    else {
+        return Ok(());
+    };
+
+    let mut downloaded = 0_u64;
+    update
+        .download_and_install(
+            |chunk_length, content_length| {
+                downloaded += u64::try_from(chunk_length).unwrap_or(0);
+                log::info!(
+                    "updater: downloaded {} bytes of {:?}",
+                    downloaded,
+                    content_length
+                );
+            },
+            || {
+                log::info!("updater: download complete");
+            },
+        )
+        .await?;
+
+    log::info!("updater: update installed successfully");
+
+    #[cfg(not(windows))]
+    {
+        let restart_handle = app.clone();
+        app.dialog()
+            .message("TIWATON AI Studio was updated successfully. Restart now to use the new version.")
+            .title("Update installed")
+            .kind(MessageDialogKind::Info)
+            .buttons(MessageDialogButtons::OkCancelCustom(
+                "Restart now".into(),
+                "Later".into(),
+            ))
+            .show(move |restart_now| {
+                if restart_now {
+                    restart_handle.restart();
+                }
+            });
+    }
+
+    Ok(())
+}
+
+#[cfg(all(desktop, not(debug_assertions)))]
+async fn check_for_app_update(app: AppHandle) {
+    let update = match app
+        .updater_builder()
+        .timeout(std::time::Duration::from_secs(UPDATE_CHECK_TIMEOUT_SECS))
+        .build()
+    {
+        Ok(builder) => match builder.check().await {
+            Ok(update) => update,
+            Err(err) => {
+                log::warn!("updater: failed to check for updates: {err}");
+                return;
+            }
+        },
+        Err(err) => {
+            log::warn!("updater: failed to initialize updater: {err}");
+            return;
+        }
+    };
+
+    let Some(update) = update else {
+        log::info!("updater: no update available");
+        return;
+    };
+
+    let version = update.version.clone();
+    let install_handle = app.clone();
+    app.dialog()
+        .message(format!(
+            "TIWATON AI Studio {version} is available.\n\nInstall the update now? The app may close while the installer runs."
+        ))
+        .title("Update available")
+        .kind(MessageDialogKind::Info)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "Install now".into(),
+            "Later".into(),
+        ))
+        .show(move |install_now| {
+            if !install_now {
+                return;
+            }
+
+            let app = install_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(err) = install_app_update(app.clone()).await {
+                    log::error!("updater: failed to install update: {err}");
+                    app.dialog()
+                        .message(format!(
+                            "TIWATON AI Studio could not install the update.\n\n{err}"
+                        ))
+                        .title("Update failed")
+                        .kind(MessageDialogKind::Error)
+                        .buttons(MessageDialogButtons::Ok)
+                        .show(|_| {});
+                }
+            });
+        });
+}
 
 #[tauri::command]
 async fn start_audio_engine(
@@ -172,6 +290,18 @@ pub fn run() {
             engine_status,
         ])
         .setup(|app| {
+            #[cfg(desktop)]
+            app.handle()
+                .plugin(tauri_plugin_updater::Builder::new().build())?;
+
+            #[cfg(all(desktop, not(debug_assertions)))]
+            {
+                let app_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    check_for_app_update(app_handle).await;
+                });
+            }
+
             let tiwaton_menu = SubmenuBuilder::new(app, "TIWATON")
                 .item(&PredefinedMenuItem::about(
                     app,

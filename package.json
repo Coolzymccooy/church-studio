@@ -19,8 +19,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build",
-    "tauri:release": "tauri build --release"
+    "tauri:build": "node scripts/tauri-build.mjs",
+    "tauri:release": "node scripts/tauri-build.mjs --release"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
