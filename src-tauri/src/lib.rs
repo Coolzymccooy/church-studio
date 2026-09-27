@@ -3,6 +3,8 @@ mod dsp;
 mod history;
 mod mixer_commands;
 mod mixer_control;
+#[cfg(test)]
+mod mixer_engine_tests;
 mod mixer_meters;
 mod routing;
 
