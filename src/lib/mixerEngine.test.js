@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   applyStripChange,
   clampStripValue,
+  createCoalescer,
   createMixerController,
   createMockMixerController,
   faderDbToPosition,
@@ -343,4 +344,34 @@ test('mock controller subscribeMeters stops the timer once every listener dispos
   const countAfterDispose = count;
   await new Promise((resolve) => setTimeout(resolve, 80));
   assert.equal(count, countAfterDispose, 'no further ticks after the only subscriber disposes');
+});
+
+test('createCoalescer sends only the latest value per key on each flush', async () => {
+  let flush = null;
+  const coalesce = createCoalescer((fn) => { flush = fn; });
+  const sent = [];
+  const send = (key, v) => coalesce(key, async () => { sent.push([key, v]); return v; });
+
+  const first = send('s0:fader_db', -10);
+  const second = send('s0:fader_db', -5);
+  const other = send('s1:pan', 0.5);
+  flush();
+
+  assert.equal(await first, undefined);
+  assert.equal(await second, -5);
+  assert.equal(await other, 0.5);
+  assert.deepEqual(sent, [['s0:fader_db', -5], ['s1:pan', 0.5]]);
+});
+
+test('createCoalescer rejects when the surviving call fails and schedules again after a flush', async () => {
+  const flushes = [];
+  const coalesce = createCoalescer((fn) => { flushes.push(fn); });
+  const failing = coalesce('k', async () => { throw new Error('engine said no'); });
+  flushes[0]();
+  await assert.rejects(failing, /engine said no/);
+
+  const later = coalesce('k', async () => 'ok');
+  assert.equal(flushes.length, 2);
+  flushes[1]();
+  assert.equal(await later, 'ok');
 });

@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { applyStripChange, clampStripValue } from '../../lib/mixerEngine.js';
+import { applyStripChange, clampStripValue, createCoalescer } from '../../lib/mixerEngine.js';
 
 const TOAST_MS = 4000;
 
 /**
- * useMixer(controller) — drives a MixerConsole from any object implementing
+ * useMixer(controller) Ã¢â‚¬â€ drives a MixerConsole from any object implementing
  * the mixerEngine controller interface (real Tauri controller or the mock).
  *
  * Meters arrive at ~20 Hz and are kept in a ref (`metersRef`), never in React
- * state, so the console doesn't re-render on every tick — Meter.jsx reads the
+ * state, so the console doesn't re-render on every tick Ã¢â‚¬â€ Meter.jsx reads the
  * ref directly from a requestAnimationFrame loop.
  *
  * Every mutation is optimistic: local state updates immediately, the
@@ -22,6 +22,9 @@ export function useMixer(controller) {
   const [toast, setToast] = useState(null);
   const metersRef = useRef({ strips: [], buses: [] });
   const toastTimerRef = useRef(null);
+  // Continuous controls (faders, knobs) fire on every input event while
+  // dragging; send at most one engine command per control per frame.
+  const [coalesce] = useState(() => createCoalescer());
 
   const showToast = useCallback((message) => {
     setToast(message);
@@ -60,7 +63,7 @@ export function useMixer(controller) {
   }, [controller, showToast]);
 
   // withOptimism applies an optimistic change immediately and, on failure,
-  // reverts only the field this specific call touched — and reverts it
+  // reverts only the field this specific call touched Ã¢â‚¬â€ and reverts it
   // against whatever the *latest* state is at that point, not a stale
   // snapshot taken before the call started. Rapid slider drags fire many
   // overlapping invokes; capturing one full-state snapshot up front and
@@ -88,9 +91,9 @@ export function useMixer(controller) {
         const previousValue = prev.strips[index]?.[key];
         return (latest) => applyStripChange(latest, index, key, previousValue);
       },
-      () => controller.setStripParam(index, key, value),
+      () => coalesce(`strip:${index}:${key}`, () => controller.setStripParam(index, key, value)),
     );
-  }, [controller, withOptimism]);
+  }, [controller, coalesce, withOptimism]);
 
   const setStripBool = useCallback((index, key, value) => {
     withOptimism(
@@ -134,9 +137,9 @@ export function useMixer(controller) {
           buses: latest.buses.map((b) => (b.id === bus ? { ...b, [key]: previousValue } : b)),
         });
       },
-      () => controller.setBusParam(bus, key, value),
+      () => coalesce(`bus:${bus}:${key}`, () => controller.setBusParam(bus, key, value)),
     );
-  }, [controller, withOptimism]);
+  }, [controller, coalesce, withOptimism]);
 
   const setBusBool = useCallback((bus, key, value) => {
     withOptimism(

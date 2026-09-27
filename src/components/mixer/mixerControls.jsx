@@ -23,6 +23,7 @@ export function LabeledSlider({
         value={value}
         onChange={(e) => onChange(parseFloat(e.target.value))}
         aria-label={ariaLabel || label}
+        aria-valuetext={display}
         className="w-full h-1 rounded appearance-none cursor-pointer accent-[var(--accent)]"
         style={{ background: 'rgba(148,163,184,0.25)' }}
       />
@@ -47,7 +48,7 @@ export function ToggleChip({ label, active, onClick, activeColor = 'var(--accent
   );
 }
 
-export function VerticalFader({ position, onChange, ariaLabel, height = 148, width = 30 }) {
+export function VerticalFader({ position, onChange, ariaLabel, valueText, height = 148, width = 30 }) {
   return (
     <div className="relative flex items-center justify-center" style={{ width, height }}>
       <input
@@ -58,6 +59,7 @@ export function VerticalFader({ position, onChange, ariaLabel, height = 148, wid
         value={position}
         onChange={(e) => onChange(parseFloat(e.target.value))}
         aria-label={ariaLabel}
+        aria-valuetext={valueText}
         aria-orientation="vertical"
         className="cursor-pointer accent-[var(--accent)]"
         style={{

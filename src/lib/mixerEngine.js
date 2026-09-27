@@ -402,3 +402,39 @@ export function createMockMixerController() {
     },
   };
 }
+
+/**
+ * Coalesces rapid updates per key: while a flush is pending, a newer call for
+ * the same key replaces the older one (which resolves as superseded), so a
+ * fader drag sends one engine command per frame instead of one per input
+ * event. Different keys are all sent on the next flush.
+ *
+ * @param {(flush: () => void) => void} [schedule]
+ * @returns {(key: string, run: () => Promise<any>) => Promise<any>}
+ */
+export function createCoalescer(schedule = (flush) => setTimeout(flush, 16)) {
+  const pending = new Map();
+  let scheduled = false;
+
+  const flush = () => {
+    scheduled = false;
+    const jobs = [...pending.values()];
+    pending.clear();
+    for (const job of jobs) job.start();
+  };
+
+  return function enqueue(key, run) {
+    return new Promise((resolve, reject) => {
+      const prior = pending.get(key);
+      if (prior) prior.supersede();
+      pending.set(key, {
+        start: () => Promise.resolve().then(run).then(resolve, reject),
+        supersede: () => resolve(undefined),
+      });
+      if (!scheduled) {
+        scheduled = true;
+        schedule(flush);
+      }
+    });
+  };
+}

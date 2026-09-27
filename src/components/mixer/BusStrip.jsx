@@ -3,7 +3,7 @@ import { LabeledSlider, VerticalFader } from './mixerControls.jsx';
 import Meter from './Meter.jsx';
 
 /**
- * BusStrip — Main / Stream / Monitor: fader, mute, limiter ceiling, L/R meter.
+ * BusStrip â€” Main / Stream / Monitor: fader, mute, limiter ceiling, L/R meter.
  */
 export default function BusStrip({ bus, label, metersRef, onSetParam, onSetBool }) {
   const meter = () => metersRef.current.buses.find((b) => b.id === bus.id) || {};
@@ -43,6 +43,7 @@ export default function BusStrip({ bus, label, metersRef, onSetParam, onSetBool 
             position={faderPosition}
             onChange={(p) => onSetParam('fader_db', positionToFaderDb(p))}
             ariaLabel={`${label} fader`}
+            valueText={`${formatDb(bus.fader_db)} dB`}
           />
           <span className="text-[8px] font-mono text-slate-300">{formatDb(bus.fader_db)}</span>
         </div>
