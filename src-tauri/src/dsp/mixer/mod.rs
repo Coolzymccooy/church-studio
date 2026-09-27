@@ -162,7 +162,7 @@ impl Mixer {
         }
 
         let params = &*self.params;
-        let any_solo = params.any_solo();
+        let any_solo = params.any_solo(self.strips.len());
         let empty: &[f32] = &[];
 
         for (i, strip) in self.strips.iter_mut().enumerate() {

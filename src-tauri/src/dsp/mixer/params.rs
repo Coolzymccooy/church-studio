@@ -149,8 +149,10 @@ impl MixerParams {
         }
     }
 
-    /// True if any strip is soloed.
-    pub fn any_solo(&self) -> bool {
-        self.strips.iter().any(|s| s.solo.load(Ordering::Relaxed))
+    /// True if any of the first `active` strips is soloed. The bank holds 32
+    /// strips but only the device's channels run, and a solo left on a strip
+    /// that no longer has an input must not silence the Monitor bus.
+    pub fn any_solo(&self, active: usize) -> bool {
+        self.strips.iter().take(active).any(|s| s.solo.load(Ordering::Relaxed))
     }
 }

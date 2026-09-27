@@ -67,6 +67,19 @@ fn unity_passthrough_is_centre_panned() {
 }
 
 #[test]
+fn solo_on_an_inactive_strip_does_not_silence_monitor() {
+    // A 32-strip bank driving a 2-channel device, with strip 8 left soloed.
+    let params = Arc::new(MixerParams::new(32));
+    let mut mixer = Mixer::new(SR, BLOCK, 2, params.clone());
+    params.strips[0].send_db[BUS_MONITOR].store(0.0, Relaxed);
+    params.strips[8].solo.store(true, Relaxed);
+    let out = run(&mut mixer, &[dc(SRU, 0.5), dc(SRU, 0.0)], BLOCK);
+    for &s in tail(&out[BUS_MONITOR].left, 1_000) {
+        assert!((s - 0.5 * CENTRE).abs() < 1e-3, "monitor: {s}");
+    }
+}
+
+#[test]
 fn hard_left_pan_silences_right() {
     let (p, mut mixer) = new_mixer(1);
     p.strips[0].pan.store(-1.0, Relaxed);
