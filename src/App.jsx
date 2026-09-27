@@ -486,15 +486,21 @@ const AudioProcessor = ({ goHome }) => {
       }
     }
 
-    // Sync RNNoise enable/disable via dry/wet gain crossfade (the real
-    // RnnoiseWorkletNode has no port-based enable message).
+    // Sync RNNoise enable/disable via a dry/wet swap (the real
+    // RnnoiseWorkletNode has no port-based enable message). The wet path
+    // lags the dry one by ~11 ms, so the overlap is kept to 4 ms: long
+    // enough to avoid a click, too short to hear as comb filtering.
     const rnDry = processingRefs.current.rnnoiseDryGain;
     const rnWet = processingRefs.current.rnnoiseWetGain;
     if (rnDry && rnWet) {
       const wantRnnoise = features.voicePattern || features.denoise;
       const now = audioContext?.currentTime || 0;
-      rnDry.gain.setTargetAtTime(wantRnnoise ? 0 : 1, now, 0.015);
-      rnWet.gain.setTargetAtTime(wantRnnoise ? 1 : 0, now, 0.015);
+      const end = now + 0.004;
+      for (const [param, target] of [[rnDry.gain, wantRnnoise ? 0 : 1], [rnWet.gain, wantRnnoise ? 1 : 0]]) {
+        param.cancelScheduledValues(now);
+        param.setValueAtTime(param.value, now);
+        param.linearRampToValueAtTime(target, end);
+      }
     }
 
     // Force open gate if disabled
@@ -513,6 +519,13 @@ const AudioProcessor = ({ goHome }) => {
   }, []);
 
   const cleanupAudio = useCallback(({ stopNative = true } = {}) => {
+    // Free RNNoise's WASM-side state explicitly; closing the context alone
+    // leaves that to the browser.
+    try {
+      processingRefs.current.rnnoiseNode?.destroy?.();
+    } catch (e) {
+      console.warn('Error destroying RNNoise node', e);
+    }
     if (contextRef.current) {
       try {
         contextRef.current.close();
