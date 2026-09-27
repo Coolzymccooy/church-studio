@@ -87,6 +87,7 @@ export default function MenuBar({
   onSetMainTab,
   onSnapshotSave,
   onExportMp4,
+  videoExportLabel = 'Video (WebM)',
   onShareRecording,
   onDownloadWaveform,
   // State
@@ -114,7 +115,7 @@ export default function MenuBar({
         { separator: true },
         { label: 'Export WAV Recording', action: () => onShareRecording?.('wav'), disabled: recordingState !== 'review' },
         { label: 'Export WebM Recording', action: () => onShareRecording?.('webm'), disabled: recordingState !== 'review' },
-        { label: 'Export MP4 (Canvas + Audio)', action: onExportMp4, disabled: !isLive },
+        { label: `Export ${videoExportLabel} (Canvas + Audio)`, action: onExportMp4, disabled: !isLive },
         { label: 'Spectrum Snapshot (PNG)', action: onDownloadWaveform },
         { separator: true },
         { label: 'Save Session Snapshot', shortcut: 'Ctrl+S', action: onSnapshotSave },
