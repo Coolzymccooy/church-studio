@@ -17,6 +17,7 @@ import StudioStatusBar from './components/StudioStatusBar';
 import DeviceSettingsModal from './components/DeviceSettingsModal';
 import InputRackAiTab from './components/InputRackAiTab';
 import { getExportAvailability } from './lib/exportFlow';
+import { loadRnnoiseAssets } from './lib/rnnoise';
 import {
   describeBroadcastRoute,
   normalizeTauriDevices,
@@ -471,13 +472,15 @@ const AudioProcessor = ({ goHome }) => {
       }
     }
 
-    // Sync RNNoise worklet enable/disable
-    const rnNode = processingRefs.current.rnnoiseNode;
-    if (rnNode) {
-      rnNode.port.postMessage({
-        type: 'config',
-        enabled: features.voicePattern || features.denoise,
-      });
+    // Sync RNNoise enable/disable via dry/wet gain crossfade (the real
+    // RnnoiseWorkletNode has no port-based enable message).
+    const rnDry = processingRefs.current.rnnoiseDryGain;
+    const rnWet = processingRefs.current.rnnoiseWetGain;
+    if (rnDry && rnWet) {
+      const wantRnnoise = features.voicePattern || features.denoise;
+      const now = audioContext?.currentTime || 0;
+      rnDry.gain.setTargetAtTime(wantRnnoise ? 0 : 1, now, 0.015);
+      rnWet.gain.setTargetAtTime(wantRnnoise ? 1 : 0, now, 0.015);
     }
 
     // Force open gate if disabled
@@ -668,7 +671,16 @@ const AudioProcessor = ({ goHome }) => {
         );
       }
 
-      const ctx = new Ctor();
+      // RNNoise (neural denoise) assumes a 48kHz pipeline, and our offline
+      // export contexts already render at 48000 — request it here too so
+      // the live engine and exports agree and RNNoise can actually run.
+      let ctx;
+      try {
+        ctx = new Ctor({ sampleRate: 48000 });
+      } catch (rateErr) {
+        console.warn('[TIWATON] Could not force 48kHz AudioContext, using device default:', rateErr.message);
+        ctx = new Ctor();
+      }
 
       if (ctx.state === 'suspended') {
         await ctx.resume();
@@ -719,31 +731,20 @@ const AudioProcessor = ({ goHome }) => {
         console.warn('[TIWATON] AudioWorklet not available, falling back to main-thread gate:', err.message);
       }
 
-      try {
-        await ctx.audioWorklet.addModule('/worklets/rnnoise-worklet.js');
-        rnnoiseNode = new AudioWorkletNode(ctx, 'rnnoise-processor');
-
-        // Try to load RNNoise WASM binary
+      if (ctx.sampleRate !== 48000) {
+        console.warn(
+          `[TIWATON] RNNoise needs a 48kHz AudioContext, but this one is running at ${ctx.sampleRate}Hz — skipping neural denoise.`,
+        );
+      } else {
         try {
-          const wasmResponse = await fetch('/wasm/rnnoise.wasm');
-          if (wasmResponse.ok) {
-            const wasmBytes = await wasmResponse.arrayBuffer();
-            rnnoiseNode.port.postMessage({ type: 'load-wasm', wasmBytes }, [wasmBytes]);
-            console.log('[TIWATON] RNNoise WASM loaded (neural noise suppression active)');
-          } else {
-            console.warn('[TIWATON] RNNoise WASM not found at /wasm/rnnoise.wasm — neural denoising disabled. Place rnnoise.wasm in public/wasm/ to enable.');
-          }
-        } catch (wasmErr) {
-          console.warn('[TIWATON] RNNoise WASM load failed:', wasmErr.message);
+          const { wasmBinary, RnnoiseWorkletNode, workletUrl } = await loadRnnoiseAssets();
+          await ctx.audioWorklet.addModule(workletUrl);
+          rnnoiseNode = new RnnoiseWorkletNode(ctx, { wasmBinary, maxChannels: 1 });
+          console.log('[TIWATON] RNNoise WASM loaded (neural noise suppression active)');
+        } catch (err) {
+          console.warn('[TIWATON] RNNoise unavailable, continuing without neural denoise:', err.message);
+          rnnoiseNode = null;
         }
-
-        rnnoiseNode.port.onmessage = (event) => {
-          if (event.data.type === 'vad') {
-            // RNNoise VAD probability can reinforce our gate decisions
-          }
-        };
-      } catch (err) {
-        console.warn('[TIWATON] RNNoise worklet not available:', err.message);
       }
 
       // ── LUFS Meter (ITU-R BS.1770) ────────────────────────────────────────
@@ -983,9 +984,24 @@ const AudioProcessor = ({ goHome }) => {
       inputGain.connect(lowCut);
 
       // ── Neural Denoise (RNNoise WASM) ────────────────────────────────────
+      // RnnoiseWorkletNode has no built-in enable/disable message, so the
+      // "denoise" toggle is implemented as a dry/wet gain crossfade around
+      // it instead — both paths run, only the audible gain changes.
+      let rnnoiseDryGain = null;
+      let rnnoiseWetGain = null;
       if (rnnoiseNode) {
+        rnnoiseDryGain = ctx.createGain();
+        rnnoiseWetGain = ctx.createGain();
+        const wantRnnoise = featuresRef.current.voicePattern || featuresRef.current.denoise;
+        rnnoiseDryGain.gain.value = wantRnnoise ? 0 : 1;
+        rnnoiseWetGain.gain.value = wantRnnoise ? 1 : 0;
+
+        lowCut.connect(rnnoiseDryGain);
+        rnnoiseDryGain.connect(ana);
+
         lowCut.connect(rnnoiseNode);
-        rnnoiseNode.connect(ana);
+        rnnoiseNode.connect(rnnoiseWetGain);
+        rnnoiseWetGain.connect(ana);
       } else {
         lowCut.connect(ana);
       }
@@ -1115,6 +1131,8 @@ const AudioProcessor = ({ goHome }) => {
         // new worklet nodes
         hyperGateNode,
         rnnoiseNode,
+        rnnoiseDryGain,
+        rnnoiseWetGain,
         lufsNode,
         lookaheadGateNode,
         dynamicDesserNode,
