@@ -7,7 +7,8 @@ use std::sync::Arc;
 const SR: f64 = 48_000.0;
 const SRU: usize = 48_000;
 const BLOCK: usize = 512;
-const CENTRE: f32 = std::f32::consts::FRAC_1_SQRT_2;
+/// Per-side gain of a centred strip: the pan law is normalised to 0 dB.
+const CENTRE: f32 = 1.0;
 
 struct BusOut {
     left: Vec<f32>,
@@ -202,19 +203,21 @@ fn no_nan_on_silence_with_all_processing_on() {
 fn fader_jump_is_ramped_without_clicks() {
     let (p, mut mixer) = new_mixer(1);
     p.strips[0].fader_db.store(MIN_DB, Relaxed);
-    let input = dc(SRU, 1.0);
+    // 0.5 keeps the centred level (0 dB pan law) below the −1 dBFS bus
+    // limiter, so only the fader ramp shapes the output.
+    let input = dc(SRU, 0.5);
     let _ = run(&mut mixer, &[input[..SRU / 2].to_vec()], BLOCK);
     p.strips[0].fader_db.store(0.0, Relaxed);
     let out = run(&mut mixer, &[input[SRU / 2..].to_vec()], BLOCK);
 
     let ramp = smooth::ramp_samples(SR) as f32;
     assert!(ramp >= 0.005 * SR as f32, "ramp must be at least 5 ms");
-    let max_step = CENTRE / ramp * 1.01 + 1e-6;
+    let max_step = 0.5 * CENTRE / ramp * 1.01 + 1e-6;
     let main = &out[BUS_MAIN].left;
     for w in main.windows(2) {
         assert!((w[1] - w[0]).abs() <= max_step, "step {}", (w[1] - w[0]).abs());
     }
-    assert!((main[main.len() - 1] - CENTRE).abs() < 1e-3);
+    assert!((main[main.len() - 1] - 0.5 * CENTRE).abs() < 1e-3);
 }
 
 #[test]

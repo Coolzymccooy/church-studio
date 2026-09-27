@@ -21,6 +21,14 @@ pub const TRIM_MAX_DB: f32 = 40.0;
 pub const FADER_MAX_DB: f32 = 10.0;
 pub const EQ_MAX_DB: f32 = 15.0;
 
+/// Pan-law normalisation. The pan is constant power (cos/sin), scaled by √2
+/// so a centred strip reaches each side of a bus at unity (0 dB) and a hard
+/// pan is +3 dB on one side. This keeps a centred mono source at the same
+/// level it had before the mixer existed (the old engine pushed the mono
+/// voice unchanged to every output channel), both on stereo outputs (L = R =
+/// input) and on 1-channel outputs ((L + R) / 2 = input).
+pub const PAN_LAW_NORM: f32 = std::f32::consts::SQRT_2;
+
 /// dB → linear gain for faders and sends: ≤ `MIN_DB` (or NaN) is silence.
 pub fn fader_db_to_lin(db: f32) -> f32 {
     if db.is_nan() || db <= MIN_DB {
@@ -54,7 +62,8 @@ pub struct StripParams {
     pub comp_enabled: AtomicBool,
     pub comp_threshold_db: AtomicF32,
     pub comp_ratio: AtomicF32,
-    /// −1 (hard left) .. +1 (hard right), constant-power law.
+    /// −1 (hard left) .. +1 (hard right), constant-power law normalised to
+    /// 0 dB at centre (see `PAN_LAW_NORM`).
     pub pan: AtomicF32,
     pub mute: AtomicBool,
     /// PFL solo to the Monitor bus only.

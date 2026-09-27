@@ -3,7 +3,8 @@
 //! Signal flow:
 //!   input → trim × polarity (ramped) → HPF → gate (lookahead, always delays)
 //!         → 3-band EQ → compressor → [pre-fader] → fader (ramped) → [post-fader]
-//!         → pan (constant power, ramped) × send (ramped) × mute (ramped) → buses
+//!         → pan (constant power, 0 dB at centre, ramped) × send (ramped)
+//!         × mute (ramped) → buses
 //!
 //! Main and Stream sends are post-fader. The Monitor send is pre-fader unless
 //! `monitor_post_fader` is set. Mute removes the strip from every bus mix.
@@ -17,7 +18,7 @@
 //! gate is enabled, so all strips stay phase-aligned.
 use super::params::{
     clamp_or, fader_db_to_lin, StripParams, BUS_MAIN, BUS_MONITOR, BUS_STREAM, EQ_MAX_DB,
-    NUM_BUSES, TRIM_MAX_DB, TRIM_MIN_DB,
+    NUM_BUSES, PAN_LAW_NORM, TRIM_MAX_DB, TRIM_MIN_DB,
 };
 use super::smooth::LinearSmoother;
 use super::StereoBuffer;
@@ -91,8 +92,8 @@ impl Strip {
             comp_buf: vec![0.0; max_block.max(1)],
             in_gain: LinearSmoother::new(1.0, ramp),
             fader: LinearSmoother::new(1.0, ramp),
-            pan_l: LinearSmoother::new(std::f32::consts::FRAC_1_SQRT_2, ramp),
-            pan_r: LinearSmoother::new(std::f32::consts::FRAC_1_SQRT_2, ramp),
+            pan_l: LinearSmoother::new(1.0, ramp),
+            pan_r: LinearSmoother::new(1.0, ramp),
             mute: LinearSmoother::new(1.0, ramp),
             sends: [
                 LinearSmoother::new(1.0, ramp),
@@ -126,7 +127,7 @@ impl Strip {
 
         let pan = clamp_or(p.pan.load(Relaxed), -1.0, 1.0, 0.0);
         let angle = (pan + 1.0) * std::f32::consts::FRAC_PI_4;
-        let (pan_l, pan_r) = (angle.cos(), angle.sin());
+        let (pan_l, pan_r) = (angle.cos() * PAN_LAW_NORM, angle.sin() * PAN_LAW_NORM);
 
         let fader = fader_db_to_lin(p.fader_db.load(Relaxed));
         let mute = if p.mute.load(Relaxed) { 0.0 } else { 1.0 };

@@ -1,8 +1,9 @@
 //! Mixer DSP core: mono input strips summed into three stereo buses
 //! (Main = room/PA, Stream = livestream/record, Monitor = stage/headphones).
 //!
-//! Pure DSP — not yet wired to the audio engine. The control thread owns an
-//! `Arc<MixerParams>` (atomics only) and the audio thread owns the `Mixer`.
+//! Pure DSP. The engine (`audio::input_proc`) owns the `Mixer` on the audio
+//! thread; the control side (`mixer_control`) owns the shared
+//! `Arc<MixerParams>` (atomics only).
 //!
 //! API (allocation-free after `new`):
 //!   `mixer.process(&inputs, frames)` where `inputs[i]` feeds strip `i`
