@@ -116,10 +116,12 @@ fn solo_is_pfl_on_monitor_only() {
     // Monitor carries only the soloed strip...
     assert!(max_abs_diff(&solo[BUS_MONITOR].left, &solo_a_only[BUS_MONITOR].left) < 1e-9);
     assert!(max_abs_diff(&solo[BUS_MONITOR].right, &solo_a_only[BUS_MONITOR].right) < 1e-9);
-    // ...pre-fader at unity (fader is −10 dB, PFL ignores it).
-    let expected = 0.3 * CENTRE;
-    let got = peak(tail(&solo[BUS_MONITOR].left, 4_800));
-    assert!((got - expected).abs() < 5e-3, "PFL peak {got}");
+    // ...pre-fader at unity (0 dB) on BOTH sides: the fader is −10 dB and the
+    // pan law is not applied, so the level equals the input (0.3).
+    for side in [&solo[BUS_MONITOR].left, &solo[BUS_MONITOR].right] {
+        let gain = peak(tail(side, 4_800)) / 0.3;
+        assert!((gain - 1.0).abs() < 0.01, "PFL gain {gain}");
+    }
     // Without solo the monitor has both strips.
     assert!(max_abs_diff(&no_solo[BUS_MONITOR].left, &solo[BUS_MONITOR].left) > 0.01);
 }
@@ -213,4 +215,22 @@ fn fader_jump_is_ramped_without_clicks() {
         assert!((w[1] - w[0]).abs() <= max_step, "step {}", (w[1] - w[0]).abs());
     }
     assert!((main[main.len() - 1] - CENTRE).abs() < 1e-3);
+}
+
+#[test]
+fn muted_strip_is_still_audible_on_pfl() {
+    let (p, mut mixer) = new_mixer(1);
+    p.strips[0].mute.store(true, Relaxed);
+    p.strips[0].solo.store(true, Relaxed);
+    let out = run(&mut mixer, &[sine(SRU, 440.0, 48_000.0, 0.3)], BLOCK);
+    // Main and Stream honour the mute...
+    for bus in [BUS_MAIN, BUS_STREAM] {
+        assert!(peak(&out[bus].left) < 1e-9);
+        assert!(peak(&out[bus].right) < 1e-9);
+    }
+    // ...but PFL ignores it: unity on both monitor sides.
+    for side in [&out[BUS_MONITOR].left, &out[BUS_MONITOR].right] {
+        let gain = peak(tail(side, 4_800)) / 0.3;
+        assert!((gain - 1.0).abs() < 0.01, "PFL gain {gain}");
+    }
 }

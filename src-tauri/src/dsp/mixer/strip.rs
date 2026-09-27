@@ -6,9 +6,12 @@
 //!         → pan (constant power, ramped) × send (ramped) × mute (ramped) → buses
 //!
 //! Main and Stream sends are post-fader. The Monitor send is pre-fader unless
-//! `monitor_post_fader` is set. When any strip is soloed the Monitor bus
-//! carries only soloed strips, pre-fader at unity (PFL); Main and Stream are
-//! never affected by solo. Mute removes the strip from every bus.
+//! `monitor_post_fader` is set. Mute removes the strip from every bus mix.
+//!
+//! Solo is PFL (live-console standard): when any strip is soloed the Monitor
+//! bus carries ONLY the soloed strips, pre-fader, at unity (0 dB) on BOTH
+//! sides — no pan law, no send level — and PFL IGNORES mute, so the operator
+//! can check a muted mic before opening it. Main and Stream never see solo.
 //!
 //! Latency: every strip carries the gate's 20 ms lookahead whether or not the
 //! gate is enabled, so all strips stay phase-aligned.
@@ -61,6 +64,8 @@ pub struct Strip {
     pan_r: LinearSmoother,
     mute: LinearSmoother,
     sends: [LinearSmoother; NUM_BUSES],
+    /// PFL gain (1 while this strip is soloed, else 0). Not affected by mute.
+    pfl: LinearSmoother,
 
     hpf: Biquad,
     hpf_freq: f32,
@@ -89,6 +94,7 @@ impl Strip {
                 LinearSmoother::new(1.0, ramp),
                 LinearSmoother::new(0.0, ramp),
             ],
+            pfl: LinearSmoother::new(0.0, ramp),
             hpf: Biquad::hpf(80.0, sr),
             hpf_freq: 80.0,
             gate: Gate::new(sr),
@@ -123,9 +129,11 @@ impl Strip {
         for (dst, src) in sends.iter_mut().zip(p.send_db.iter()) {
             *dst = fader_db_to_lin(src.load(Relaxed));
         }
+        // While anything is soloed the Monitor bus is PFL only: the normal
+        // monitor send is silenced and soloed strips come in via `pfl`.
+        let pfl = if any_solo && p.solo.load(Relaxed) { 1.0 } else { 0.0 };
         if any_solo {
-            // PFL: only soloed strips reach the Monitor bus, at unity.
-            sends[BUS_MONITOR] = if p.solo.load(Relaxed) { 1.0 } else { 0.0 };
+            sends[BUS_MONITOR] = 0.0;
         }
 
         let targets = [
@@ -134,6 +142,7 @@ impl Strip {
             (&mut self.pan_l, pan_l),
             (&mut self.pan_r, pan_r),
             (&mut self.mute, mute),
+            (&mut self.pfl, pfl),
         ];
         for (smoother, value) in targets {
             if snap {
@@ -256,9 +265,10 @@ impl Strip {
             main.right[i] += post * g_main * pr;
             stream.left[i] += post * g_stream * pl;
             stream.right[i] += post * g_stream * pr;
+            let pfl = self.pfl.next(); // unity, both sides, ignores mute
             let mon_src = if monitor_post { post } else { pre };
-            monitor.left[i] += mon_src * g_mon * pl;
-            monitor.right[i] += mon_src * g_mon * pr;
+            monitor.left[i] += mon_src * g_mon * pl + pre * pfl;
+            monitor.right[i] += mon_src * g_mon * pr + pre * pfl;
 
             pre_peak = pre_peak.max(pre.abs());
             post_peak = post_peak.max(post.abs());
