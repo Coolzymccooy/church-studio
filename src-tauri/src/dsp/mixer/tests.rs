@@ -258,3 +258,47 @@ fn compressor_toggle_is_crossfaded() {
     // And the compressor really acts when on.
     assert!(mixer.strip_meters()[0].gain_reduction_db < -6.0);
 }
+
+#[test]
+fn latency_counts_only_active_stages() {
+    let (p, mut mixer) = new_mixer(3);
+    let bus = mixer.bus_latency_samples();
+    assert_eq!(bus, (SR * 0.005) as usize, "bus limiter lookahead is 5 ms");
+    let silent = vec![0.0f32; BLOCK];
+    let inputs: [&[f32]; 3] = [&silent, &silent, &silent];
+
+    // Defaults: every strip gate off → only the bus limiter.
+    mixer.process(&inputs, BLOCK);
+    assert_eq!(mixer.path_latency_samples(usize::MAX, 0), bus);
+    assert_eq!(mixer.path_latency_samples(0, 100), bus + 100);
+
+    // One gate on: its 20 ms lookahead counts once (strips are parallel).
+    p.strips[2].gate_enabled.store(true, Relaxed);
+    mixer.process(&inputs, BLOCK);
+    let gate = (SR * 0.020) as usize;
+    assert_eq!(mixer.path_latency_samples(usize::MAX, 0), bus + gate);
+    assert_eq!(mixer.path_latency_samples(0, 100), bus + gate);
+    assert_eq!(mixer.path_latency_samples(2, 100), bus + gate + 100);
+    assert_eq!(mixer.path_latency_samples(1, 5_000), bus + 5_000);
+
+    // Gate off again: back to the limiter only.
+    p.strips[2].gate_enabled.store(false, Relaxed);
+    mixer.process(&inputs, BLOCK);
+    assert_eq!(mixer.path_latency_samples(usize::MAX, 0), bus);
+}
+
+#[test]
+fn ungated_strip_adds_no_delay() {
+    // An impulse leaves the bus exactly one limiter lookahead later: a strip
+    // with its gate off adds no latency of its own.
+    let (_p, mut mixer) = new_mixer(1);
+    let mut input = vec![0.0f32; SRU / 10];
+    input[100] = 0.5;
+    let out = run(&mut mixer, &[input], BLOCK);
+    let main = &out[BUS_MAIN].left;
+    let (peak_at, _) = main
+        .iter()
+        .enumerate()
+        .fold((0usize, 0.0f32), |(bi, bv), (i, &v)| if v.abs() > bv { (i, v.abs()) } else { (bi, bv) });
+    assert_eq!(peak_at, 100 + mixer.bus_latency_samples());
+}

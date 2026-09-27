@@ -57,6 +57,11 @@ impl Bus {
         self.meters
     }
 
+    /// Limiter lookahead in samples (the limiter always runs).
+    pub fn latency_samples(&self) -> usize {
+        self.limiter_l.latency_samples()
+    }
+
     /// Apply fader, mute and limiter to the first `frames` samples of `buf`
     /// in place, then update the meters.
     pub fn process(&mut self, buf: &mut StereoBuffer, frames: usize, p: &BusParams, snap: bool) {

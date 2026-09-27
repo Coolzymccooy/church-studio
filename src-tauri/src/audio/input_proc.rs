@@ -140,7 +140,7 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
             strips,
             mixer.params.clone(),
         );
-        InputProcessor {
+        let processor = InputProcessor {
             stride,
             chan_bufs,
             dsp,
@@ -155,7 +155,10 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
             // Meters are sent ~50 times per second, as before.
             meter_interval_samples: (sample_rate as usize / 50).max(1),
             samples_since_meter: 0,
-        }
+        };
+        // Report a sensible latency before the first callback.
+        processor.publish_path_latency();
+        processor
     }
 
     /// Process one device callback of interleaved samples of any length,
@@ -184,6 +187,7 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
         }
         let strips = self.chan_bufs.len();
         self.mixer.process(&inputs[..strips], n);
+        self.publish_path_latency();
         self.meter_slots
             .publish(self.mixer.strip_meters(), &self.mixer.bus_meters()[..]);
 
@@ -205,11 +209,27 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
         self.send_voice_meters(n);
     }
 
+    /// Publish the latency of what is active now (see
+    /// `EngineShared::path_latency_samples`).
+    fn publish_path_latency(&self) {
+        let voice = self.voice_strip.load(Ordering::Relaxed);
+        let voice_latency = if voice < self.chan_bufs.len() {
+            self.dsp.total_latency_samples()
+        } else {
+            0
+        };
+        let path = self.mixer.path_latency_samples(voice, voice_latency);
+        self.shared
+            .path_latency_samples
+            .store(path as u64, Ordering::Relaxed);
+    }
+
     /// Run the voice chain in place on the strip that holds `voice_chain`.
     /// If that strip has no input channel on this device, the chain idles.
     fn run_voice_chain(&mut self, n: usize, monitor_gain: f32) {
         let voice = self.voice_strip.load(Ordering::Relaxed);
         let Some(channel) = self.chan_bufs.get_mut(voice) else {
+            self.shared.dsp_latency_samples.store(0, Ordering::Relaxed);
             self.spectrum.accumulate(&[], monitor_gain);
             return;
         };

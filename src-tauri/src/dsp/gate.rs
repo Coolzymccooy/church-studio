@@ -109,7 +109,7 @@ impl Gate {
         (delayed, self.env)
     }
 
-    #[allow(dead_code)] // the chain uses SwitchedGate, the mixer tick_raw
+    #[allow(dead_code)] // the chain and the mixer strips use SwitchedGate
     pub fn process_block(&mut self, buf: &mut [f32]) -> f32 {
         let mut last_gain = 0.0;
         for s in buf.iter_mut() {

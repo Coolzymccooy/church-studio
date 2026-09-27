@@ -35,10 +35,6 @@ use input_proc::{InputProcessor, OutputRoute};
 /// per-channel and mixer buffers are never outgrown.
 const MAX_CALLBACK_FRAMES: usize = 4096;
 
-/// Constant latency of the mixer: 20 ms strip gate lookahead plus 5 ms bus
-/// limiter lookahead (see `dsp::mixer`), present on every path.
-const MIXER_LATENCY_MS: f32 = 25.0;
-
 /// `mixer-meters` emit period (the meters thread wakes at least every
 /// 20 ms, so the event arrives at roughly 18–20 Hz).
 const MIXER_METERS_INTERVAL_MS: u64 = 50;
@@ -133,6 +129,11 @@ struct EngineShared {
     /// Current processing latency of the DSP chain (samples), published by
     /// the callback after every block.
     dsp_latency_samples: AtomicU64,
+    /// Input-to-output processing latency (samples) of what is active now:
+    /// the slowest strip (voice chain on its strip, plus the gate lookahead
+    /// of any strip whose gate is on) plus the bus limiter. Published by the
+    /// callback after every block.
+    path_latency_samples: AtomicU64,
     dropped_output_samples: AtomicU64,
     callback_count: AtomicU64,
     callback_total_ns: AtomicU64,
@@ -148,6 +149,7 @@ impl EngineShared {
             profile_applied: AtomicU64::new(0),
             capture_busy: AtomicBool::new(false),
             dsp_latency_samples: AtomicU64::new(0),
+            path_latency_samples: AtomicU64::new(0),
             noise_profile_ready: AtomicBool::new(false),
             dropped_output_samples: AtomicU64::new(0),
             callback_count: AtomicU64::new(0),
@@ -674,19 +676,22 @@ impl RunningEngine {
         }
     }
 
-    /// Current DSP processing latency in samples (0 when bypassed).
+    /// Current voice-chain latency in samples (0 when bypassed or when the
+    /// voice chain is on no active strip).
     pub fn dsp_latency_samples(&self) -> u64 {
         self.shared.dsp_latency_samples.load(Ordering::Relaxed)
     }
 
-    /// Buffer latency plus current voice-chain and mixer latency, in ms.
+    /// Buffer latency plus the processing latency of what is really active
+    /// (voice chain, gated strips, bus limiter), in ms.
     pub fn total_latency_ms(&self) -> f32 {
-        let dsp_ms = if self.sample_rate > 0 {
-            self.dsp_latency_samples() as f32 * 1000.0 / self.sample_rate as f32
+        let path = self.shared.path_latency_samples.load(Ordering::Relaxed);
+        let path_ms = if self.sample_rate > 0 {
+            path as f32 * 1000.0 / self.sample_rate as f32
         } else {
             0.0
         };
-        self.latency_ms + dsp_ms + MIXER_LATENCY_MS
+        self.latency_ms + path_ms
     }
 
     pub fn noise_profile_ready(&self) -> bool {

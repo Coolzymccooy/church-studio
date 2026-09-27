@@ -1,7 +1,7 @@
 //! One mono input channel strip.
 //!
 //! Signal flow:
-//!   input → trim × polarity (ramped) → HPF → gate (lookahead, always delays)
+//!   input → trim × polarity (ramped) → HPF → gate (switched, lookahead)
 //!         → 3-band EQ → compressor → [pre-fader] → fader (ramped) → [post-fader]
 //!         → pan (constant power, 0 dB at centre, ramped) × send (ramped)
 //!         × mute (ramped) → buses
@@ -14,8 +14,13 @@
 //! sides — no pan law, no send level — and PFL IGNORES mute, so the operator
 //! can check a muted mic before opening it. Main and Stream never see solo.
 //!
-//! Latency: every strip carries the gate's 20 ms lookahead whether or not the
-//! gate is enabled, so all strips stay phase-aligned.
+//! Latency: the gate is a `SwitchedGate`, the same live-safe switch as the
+//! voice chain. Off, it is a zero-latency passthrough; switched on, it plays
+//! dry while its 20 ms lookahead fills and then crossfades to the gated
+//! signal. So a strip only carries the 20 ms while its gate is on (the
+//! strip's latency is `latency_samples()`). Trade-off: a gated strip is
+//! 20 ms behind an ungated one, which matters only when two strips carry the
+//! same source.
 use super::params::{
     clamp_or, fader_db_to_lin, StripParams, BUS_MAIN, BUS_MONITOR, BUS_STREAM, EQ_MAX_DB,
     NUM_BUSES, PAN_LAW_NORM, TRIM_MAX_DB, TRIM_MIN_DB,
@@ -24,7 +29,7 @@ use super::smooth::LinearSmoother;
 use super::StereoBuffer;
 use crate::dsp::biquad::Biquad;
 use crate::dsp::compressor::Compressor;
-use crate::dsp::gate::Gate;
+use crate::dsp::gate::SwitchedGate;
 use std::sync::atomic::Ordering::Relaxed;
 
 const EQ_LOW_HZ: f64 = 100.0;
@@ -74,7 +79,7 @@ pub struct Strip {
 
     hpf: Biquad,
     hpf_freq: f32,
-    gate: Gate,
+    gate: SwitchedGate,
     eq_low: Biquad,
     eq_mid: Biquad,
     eq_high: Biquad,
@@ -104,7 +109,11 @@ impl Strip {
             comp_mix: LinearSmoother::new(0.0, ramp),
             hpf: Biquad::hpf(80.0, sr),
             hpf_freq: 80.0,
-            gate: Gate::new(sr),
+            gate: {
+                let mut gate = SwitchedGate::new(sr);
+                gate.enabled = false; // synced from the params every block
+                gate
+            },
             eq_low: Biquad::low_shelf(EQ_LOW_HZ, 0.0, sr),
             eq_mid: Biquad::peaking(EQ_MID_HZ, EQ_MID_Q, 0.0, sr),
             eq_high: Biquad::high_shelf(EQ_HIGH_HZ, 0.0, sr),
@@ -116,6 +125,12 @@ impl Strip {
 
     pub fn meters(&self) -> StripMeters {
         self.meters
+    }
+
+    /// Current processing latency in samples: the gate lookahead while the
+    /// gate is on, otherwise 0.
+    pub fn latency_samples(&self) -> usize {
+        self.gate.latency_samples()
     }
 
     /// Update ramp targets from the shared params. `snap` jumps straight to
@@ -227,21 +242,25 @@ impl Strip {
         let gate_on = p.gate_enabled.load(Relaxed);
         let monitor_post = p.monitor_post_fader.load(Relaxed) && !any_solo;
 
-        // Stage 1: gain, HPF, gate, EQ (per sample).
-        let mut gate_gain = 0.0f32;
+        // Stage 1: gain and HPF (per sample).
         for i in 0..n {
             let x = input.get(i).copied().unwrap_or(0.0);
             let mut y = x * self.in_gain.next();
             if hpf_on {
                 y = self.hpf.tick(y);
             }
-            let (delayed, g) = self.gate.tick_raw(y);
-            gate_gain = g;
-            y = if gate_on { delayed * g } else { delayed };
-            y = self.eq_low.tick(y);
-            y = self.eq_mid.tick(y);
-            y = self.eq_high.tick(y);
             self.scratch[i] = y;
+        }
+
+        // Gate: zero latency and no work while off (see module docs).
+        self.gate.enabled = gate_on;
+        let gate_gain = self.gate.process_block(&mut self.scratch[..n]);
+
+        // EQ (per sample).
+        for y in self.scratch[..n].iter_mut() {
+            let mut v = self.eq_low.tick(*y);
+            v = self.eq_mid.tick(v);
+            *y = self.eq_high.tick(v);
         }
 
         // Stage 2: compressor (block API), crossfaded on/off over the ramp
