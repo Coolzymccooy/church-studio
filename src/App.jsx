@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   adjustPageZoom,
   isDesktopApp,
@@ -17,6 +17,8 @@ import StudioStatusBar from './components/StudioStatusBar';
 import DeviceSettingsModal from './components/DeviceSettingsModal';
 import InputRackAiTab from './components/InputRackAiTab';
 import { getExportAvailability } from './lib/exportFlow';
+import { loadRnnoiseAssets } from './lib/rnnoise';
+import { pickVideoMimeType } from './lib/mediaFormats';
 import {
   describeBroadcastRoute,
   normalizeTauriDevices,
@@ -139,6 +141,19 @@ const AudioProcessor = ({ goHome }) => {
   const [recordedUrl, setRecordedUrl] = useState(null);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [gainRiderDb, setGainRiderDb] = useState(0); // Smart Gain Rider readout
+
+  // Negotiated once per session: which video container MediaRecorder will
+  // actually produce here. Drives both the download extension and every
+  // "MP4"/"WebM" label in the UI, so we never call a WebM file "MP4".
+  const videoFormat = useMemo(
+    () =>
+      pickVideoMimeType(
+        typeof MediaRecorder !== 'undefined'
+          ? MediaRecorder.isTypeSupported.bind(MediaRecorder)
+          : undefined,
+      ),
+    [],
+  );
 
   // playback tracking for record-check review
   const [playbackPosition, setPlaybackPosition] = useState(0);
@@ -471,13 +486,21 @@ const AudioProcessor = ({ goHome }) => {
       }
     }
 
-    // Sync RNNoise worklet enable/disable
-    const rnNode = processingRefs.current.rnnoiseNode;
-    if (rnNode) {
-      rnNode.port.postMessage({
-        type: 'config',
-        enabled: features.voicePattern || features.denoise,
-      });
+    // Sync RNNoise enable/disable via a dry/wet swap (the real
+    // RnnoiseWorkletNode has no port-based enable message). The wet path
+    // lags the dry one by ~11 ms, so the overlap is kept to 4 ms: long
+    // enough to avoid a click, too short to hear as comb filtering.
+    const rnDry = processingRefs.current.rnnoiseDryGain;
+    const rnWet = processingRefs.current.rnnoiseWetGain;
+    if (rnDry && rnWet) {
+      const wantRnnoise = !isBypassed && (features.voicePattern || features.denoise);
+      const now = audioContext?.currentTime || 0;
+      const end = now + 0.004;
+      for (const [param, target] of [[rnDry.gain, wantRnnoise ? 0 : 1], [rnWet.gain, wantRnnoise ? 1 : 0]]) {
+        param.cancelScheduledValues(now);
+        param.setValueAtTime(param.value, now);
+        param.linearRampToValueAtTime(target, end);
+      }
     }
 
     // Force open gate if disabled
@@ -496,6 +519,13 @@ const AudioProcessor = ({ goHome }) => {
   }, []);
 
   const cleanupAudio = useCallback(({ stopNative = true } = {}) => {
+    // Free RNNoise's WASM-side state explicitly; closing the context alone
+    // leaves that to the browser.
+    try {
+      processingRefs.current.rnnoiseNode?.destroy?.();
+    } catch (e) {
+      console.warn('Error destroying RNNoise node', e);
+    }
     if (contextRef.current) {
       try {
         contextRef.current.close();
@@ -648,7 +678,10 @@ const AudioProcessor = ({ goHome }) => {
     }
   };
 
+  // Read by the audio-graph builder, which can run from an older render.
+  const isBypassedRef = useRef(isBypassed);
   useEffect(() => {
+    isBypassedRef.current = isBypassed;
     setAbMode(isBypassed ? 'A' : 'B');
   }, [isBypassed]);
 
@@ -668,7 +701,16 @@ const AudioProcessor = ({ goHome }) => {
         );
       }
 
-      const ctx = new Ctor();
+      // RNNoise (neural denoise) assumes a 48kHz pipeline, and our offline
+      // export contexts already render at 48000 — request it here too so
+      // the live engine and exports agree and RNNoise can actually run.
+      let ctx;
+      try {
+        ctx = new Ctor({ sampleRate: 48000 });
+      } catch (rateErr) {
+        console.warn('[TIWATON] Could not force 48kHz AudioContext, using device default:', rateErr.message);
+        ctx = new Ctor();
+      }
 
       if (ctx.state === 'suspended') {
         await ctx.resume();
@@ -719,31 +761,20 @@ const AudioProcessor = ({ goHome }) => {
         console.warn('[TIWATON] AudioWorklet not available, falling back to main-thread gate:', err.message);
       }
 
-      try {
-        await ctx.audioWorklet.addModule('/worklets/rnnoise-worklet.js');
-        rnnoiseNode = new AudioWorkletNode(ctx, 'rnnoise-processor');
-
-        // Try to load RNNoise WASM binary
+      if (ctx.sampleRate !== 48000) {
+        console.warn(
+          `[TIWATON] RNNoise needs a 48kHz AudioContext, but this one is running at ${ctx.sampleRate}Hz — skipping neural denoise.`,
+        );
+      } else {
         try {
-          const wasmResponse = await fetch('/wasm/rnnoise.wasm');
-          if (wasmResponse.ok) {
-            const wasmBytes = await wasmResponse.arrayBuffer();
-            rnnoiseNode.port.postMessage({ type: 'load-wasm', wasmBytes }, [wasmBytes]);
-            console.log('[TIWATON] RNNoise WASM loaded (neural noise suppression active)');
-          } else {
-            console.warn('[TIWATON] RNNoise WASM not found at /wasm/rnnoise.wasm — neural denoising disabled. Place rnnoise.wasm in public/wasm/ to enable.');
-          }
-        } catch (wasmErr) {
-          console.warn('[TIWATON] RNNoise WASM load failed:', wasmErr.message);
+          const { wasmBinary, RnnoiseWorkletNode, workletUrl } = await loadRnnoiseAssets();
+          await ctx.audioWorklet.addModule(workletUrl);
+          rnnoiseNode = new RnnoiseWorkletNode(ctx, { wasmBinary, maxChannels: 1 });
+          console.log('[TIWATON] RNNoise WASM loaded (neural noise suppression active)');
+        } catch (err) {
+          console.warn('[TIWATON] RNNoise unavailable, continuing without neural denoise:', err.message);
+          rnnoiseNode = null;
         }
-
-        rnnoiseNode.port.onmessage = (event) => {
-          if (event.data.type === 'vad') {
-            // RNNoise VAD probability can reinforce our gate decisions
-          }
-        };
-      } catch (err) {
-        console.warn('[TIWATON] RNNoise worklet not available:', err.message);
       }
 
       // ── LUFS Meter (ITU-R BS.1770) ────────────────────────────────────────
@@ -983,9 +1014,26 @@ const AudioProcessor = ({ goHome }) => {
       inputGain.connect(lowCut);
 
       // ── Neural Denoise (RNNoise WASM) ────────────────────────────────────
+      // RnnoiseWorkletNode has no built-in enable/disable message, so the
+      // "denoise" toggle is implemented as a dry/wet gain crossfade around
+      // it instead — both paths run, only the audible gain changes.
+      let rnnoiseDryGain = null;
+      let rnnoiseWetGain = null;
       if (rnnoiseNode) {
+        rnnoiseDryGain = ctx.createGain();
+        rnnoiseWetGain = ctx.createGain();
+        // BYPASS AI means raw audio, so it selects the dry path too.
+        const wantRnnoise = !isBypassedRef.current
+          && (featuresRef.current.voicePattern || featuresRef.current.denoise);
+        rnnoiseDryGain.gain.value = wantRnnoise ? 0 : 1;
+        rnnoiseWetGain.gain.value = wantRnnoise ? 1 : 0;
+
+        lowCut.connect(rnnoiseDryGain);
+        rnnoiseDryGain.connect(ana);
+
         lowCut.connect(rnnoiseNode);
-        rnnoiseNode.connect(ana);
+        rnnoiseNode.connect(rnnoiseWetGain);
+        rnnoiseWetGain.connect(ana);
       } else {
         lowCut.connect(ana);
       }
@@ -1115,6 +1163,8 @@ const AudioProcessor = ({ goHome }) => {
         // new worklet nodes
         hyperGateNode,
         rnnoiseNode,
+        rnnoiseDryGain,
+        rnnoiseWetGain,
         lufsNode,
         lookaheadGateNode,
         dynamicDesserNode,
@@ -1643,14 +1693,9 @@ const AudioProcessor = ({ goHome }) => {
       ...audioTracks,
     ]);
 
-    // Prefer WebM/VP8 (universal), fallback to whatever browser supports
-    const mimeTypes = [
-      'video/webm;codecs=vp8,opus',
-      'video/webm;codecs=vp9,opus',
-      'video/webm',
-      'video/mp4',
-    ];
-    const mimeType = mimeTypes.find(t => MediaRecorder.isTypeSupported(t)) || 'video/webm';
+    // Use the container we already negotiated for this browser, so the file
+    // extension always matches what MediaRecorder actually produced.
+    const { mimeType, extension } = videoFormat;
 
     const recorder = new MediaRecorder(combinedStream, { mimeType, videoBitsPerSecond: 2500000 });
     const chunks = [];
@@ -1658,11 +1703,10 @@ const AudioProcessor = ({ goHome }) => {
     recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
     recorder.onstop = () => {
       const blob = new Blob(chunks, { type: mimeType });
-      const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `TIWATON_session_${Date.now()}.${ext}`;
+      a.download = `TIWATON_session_${Date.now()}.${extension}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -1680,7 +1724,7 @@ const AudioProcessor = ({ goHome }) => {
     }, 10000);
 
     return recorder; // caller can stop early with recorder.stop()
-  }, []);
+  }, [videoFormat]);
 
   // --- FILE MODE: PROCESS & EXPORT (AI MASTER) ---
   const processAndExportFile = () => {
@@ -3263,6 +3307,7 @@ const AudioProcessor = ({ goHome }) => {
         onSetMainTab={setMainTab}
         onSnapshotSave={handleSnapshotSave}
         onExportMp4={exportMp4}
+        videoExportLabel={videoFormat.label}
         onShareRecording={shareRecording}
         onDownloadWaveform={downloadWaveform}
         isLive={isLive}
@@ -3929,7 +3974,7 @@ const AudioProcessor = ({ goHome }) => {
                       <div className="w-px h-3 bg-slate-600"/>
                       <button onClick={downloadWaveform} className="px-2 py-1 hover:bg-slate-700 font-bold text-cyan-400 flex items-center gap-1"><Activity size={9}/>PNG</button>
                       <div className="w-px h-3 bg-slate-600"/>
-                      <button onClick={exportMp4} className="px-2 py-1 hover:bg-slate-700 rounded-r-full font-bold text-purple-400 flex items-center gap-1"><Video size={9}/>MP4</button>
+                      <button onClick={exportMp4} className="px-2 py-1 hover:bg-slate-700 rounded-r-full font-bold text-purple-400 flex items-center gap-1"><Video size={9}/>{videoFormat.extension.toUpperCase()}</button>
                     </div>
                   )}
                 </div>
@@ -4210,9 +4255,9 @@ const AudioProcessor = ({ goHome }) => {
           {isLive && (
             <button onClick={exportMp4} disabled={!exportAvailability.canExportMp4} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[9px] font-semibold hover:opacity-80 disabled:opacity-40"
               style={{background:'#0D1428', borderColor:'rgba(168,85,247,0.4)', color:'#c084fc'}}
-              title="Record 10s of canvas + processed audio as MP4/WebM">
+              title={`Record 10s of canvas + processed audio as ${videoFormat.label}`}>
               {exportStatus === 'sharing' ? <span className="w-2.5 h-2.5 rounded-full border border-purple-400 border-t-transparent animate-spin"/> : <Video className="w-3 h-3"/>}
-              {exportStatus === 'done' ? 'Saved!' : exportStatus === 'sharing' ? 'Recording...' : 'MP4'}
+              {exportStatus === 'done' ? 'Saved!' : exportStatus === 'sharing' ? 'Recording...' : videoFormat.label}
             </button>
           )}
           <button onClick={hardReset} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[9px] font-semibold hover:opacity-80"
