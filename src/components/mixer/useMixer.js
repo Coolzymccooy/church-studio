@@ -25,6 +25,11 @@ export function useMixer(controller) {
   // Continuous controls (faders, knobs) fire on every input event while
   // dragging; send at most one engine command per control per frame.
   const [coalesce] = useState(() => createCoalescer());
+  const stripCountRef = useRef(0);
+
+  useEffect(() => {
+    stripCountRef.current = state?.strips?.length ?? 0;
+  }, [state]);
 
   const showToast = useCallback((message) => {
     setToast(message);
@@ -51,8 +56,21 @@ export function useMixer(controller) {
         if (!cancelled) setLoading(false);
       });
 
+    // The engine can start, stop or change device while this view is open,
+    // which changes how many strips exist. Meter frames carry one entry per
+    // running strip, so a count that differs from the state means the state
+    // is stale: fetch it again (once at a time).
+    let refetching = false;
     const sub = controller.subscribeMeters((payload) => {
       metersRef.current = payload;
+      const running = payload?.strips?.length ?? 0;
+      if (running > 0 && running !== stripCountRef.current && !refetching && !cancelled) {
+        refetching = true;
+        controller.getState()
+          .then((next) => { if (!cancelled) setState(next); })
+          .catch(() => {})
+          .finally(() => { refetching = false; });
+      }
     });
 
     return () => {
@@ -81,8 +99,11 @@ export function useMixer(controller) {
     call().catch((err) => {
       showToast(describeMixerError(err));
       if (revert) setState((prev) => (prev ? revert(prev) : prev));
+      // With coalescing, the value before this change may never have reached
+      // the engine; re-read the engine so the UI shows what it really has.
+      controller.getState().then(setState).catch(() => {});
     });
-  }, [showToast]);
+  }, [controller, showToast]);
 
   const setStripParam = useCallback((index, key, value) => {
     withOptimism(
