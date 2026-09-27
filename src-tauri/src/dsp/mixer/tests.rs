@@ -234,3 +234,24 @@ fn muted_strip_is_still_audible_on_pfl() {
         assert!((gain - 1.0).abs() < 0.01, "PFL gain {gain}");
     }
 }
+
+#[test]
+fn compressor_toggle_is_crossfaded() {
+    let (p, mut mixer) = new_mixer(1);
+    p.strips[0].comp_threshold_db.store(-40.0, Relaxed);
+    p.strips[0].comp_ratio.store(10.0, Relaxed);
+    let input = sine(SRU * 2, 440.0, 48_000.0, 0.5);
+    let mut main = Vec::with_capacity(input.len());
+    for (i, chunk) in input.chunks(480).enumerate() {
+        p.strips[0].comp_enabled.store((i / 20) % 2 == 1, Relaxed);
+        let n = mixer.process(&[chunk], chunk.len());
+        main.extend_from_slice(&mixer.output(BUS_MAIN).0[..n]);
+    }
+    // Heavy compression (~20 dB of gain reduction) switched every 200 ms:
+    // without the crossfade the gain would jump; with it the step stays at
+    // the sine's own slope (< 0.03) plus a tiny ramp increment.
+    let max_step = main.windows(2).fold(0.0f32, |m, w| m.max((w[1] - w[0]).abs()));
+    assert!(max_step < 0.04, "step {max_step}");
+    // And the compressor really acts when on.
+    assert!(mixer.strip_meters()[0].gain_reduction_db < -6.0);
+}

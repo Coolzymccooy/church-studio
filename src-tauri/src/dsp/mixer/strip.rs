@@ -57,6 +57,8 @@ impl StripMeters {
 pub struct Strip {
     sr: f64,
     scratch: Vec<f32>,
+    /// Compressed copy of `scratch`, crossfaded in by `comp_mix`.
+    comp_buf: Vec<f32>,
 
     in_gain: LinearSmoother,
     fader: LinearSmoother,
@@ -66,6 +68,8 @@ pub struct Strip {
     sends: [LinearSmoother; NUM_BUSES],
     /// PFL gain (1 while this strip is soloed, else 0). Not affected by mute.
     pfl: LinearSmoother,
+    /// Compressor on/off as a dry→compressed crossfade (0 = off, 1 = on).
+    comp_mix: LinearSmoother,
 
     hpf: Biquad,
     hpf_freq: f32,
@@ -84,6 +88,7 @@ impl Strip {
         Strip {
             sr,
             scratch: vec![0.0; max_block.max(1)],
+            comp_buf: vec![0.0; max_block.max(1)],
             in_gain: LinearSmoother::new(1.0, ramp),
             fader: LinearSmoother::new(1.0, ramp),
             pan_l: LinearSmoother::new(std::f32::consts::FRAC_1_SQRT_2, ramp),
@@ -95,6 +100,7 @@ impl Strip {
                 LinearSmoother::new(0.0, ramp),
             ],
             pfl: LinearSmoother::new(0.0, ramp),
+            comp_mix: LinearSmoother::new(0.0, ramp),
             hpf: Biquad::hpf(80.0, sr),
             hpf_freq: 80.0,
             gate: Gate::new(sr),
@@ -132,6 +138,7 @@ impl Strip {
         // While anything is soloed the Monitor bus is PFL only: the normal
         // monitor send is silenced and soloed strips come in via `pfl`.
         let pfl = if any_solo && p.solo.load(Relaxed) { 1.0 } else { 0.0 };
+        let comp_mix = if p.comp_enabled.load(Relaxed) { 1.0 } else { 0.0 };
         if any_solo {
             sends[BUS_MONITOR] = 0.0;
         }
@@ -143,6 +150,7 @@ impl Strip {
             (&mut self.pan_r, pan_r),
             (&mut self.mute, mute),
             (&mut self.pfl, pfl),
+            (&mut self.comp_mix, comp_mix),
         ];
         for (smoother, value) in targets {
             if snap {
@@ -216,7 +224,6 @@ impl Strip {
 
         let hpf_on = p.hpf_enabled.load(Relaxed);
         let gate_on = p.gate_enabled.load(Relaxed);
-        let comp_on = p.comp_enabled.load(Relaxed);
         let monitor_post = p.monitor_post_fader.load(Relaxed) && !any_solo;
 
         // Stage 1: gain, HPF, gate, EQ (per sample).
@@ -236,14 +243,22 @@ impl Strip {
             self.scratch[i] = y;
         }
 
-        // Stage 2: compressor (block API).
+        // Stage 2: compressor (block API), crossfaded on/off over the ramp
+        // so switching it never clicks. Skipped entirely while fully off.
         let mut gr_db = 0.0f32;
-        if comp_on {
+        let comp_active = self.comp_mix.current() > 0.0 || self.comp_mix.target() > 0.0;
+        if comp_active {
+            self.comp_buf[..n].copy_from_slice(&self.scratch[..n]);
+            self.comp.process_block(&mut self.comp_buf[..n]);
             let before = peak(&self.scratch[..n]);
-            self.comp.process_block(&mut self.scratch[..n]);
-            let after = peak(&self.scratch[..n]);
-            if before > 1e-9 {
+            let after = peak(&self.comp_buf[..n]);
+            if before > 1e-9 && self.comp_mix.target() > 0.0 {
                 gr_db = (20.0 * (after / before).max(1e-9).log10()).min(0.0);
+            }
+            for i in 0..n {
+                let mix = self.comp_mix.next();
+                let dry = self.scratch[i];
+                self.scratch[i] = dry + (self.comp_buf[i] - dry) * mix;
             }
         }
 
