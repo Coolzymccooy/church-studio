@@ -42,6 +42,10 @@ pub struct AudioEngine {
     pub input_device_name: String,
     pub monitor_output_name: String,
     pub broadcast_output_name: Option<String>,
+    /// Fixed latency of the block-based DSP stages, in samples.
+    pub dsp_latency_samples: usize,
+    /// RNNoise stage usable (engine at 48 kHz).
+    pub neural_available: bool,
 }
 
 pub type EngineState = std::sync::Mutex<Option<RunningEngine>>;
@@ -56,6 +60,10 @@ pub struct RunningEngine {
     pub input_device_name: String,
     pub monitor_output_name: String,
     pub broadcast_output_name: Option<String>,
+    /// Fixed latency of the block-based DSP stages, in samples.
+    pub dsp_latency_samples: usize,
+    /// RNNoise stage usable (engine at 48 kHz).
+    pub neural_available: bool,
 }
 
 enum EngineCommand {
@@ -70,6 +78,8 @@ struct EngineInfo {
     input_device_name: String,
     monitor_output_name: String,
     broadcast_output_name: Option<String>,
+    dsp_latency_samples: usize,
+    neural_available: bool,
 }
 
 /// State shared between the audio callback and the control (Tauri) thread.
@@ -152,6 +162,8 @@ impl AudioEngine {
             input_device_name: self.input_device_name.clone(),
             monitor_output_name: self.monitor_output_name.clone(),
             broadcast_output_name: self.broadcast_output_name.clone(),
+            dsp_latency_samples: self.dsp_latency_samples,
+            neural_available: self.neural_available,
         }
     }
 
@@ -252,6 +264,8 @@ impl AudioEngine {
 
         let (meters_tx, meters_rx) = mpsc::sync_channel::<MetersPayload>(32);
         let mut dsp = DspChain::new(sr as f64);
+        let dsp_latency_samples = dsp.latency_samples();
+        let neural_available = dsp.neural_available();
         let shared_cb = shared.clone();
 
         let mut spec_planner = FftPlanner::<f32>::new();
@@ -358,6 +372,7 @@ impl AudioEngine {
                 lufs_i: dsp.last_lufs.integrated,
                 deess_gr_db: dsp.last_deess_gr,
                 auto_gain_db: dsp.last_auto_gain_db,
+                neural_vad: dsp.neural_vad(),
                 spectrum,
             });
 
@@ -487,6 +502,7 @@ impl AudioEngine {
                         lufs_i: -70.0,
                         deess_gr_db: 0.0,
                         auto_gain_db: 0.0,
+                        neural_vad: 0.0,
                         spectrum: vec![],
                     });
 
@@ -529,6 +545,8 @@ impl AudioEngine {
             input_device_name,
             monitor_output_name,
             broadcast_output_name,
+            dsp_latency_samples,
+            neural_available,
         })
     }
 }
@@ -586,6 +604,8 @@ impl RunningEngine {
             input_device_name: info.input_device_name,
             monitor_output_name: info.monitor_output_name,
             broadcast_output_name: info.broadcast_output_name,
+            dsp_latency_samples: info.dsp_latency_samples,
+            neural_available: info.neural_available,
         })
     }
 

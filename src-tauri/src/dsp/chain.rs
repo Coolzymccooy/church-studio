@@ -1,6 +1,6 @@
 /// Complete DSP processing pipeline.
 /// Chain order:
-///   input → HPF(80Hz) → Gate → Noise Reduction → EQ Warmth → EQ Clarity
+///   input → HPF(80Hz) → Neural denoise (RNNoise) → Gate → Noise Reduction → EQ Warmth → EQ Clarity
 ///         → De-esser → Compressor → Auto Gain → Limiter → LUFS meter → output
 use super::{
     biquad::Biquad,
@@ -9,6 +9,7 @@ use super::{
     dereverb::SpectralDereverb,
     gate::Gate,
     lufs::{LufsMeter, LufsReadings},
+    neural::NeuralDenoiser,
     noise::SpectralDenoiser,
     DspParams,
 };
@@ -23,6 +24,7 @@ pub struct DspChain {
 
     // Pre-processing
     hpf: Biquad,
+    neural: NeuralDenoiser,
     gate: Gate,
     noise: SpectralDenoiser,
 
@@ -65,6 +67,7 @@ impl DspChain {
             gate_enabled: true,
             compressor_enabled: true,
             hpf: Biquad::hpf(80.0, sr),
+            neural: NeuralDenoiser::new(sr),
             gate: Gate::new(sr),
             noise: SpectralDenoiser::new(),
             eq_warmth: Biquad::low_shelf(200.0, 3.0, sr),
@@ -101,6 +104,10 @@ impl DspChain {
         self.compressor.set_threshold(p.comp_threshold_db.load(Relaxed));
         self.compressor.set_ratio(p.comp_ratio.load(Relaxed));
 
+        // Neural denoise
+        self.neural.enabled = p.neural_enabled.load(Relaxed);
+        self.neural.mix = p.neural_mix.load(Relaxed);
+
         // Noise reduction
         self.noise.alpha = p.noise_alpha.load(Relaxed);
         self.noise.enabled = p.noise_enabled.load(Relaxed);
@@ -130,6 +137,9 @@ impl DspChain {
 
         // 2. HPF
         for s in buf.iter_mut() { *s = self.hpf.tick(*s); }
+
+        // 2b. Neural denoise (RNNoise; inactive unless the engine runs at 48 kHz)
+        self.neural.process_block(buf);
 
         // 3. Gate
         let gate_gain = if self.gate_enabled {
@@ -178,6 +188,25 @@ impl DspChain {
         let out_peak = buf.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
         self.out_peak_env += self.out_peak_coef * (out_peak - self.out_peak_env);
         self.last_output_db = lin_to_db(self.out_peak_env.max(1e-9));
+    }
+
+    /// True when the RNNoise stage can run (engine at 48 kHz).
+    pub fn neural_available(&self) -> bool {
+        self.neural.available()
+    }
+
+    /// Latest RNNoise voice-activity probability.
+    pub fn neural_vad(&self) -> f32 {
+        self.neural.last_vad()
+    }
+
+    /// Fixed latency added by the block-based stages (neural + spectral), in
+    /// samples. Constant for the lifetime of the chain: disabled stages keep
+    /// their delay line running so toggling never shifts time.
+    pub fn latency_samples(&self) -> usize {
+        self.neural.latency_samples()
+            + self.noise.latency_samples()
+            + self.dereverb.latency_samples()
     }
 
     /// Install a noise power spectrum computed off the audio thread by

@@ -33,6 +33,8 @@ rustfft = "6"          # FFT for spectral processing
 atomic_float = "1.0"   # AtomicF32 for lock-free param sharing
 ringbuf = "0.4"        # Lock-free ring buffer (input→output)
 parking_lot = "0.12"   # Fast mutex for noise profile transfers
+# RNNoise neural denoiser (pure Rust). Default features pull in CLI-only deps.
+nnnoiseless = { version = "0.5", default-features = false }
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-updater = "2"

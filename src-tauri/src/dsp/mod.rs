@@ -5,6 +5,7 @@ pub mod desser;
 pub mod dereverb;
 pub mod gate;
 pub mod lufs;
+pub mod neural;
 pub mod noise;
 pub mod stft;
 
@@ -28,6 +29,9 @@ pub struct DspParams {
     // Noise reduction
     pub noise_enabled:      AtomicBool,
     pub noise_alpha:        AtomicF32,
+    // Neural denoise (RNNoise, 48 kHz only)
+    pub neural_enabled:     AtomicBool,
+    pub neural_mix:         AtomicF32,
     // EQ (future: make these configurable)
     // Compressor
     pub comp_enabled:       AtomicBool,
@@ -52,6 +56,8 @@ impl DspParams {
         p.gate_threshold_db.store(-45.0, Ordering::Relaxed);
         p.noise_enabled.store(false, Ordering::Relaxed);
         p.noise_alpha.store(1.5, Ordering::Relaxed);
+        p.neural_enabled.store(false, Ordering::Relaxed);
+        p.neural_mix.store(1.0, Ordering::Relaxed);
         p.comp_enabled.store(true, Ordering::Relaxed);
         p.comp_threshold_db.store(-18.0, Ordering::Relaxed);
         p.comp_ratio.store(3.0, Ordering::Relaxed);
@@ -76,6 +82,8 @@ pub struct MetersPayload {
     pub lufs_i:        f32,
     pub deess_gr_db:   f32,
     pub auto_gain_db:  f32,
+    /// RNNoise voice-activity probability (0..1); 0 when the stage is off.
+    pub neural_vad:    f32,
     /// FFT spectrum bins (0..127) for visualizer
     pub spectrum:      Vec<f32>,
 }

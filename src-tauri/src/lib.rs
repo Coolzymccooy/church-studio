@@ -193,6 +193,7 @@ fn set_param(params: State<'_, SharedParams>, key: String, value: f32) {
         "gain_db" => p.gain_db.store(value, Ordering::Relaxed),
         "gate_threshold_db" => p.gate_threshold_db.store(value, Ordering::Relaxed),
         "noise_alpha" => p.noise_alpha.store(value, Ordering::Relaxed),
+        "neural_mix" => p.neural_mix.store(value.clamp(0.0, 1.0), Ordering::Relaxed),
         "comp_threshold_db" => p.comp_threshold_db.store(value, Ordering::Relaxed),
         "comp_ratio" => p.comp_ratio.store(value, Ordering::Relaxed),
         "deess_threshold_db" => p.deess_threshold_db.store(value, Ordering::Relaxed),
@@ -208,6 +209,7 @@ fn set_param_bool(params: State<'_, SharedParams>, key: String, value: bool) {
     match key.as_str() {
         "gate_enabled" => p.gate_enabled.store(value, Ordering::Relaxed),
         "noise_enabled" => p.noise_enabled.store(value, Ordering::Relaxed),
+        "neural_denoise" => p.neural_enabled.store(value, Ordering::Relaxed),
         "comp_enabled" => p.comp_enabled.store(value, Ordering::Relaxed),
         "deess_enabled" => p.deess_enabled.store(value, Ordering::Relaxed),
         "dereverb_enabled" => p.dereverb_enabled.store(value, Ordering::Relaxed),
@@ -239,6 +241,8 @@ fn serialize_engine_status(engine: &RunningEngine) -> serde_json::Value {
         "monitor_output_name": engine.monitor_output_name,
         "broadcast_output_name": engine.broadcast_output_name,
         "noise_profile_ready": engine.noise_profile_ready(),
+        "neural_available": engine.neural_available,
+        "dsp_latency_samples": engine.dsp_latency_samples,
         "dropped_output_samples": engine.dropped_output_samples(),
     })
 }
@@ -260,6 +264,7 @@ fn engine_status(state: State<'_, EngineState>) -> serde_json::Value {
             "monitor_output_name": null,
             "broadcast_output_name": null,
             "noise_profile_ready": false,
+            "neural_available": false,
             "dropped_output_samples": 0,
         })
     }
