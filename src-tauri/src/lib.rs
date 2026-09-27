@@ -6,6 +6,7 @@ mod mixer_control;
 #[cfg(test)]
 mod mixer_engine_tests;
 mod mixer_meters;
+mod mixer_model;
 mod routing;
 
 use audio::{DeviceSelection, EngineState, RunningEngine};

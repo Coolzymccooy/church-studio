@@ -12,9 +12,9 @@ use crate::dsp::mixer::params::{
     clamp_or, BusParams, StripParams, BUS_MAIN, BUS_MONITOR, BUS_STREAM, NUM_BUSES,
 };
 use crate::dsp::mixer::{MixerParams, MixerScene};
+pub use crate::mixer_model::{BusState, MixerState, StoredScene, StripState};
 use atomic_float::AtomicF32;
 use parking_lot::Mutex;
-use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::Relaxed};
 use std::sync::Arc;
 
@@ -227,67 +227,6 @@ fn is_reserved_file_name(slug: &str) -> bool {
     bytes.len() == 4
         && (slug.starts_with("com") || slug.starts_with("lpt"))
         && (b'1'..=b'9').contains(&bytes[3])
-}
-
-/// One strip in `MixerState` (snake_case keys, identical to the set keys).
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct StripState {
-    pub index: u32,
-    pub name: String,
-    pub trim_db: f32,
-    pub polarity: bool,
-    pub hpf_enabled: bool,
-    pub hpf_hz: f32,
-    pub gate_enabled: bool,
-    pub gate_threshold_db: f32,
-    pub eq_low_db: f32,
-    pub eq_mid_db: f32,
-    pub eq_high_db: f32,
-    pub comp_enabled: bool,
-    pub comp_threshold_db: f32,
-    pub comp_ratio: f32,
-    pub pan: f32,
-    pub mute: bool,
-    pub solo: bool,
-    pub fader_db: f32,
-    pub send_main_db: f32,
-    pub send_stream_db: f32,
-    pub send_monitor_db: f32,
-    pub monitor_post_fader: bool,
-    pub voice_chain: bool,
-}
-
-/// One bus in `MixerState`.
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct BusState {
-    pub id: String,
-    pub fader_db: f32,
-    pub mute: bool,
-    pub limiter_ceiling_db: f32,
-}
-
-/// `mixer_state` / `mixer_load_scene` result. Top level is camelCase.
-#[derive(Clone, Debug, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MixerState {
-    pub input_channels: u32,
-    pub running: bool,
-    pub strips: Vec<StripState>,
-    pub buses: Vec<BusState>,
-    pub scenes: Vec<String>,
-}
-
-/// On-disk scene file: the DSP snapshot plus the control-side extras.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct StoredScene {
-    #[serde(default)]
-    pub version: u32,
-    pub name: String,
-    #[serde(default)]
-    pub strip_names: Vec<String>,
-    #[serde(default)]
-    pub voice_strip: usize,
-    pub mixer: MixerScene,
 }
 
 /// What the audio engine needs from the mixer control state.
