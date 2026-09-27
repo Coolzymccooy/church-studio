@@ -225,7 +225,8 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
     }
 
     /// Run the voice chain in place on the strip that holds `voice_chain`.
-    /// If that strip has no input channel on this device, the chain idles.
+    /// If no strip holds it (`NO_VOICE_STRIP`) or that strip has no input
+    /// channel on this device, the chain idles.
     fn run_voice_chain(&mut self, n: usize, monitor_gain: f32) {
         let voice = self.voice_strip.load(Ordering::Relaxed);
         let Some(channel) = self.chan_bufs.get_mut(voice) else {

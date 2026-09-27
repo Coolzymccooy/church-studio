@@ -24,6 +24,8 @@ pub const MAX_STRIPS: usize = 32;
 pub const BUS_IDS: [&str; NUM_BUSES] = ["main", "stream", "monitor"];
 pub const MAX_STRIP_NAME_CHARS: usize = 24;
 pub const MAX_SCENE_NAME_CHARS: usize = 40;
+/// `voice_strip` value meaning "no strip runs the voice chain".
+pub const NO_VOICE_STRIP: usize = usize::MAX;
 /// Version tag written into scene files.
 pub const SCENE_FILE_VERSION: u32 = 1;
 
@@ -321,20 +323,15 @@ impl MixerControl {
         Ok(())
     }
 
-    /// Exactly one strip carries the voice chain: turning it on for a strip
+    /// At most one strip carries the voice chain: turning it on for a strip
     /// moves it there (clearing the others). Turning it off on the strip that
-    /// holds it is rejected (turn it on elsewhere instead); turning it off on
-    /// any other strip is a no-op.
+    /// holds it leaves no strip with the voice chain (`NO_VOICE_STRIP`);
+    /// turning it off on any other strip is a no-op.
     fn set_voice_chain(&self, index: usize, on: bool) -> Result<(), String> {
         if on {
             self.voice_strip.store(index, Relaxed);
-            return Ok(());
-        }
-        if self.voice_strip.load(Relaxed) == index {
-            return Err(
-                "the voice chain must stay on one strip; turn it on for another strip to move it"
-                    .to_string(),
-            );
+        } else if self.voice_strip.load(Relaxed) == index {
+            self.voice_strip.store(NO_VOICE_STRIP, Relaxed);
         }
         Ok(())
     }
@@ -468,7 +465,11 @@ impl MixerControl {
                 }
             }
         }
-        let voice = if scene.voice_strip < MAX_STRIPS { scene.voice_strip } else { 0 };
+        let voice = if scene.voice_strip < MAX_STRIPS {
+            scene.voice_strip
+        } else {
+            NO_VOICE_STRIP
+        };
         self.voice_strip.store(voice, Relaxed);
     }
 }

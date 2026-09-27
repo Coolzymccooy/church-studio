@@ -59,6 +59,8 @@ pub struct StoredScene {
     pub name: String,
     #[serde(default)]
     pub strip_names: Vec<String>,
+    /// Strip running the voice chain; any value ≥ 32 means none
+    /// (`NO_VOICE_STRIP`). Missing in a file = strip 0 (the default).
     #[serde(default)]
     pub voice_strip: usize,
     pub mixer: MixerScene,

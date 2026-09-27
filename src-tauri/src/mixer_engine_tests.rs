@@ -5,7 +5,7 @@
 use crate::dsp::mixer::{BusMeters, Mixer, StripMeters, BUS_MAIN, BUS_MONITOR, BUS_STREAM};
 use crate::dsp::test_util::{rms, sine};
 use crate::mixer_control::{
-    scene_slug, MixerControl, StoredScene, MAX_STRIPS, OTHER_STRIPS_FADER_DB,
+    scene_slug, MixerControl, StoredScene, MAX_STRIPS, NO_VOICE_STRIP, OTHER_STRIPS_FADER_DB,
 };
 use crate::mixer_meters::{MixerMeterSlots, METER_FLOOR_DB};
 use crate::routing::{deinterleave, device_sample, push_stereo};
@@ -215,13 +215,26 @@ fn voice_chain_is_exclusive() {
     assert_eq!(flags.iter().filter(|&&on| on).count(), 1);
     assert!(flags[3] && !flags[0]);
 
-    // Turning it off elsewhere is a no-op; off on the holder is refused.
+    // Turning it off elsewhere is a no-op.
     m.set_strip_bool(0, "voice_chain", false).unwrap();
-    assert_eq!(m.voice_strip.load(Relaxed), 3);
-    assert!(m.set_strip_bool(3, "voice_chain", false).is_err());
     assert_eq!(m.voice_strip.load(Relaxed), 3);
     assert!(m.set_strip_bool(40, "voice_chain", true).is_err());
     assert_eq!(m.voice_strip.load(Relaxed), 3);
+
+    // Off on the holder: no strip runs the voice chain.
+    m.set_strip_bool(3, "voice_chain", false).unwrap();
+    assert_eq!(m.voice_strip.load(Relaxed), NO_VOICE_STRIP);
+    assert!(voice_flags(&m).iter().all(|&on| !on));
+
+    // That survives a scene round trip, and turning it on again works.
+    let scene = m.capture_scene("No voice");
+    let json = serde_json::to_string(&scene).unwrap();
+    let back: StoredScene = serde_json::from_str(&json).unwrap();
+    let fresh = MixerControl::new();
+    fresh.apply_scene(&back);
+    assert!(voice_flags(&fresh).iter().all(|&on| !on));
+    m.set_strip_bool(5, "voice_chain", true).unwrap();
+    assert_eq!(voice_flags(&m).iter().filter(|&&on| on).count(), 1);
 }
 
 // ── Scene slugs and files ───────────────────────────────────────────────────
