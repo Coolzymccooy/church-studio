@@ -279,6 +279,10 @@ impl AudioEngine {
             vec![Complex32::default(); spec_fft.get_inplace_scratch_len().max(1)];
         let mut spec_acc = vec![0.0f32; 128];
         let mut spec_count = 0usize;
+        // Meters are sent ~50 times per second (not every callback), and the
+        // spectrum Vec is only built on those callbacks.
+        let meter_interval_samples = (sr as usize / 50).max(1);
+        let mut samples_since_meter = 0usize;
 
         let params_cb = params.clone();
 
@@ -340,21 +344,20 @@ impl AudioEngine {
                 }
             }
 
+            // No logging on the audio thread: just count. The meters thread
+            // logs the running total when it changes.
             if dropped_this_callback > 0 {
-                let total = shared_cb
+                shared_cb
                     .dropped_output_samples
-                    .fetch_add(dropped_this_callback, Ordering::Relaxed)
-                    + dropped_this_callback;
-                if total % 2048 <= dropped_this_callback {
-                    log::warn!(
-                        "Dropping output samples because the playback ring buffer is full (total dropped: {total})"
-                    );
-                }
+                    .fetch_add(dropped_this_callback, Ordering::Relaxed);
             }
 
-            // Only every 4th callback produces a spectrum (one 128-bin
-            // allocation); the others send an empty, non-allocating Vec.
-            let spectrum = if spec_count >= 4 {
+            // Emit meters only every ~20 ms. The 128-bin spectrum Vec is the
+            // callback's only allocation and happens only here; the channel
+            // is drained every 20 ms, so try_send rejecting (and dropping the
+            // payload on this thread) is not the common path.
+            samples_since_meter += block.len();
+            if samples_since_meter >= meter_interval_samples && spec_count > 0 {
                 let mut bins = Vec::with_capacity(spec_acc.len());
                 for &value in spec_acc.iter() {
                     let db = 20.0 * (value / spec_count as f32 / 128.0).max(1e-9).log10();
@@ -362,23 +365,21 @@ impl AudioEngine {
                 }
                 spec_acc.fill(0.0);
                 spec_count = 0;
-                bins
-            } else {
-                Vec::new()
-            };
+                samples_since_meter = 0;
 
-            let _ = meters_tx.try_send(MetersPayload {
-                input_db: dsp.last_input_db,
-                output_db: dsp.last_output_db,
-                gate_gain: dsp.last_gate_gain,
-                lufs_m: dsp.last_lufs.momentary,
-                lufs_st: dsp.last_lufs.short_term,
-                lufs_i: dsp.last_lufs.integrated,
-                deess_gr_db: dsp.last_deess_gr,
-                auto_gain_db: dsp.last_auto_gain_db,
-                neural_vad: dsp.neural_vad(),
-                spectrum,
-            });
+                let _ = meters_tx.try_send(MetersPayload {
+                    input_db: dsp.last_input_db,
+                    output_db: dsp.last_output_db,
+                    gate_gain: dsp.last_gate_gain,
+                    lufs_m: dsp.last_lufs.momentary,
+                    lufs_st: dsp.last_lufs.short_term,
+                    lufs_i: dsp.last_lufs.integrated,
+                    deess_gr_db: dsp.last_deess_gr,
+                    auto_gain_db: dsp.last_auto_gain_db,
+                    neural_vad: dsp.neural_vad(),
+                    spectrum: bins,
+                });
+            }
 
             shared_cb.record_callback_time(callback_started.elapsed());
         };
@@ -485,11 +486,21 @@ impl AudioEngine {
 
         in_stream.play().map_err(|e| e.to_string())?;
 
+        let meters_shared = shared.clone();
         std::thread::spawn(move || {
             let mut pending: Vec<MetersPayload> = Vec::with_capacity(8);
             let mut last_emit = Instant::now();
+            let mut last_logged_drops = 0u64;
 
             loop {
+                let drops = meters_shared.dropped_output_samples.load(Ordering::Relaxed);
+                if drops != last_logged_drops {
+                    log::warn!(
+                        "Dropping output samples because the playback ring buffer is full (total dropped: {drops})"
+                    );
+                    last_logged_drops = drops;
+                }
+
                 match meters_rx.recv_timeout(Duration::from_millis(20)) {
                     Ok(meters) => pending.push(meters),
                     Err(mpsc::RecvTimeoutError::Timeout) => {}
