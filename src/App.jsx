@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   adjustPageZoom,
   isDesktopApp,
@@ -16,6 +16,8 @@ import LandingPage from './components/LandingPage';
 import StudioStatusBar from './components/StudioStatusBar';
 import DeviceSettingsModal from './components/DeviceSettingsModal';
 import InputRackAiTab from './components/InputRackAiTab';
+import MixerConsole from './components/mixer/MixerConsole';
+import { createMixerController, createMockMixerController } from './lib/mixerEngine';
 import { getExportAvailability } from './lib/exportFlow';
 import {
   describeBroadcastRoute,
@@ -125,7 +127,22 @@ const AudioProcessor = ({ goHome }) => {
   const [audioEngineError, setAudioEngineError] = useState(null);
   const [chainReady, setChainReady] = useState(0); // increments when audio chain is fully built
   const [controlTab, setControlTab] = useState('core');
-  const [mainTab, setMainTab] = useState('live'); // 'live' | 'editor'
+  const [mainTab, setMainTab] = useState('live'); // 'live' | 'editor' | 'mixer'
+  // Mixer console: real Tauri controller (invoke/listen loaded lazily, same
+  // pattern as the native engine helpers above) when running under the
+  // desktop app, otherwise a fully in-memory demo controller in the browser.
+  const mixerController = useMemo(() => {
+    if (isTauri) {
+      const invoke = (command, payload) => (
+        import('@tauri-apps/api/core').then(({ invoke: tauriInvoke }) => tauriInvoke(command, payload))
+      );
+      const listen = (event, cb) => (
+        import('@tauri-apps/api/event').then(({ listen: tauriListen }) => tauriListen(event, cb))
+      );
+      return createMixerController({ invoke, listen });
+    }
+    return createMockMixerController();
+  }, []);
   const [gateMode, setGateMode] = useState(() => {
     return window.localStorage.getItem('tiwaton:gateMode') || 'balanced';
   });
@@ -3884,6 +3901,7 @@ const AudioProcessor = ({ goHome }) => {
             <div className="flex rounded p-0.5 border border-slate-800 gap-0.5" style={{background:'#050A1C'}}>
               <button onClick={() => setMainTab('live')} className={`px-3 py-1 rounded text-[9px] font-bold tracking-wide transition-all ${mainTab === 'live' ? 'bg-[var(--accent)] text-white' : 'text-slate-500 hover:text-white'}`}>LIVE</button>
               <button onClick={() => setMainTab('editor')} className={`px-3 py-1 rounded text-[9px] font-bold tracking-wide transition-all ${mainTab === 'editor' ? 'bg-[var(--accent)] text-white' : 'text-slate-500 hover:text-white'}`}>EDITOR</button>
+              <button onClick={() => setMainTab('mixer')} className={`px-3 py-1 rounded text-[9px] font-bold tracking-wide transition-all ${mainTab === 'mixer' ? 'bg-[var(--accent)] text-white' : 'text-slate-500 hover:text-white'}`}>MIXER</button>
             </div>
             {/* Active feature badges */}
             <div className="flex items-center gap-1 overflow-x-auto" style={{scrollbarWidth:'none'}}>
@@ -4036,6 +4054,14 @@ const AudioProcessor = ({ goHome }) => {
             <div className="flex-1 overflow-hidden">
               <WaveformEditor audioContext={audioContext} />
             </div>
+          )}
+
+          {/* ── MIXER VIEW (Phase 1) ── */}
+          {mainTab === 'mixer' && (
+            <MixerConsole
+              controller={mixerController}
+              demoBanner={isTauri ? null : 'Demo mixer — live multichannel mixing runs in the desktop app'}
+            />
           )}
 
         </div>{/* end center */}
