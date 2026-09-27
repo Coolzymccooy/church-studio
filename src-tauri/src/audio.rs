@@ -18,7 +18,20 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
+use crate::dsp::noise::compute_noise_profile;
 use crate::dsp::{AudioDeviceInfo, DspChain, DspParams, MetersPayload};
+use crate::history::HistoryRing;
+
+/// Largest number of frames the input callback processes in one pass. Longer
+/// device buffers are split into chunks of this size so the preallocated mono
+/// scratch buffer is never outgrown.
+const MAX_CALLBACK_FRAMES: usize = 4096;
+
+/// Minimum history needed to compute a noise profile (one FFT frame).
+const MIN_PROFILE_SAMPLES: usize = 1024;
+
+/// How long `capture_noise_profile` waits for live audio / the callback.
+const CAPTURE_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub struct AudioEngine {
     _in_stream: cpal::Stream,
@@ -29,6 +42,8 @@ pub struct AudioEngine {
     pub input_device_name: String,
     pub monitor_output_name: String,
     pub broadcast_output_name: Option<String>,
+    /// RNNoise stage usable (engine at 48 kHz).
+    pub neural_available: bool,
 }
 
 pub type EngineState = std::sync::Mutex<Option<RunningEngine>>;
@@ -43,6 +58,8 @@ pub struct RunningEngine {
     pub input_device_name: String,
     pub monitor_output_name: String,
     pub broadcast_output_name: Option<String>,
+    /// RNNoise stage usable (engine at 48 kHz).
+    pub neural_available: bool,
 }
 
 enum EngineCommand {
@@ -57,14 +74,28 @@ struct EngineInfo {
     input_device_name: String,
     monitor_output_name: String,
     broadcast_output_name: Option<String>,
+    neural_available: bool,
 }
 
+/// State shared between the audio callback and the control (Tauri) thread.
+///
+/// The callback never blocks on these mutexes: it only uses `try_lock` and
+/// skips the work when the control thread happens to hold the lock.
 struct EngineShared {
-    recent_input: Mutex<Vec<f32>>,
-    recent_capacity: usize,
-    capture_requested: AtomicBool,
-    capture_reply: Mutex<Option<mpsc::SyncSender<Result<(), String>>>>,
+    /// Recent raw mono input (pre-DSP) for noise-profile capture.
+    history: Mutex<HistoryRing>,
+    /// Noise power spectrum computed by the control thread, waiting to be
+    /// copied into the DSP chain by the callback. The Vec is never dropped or
+    /// resized on the audio thread.
+    profile_slot: Mutex<Vec<f32>>,
+    profile_pending: AtomicBool,
+    /// Incremented by the callback every time it consumes `profile_slot`.
+    profile_applied: AtomicU64,
+    capture_busy: AtomicBool,
     noise_profile_ready: AtomicBool,
+    /// Current processing latency of the DSP chain (samples), published by
+    /// the callback after every block.
+    dsp_latency_samples: AtomicU64,
     dropped_output_samples: AtomicU64,
     callback_count: AtomicU64,
     callback_total_ns: AtomicU64,
@@ -74,10 +105,12 @@ struct EngineShared {
 impl EngineShared {
     fn new(recent_capacity: usize) -> Self {
         Self {
-            recent_input: Mutex::new(Vec::with_capacity(recent_capacity)),
-            recent_capacity,
-            capture_requested: AtomicBool::new(false),
-            capture_reply: Mutex::new(None),
+            history: Mutex::new(HistoryRing::new(recent_capacity)),
+            profile_slot: Mutex::new(Vec::new()),
+            profile_pending: AtomicBool::new(false),
+            profile_applied: AtomicU64::new(0),
+            capture_busy: AtomicBool::new(false),
+            dsp_latency_samples: AtomicU64::new(0),
             noise_profile_ready: AtomicBool::new(false),
             dropped_output_samples: AtomicU64::new(0),
             callback_count: AtomicU64::new(0),
@@ -86,23 +119,27 @@ impl EngineShared {
         }
     }
 
+    /// Audio thread: append input to the history. Skips (never blocks) if the
+    /// control thread is taking a snapshot at this moment.
     fn push_recent_input(&self, samples: &[f32]) {
-        let mut recent = self.recent_input.lock();
-        let overflow = recent
-            .len()
-            .saturating_add(samples.len())
-            .saturating_sub(self.recent_capacity);
-
-        if overflow > 0 {
-            let drain_len = overflow.min(recent.len());
-            recent.drain(0..drain_len);
+        if let Some(mut history) = self.history.try_lock() {
+            history.push(samples);
         }
-
-        recent.extend_from_slice(samples);
     }
 
-    fn capture_recent_snapshot(&self) -> Vec<f32> {
-        self.recent_input.lock().clone()
+    /// Audio thread: copy a pending noise profile into the DSP chain.
+    fn poll_noise_profile(&self, dsp: &mut DspChain) {
+        if !self.profile_pending.load(Ordering::Acquire) {
+            return;
+        }
+        let Some(slot) = self.profile_slot.try_lock() else {
+            return; // control thread is writing; try again next callback
+        };
+        if dsp.set_noise_profile(&slot[..]) {
+            self.noise_profile_ready.store(true, Ordering::Release);
+        }
+        self.profile_pending.store(false, Ordering::Release);
+        self.profile_applied.fetch_add(1, Ordering::AcqRel);
     }
 
     fn record_callback_time(&self, elapsed: Duration) {
@@ -124,6 +161,7 @@ impl AudioEngine {
             input_device_name: self.input_device_name.clone(),
             monitor_output_name: self.monitor_output_name.clone(),
             broadcast_output_name: self.broadcast_output_name.clone(),
+            neural_available: self.neural_available,
         }
     }
 
@@ -224,6 +262,11 @@ impl AudioEngine {
 
         let (meters_tx, meters_rx) = mpsc::sync_channel::<MetersPayload>(32);
         let mut dsp = DspChain::new(sr as f64);
+        dsp.sync_params(&params);
+        shared
+            .dsp_latency_samples
+            .store(dsp.total_latency_samples() as u64, Ordering::Relaxed);
+        let neural_available = dsp.neural_available();
         let shared_cb = shared.clone();
 
         let mut spec_planner = FftPlanner::<f32>::new();
@@ -232,8 +275,14 @@ impl AudioEngine {
             .map(|i| 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / 255.0).cos()))
             .collect();
         let mut spec_buf = vec![Complex32::default(); 256];
+        let mut spec_scratch =
+            vec![Complex32::default(); spec_fft.get_inplace_scratch_len().max(1)];
         let mut spec_acc = vec![0.0f32; 128];
         let mut spec_count = 0usize;
+        // Meters are sent ~50 times per second (not every callback), and the
+        // spectrum Vec is only built on those callbacks.
+        let meter_interval_samples = (sr as usize / 50).max(1);
+        let mut samples_since_meter = 0usize;
 
         let params_cb = params.clone();
 
@@ -251,44 +300,30 @@ impl AudioEngine {
             })
             .collect();
 
-        let mut on_input = move |mono: Vec<f32>| {
+        let mut on_input = move |block: &mut [f32]| {
             let callback_started = Instant::now();
 
-            shared_cb.push_recent_input(&mono);
-
-            if shared_cb.capture_requested.swap(false, Ordering::AcqRel) {
-                let snapshot = shared_cb.capture_recent_snapshot();
-                let result = if snapshot.len() < 1024 {
-                    Err("Need at least a short burst of live audio before capturing a noise profile".to_string())
-                } else {
-                    dsp.capture_noise_profile(&snapshot);
-                    shared_cb
-                        .noise_profile_ready
-                        .store(true, Ordering::Release);
-                    Ok(())
-                };
-
-                if let Some(reply) = shared_cb.capture_reply.lock().take() {
-                    let _ = reply.send(result);
-                }
-            }
-
-            let mut block = mono;
+            shared_cb.push_recent_input(&*block);
+            shared_cb.poll_noise_profile(&mut dsp);
 
             dsp.sync_params(&params_cb);
             let bypass = params_cb.bypass.load(Ordering::Relaxed);
-            dsp.process_block(&mut block, bypass);
+            dsp.process_block(&mut *block, bypass);
+            shared_cb
+                .dsp_latency_samples
+                .store(dsp.total_latency_samples() as u64, Ordering::Relaxed);
 
             let monitor_gain =
                 db_to_lin(params_cb.monitor_gain_db.load(Ordering::Relaxed));
-            for sample in &mut block {
+            for sample in block.iter_mut() {
                 *sample *= monitor_gain;
             }
 
-            for (i, &sample) in block.iter().enumerate().take(256) {
-                spec_buf[i] = Complex32::new(sample * spec_win[i], 0.0);
+            for (i, bin) in spec_buf.iter_mut().enumerate() {
+                let sample = block.get(i).copied().unwrap_or(0.0);
+                *bin = Complex32::new(sample * spec_win[i], 0.0);
             }
-            spec_fft.process(&mut spec_buf);
+            spec_fft.process_with_scratch(&mut spec_buf[..], &mut spec_scratch[..]);
             for (acc, bin) in spec_acc.iter_mut().zip(spec_buf.iter().take(128)) {
                 *acc += bin.norm();
             }
@@ -300,7 +335,7 @@ impl AudioEngine {
                 .zip(output_stream_cfgs.iter())
             {
                 let output_channels = cfg.channels as usize;
-                for &sample in &block {
+                for &sample in block.iter() {
                     for _ in 0..output_channels {
                         if producer.try_push(sample).is_err() {
                             dropped_this_callback += 1;
@@ -309,55 +344,60 @@ impl AudioEngine {
                 }
             }
 
+            // No logging on the audio thread: just count. The meters thread
+            // logs the running total when it changes.
             if dropped_this_callback > 0 {
-                let total = shared_cb
+                shared_cb
                     .dropped_output_samples
-                    .fetch_add(dropped_this_callback, Ordering::Relaxed)
-                    + dropped_this_callback;
-                if total % 2048 <= dropped_this_callback {
-                    log::warn!(
-                        "Dropping output samples because the playback ring buffer is full (total dropped: {total})"
-                    );
-                }
+                    .fetch_add(dropped_this_callback, Ordering::Relaxed);
             }
 
-            let spectrum = if spec_count >= 4 {
-                let bins: Vec<f32> = spec_acc
-                    .iter()
-                    .map(|&value| {
-                        let db =
-                            20.0 * (value / spec_count as f32 / 128.0).max(1e-9).log10();
-                        ((db + 90.0) / 90.0).clamp(0.0, 1.0)
-                    })
-                    .collect();
+            // Emit meters only every ~20 ms. The 128-bin spectrum Vec is the
+            // callback's only allocation and happens only here; the channel
+            // is drained every 20 ms, so try_send rejecting (and dropping the
+            // payload on this thread) is not the common path.
+            samples_since_meter += block.len();
+            if samples_since_meter >= meter_interval_samples && spec_count > 0 {
+                let mut bins = Vec::with_capacity(spec_acc.len());
+                for &value in spec_acc.iter() {
+                    let db = 20.0 * (value / spec_count as f32 / 128.0).max(1e-9).log10();
+                    bins.push(((db + 90.0) / 90.0).clamp(0.0, 1.0));
+                }
                 spec_acc.fill(0.0);
                 spec_count = 0;
-                bins
-            } else {
-                vec![]
-            };
+                samples_since_meter = 0;
 
-            let _ = meters_tx.try_send(MetersPayload {
-                input_db: dsp.last_input_db,
-                output_db: dsp.last_output_db,
-                gate_gain: dsp.last_gate_gain,
-                lufs_m: dsp.last_lufs.momentary,
-                lufs_st: dsp.last_lufs.short_term,
-                lufs_i: dsp.last_lufs.integrated,
-                deess_gr_db: dsp.last_deess_gr,
-                auto_gain_db: dsp.last_auto_gain_db,
-                spectrum,
-            });
+                let _ = meters_tx.try_send(MetersPayload {
+                    input_db: dsp.last_input_db,
+                    output_db: dsp.last_output_db,
+                    gate_gain: dsp.last_gate_gain,
+                    lufs_m: dsp.last_lufs.momentary,
+                    lufs_st: dsp.last_lufs.short_term,
+                    lufs_i: dsp.last_lufs.integrated,
+                    deess_gr_db: dsp.last_deess_gr,
+                    auto_gain_db: dsp.last_auto_gain_db,
+                    neural_vad: dsp.neural_vad(),
+                    spectrum: bins,
+                });
+            }
 
             shared_cb.record_callback_time(callback_started.elapsed());
         };
+
+        // Preallocated mono fold buffer, reused by every input callback.
+        let mut mono_scratch = vec![0.0f32; MAX_CALLBACK_FRAMES];
+        let chunk_samples = in_channels.max(1) * MAX_CALLBACK_FRAMES;
 
         let in_stream = match in_cfg.sample_format() {
             SampleFormat::F32 => in_dev
                 .build_input_stream(
                     &in_stream_cfg,
                     move |data: &[f32], _| {
-                        on_input(interleaved_to_mono_f32(data, in_channels, |sample| sample));
+                        for chunk in data.chunks(chunk_samples) {
+                            let frames =
+                                fold_to_mono(chunk, in_channels, &mut mono_scratch[..], |sample| sample);
+                            on_input(&mut mono_scratch[..frames]);
+                        }
                     },
                     |e| log::error!("Input stream error: {e}"),
                     None,
@@ -367,7 +407,11 @@ impl AudioEngine {
                 .build_input_stream(
                     &in_stream_cfg,
                     move |data: &[i16], _| {
-                        on_input(interleaved_to_mono_f32(data, in_channels, i16_to_f32));
+                        for chunk in data.chunks(chunk_samples) {
+                            let frames =
+                                fold_to_mono(chunk, in_channels, &mut mono_scratch[..], i16_to_f32);
+                            on_input(&mut mono_scratch[..frames]);
+                        }
                     },
                     |e| log::error!("Input stream error: {e}"),
                     None,
@@ -377,7 +421,11 @@ impl AudioEngine {
                 .build_input_stream(
                     &in_stream_cfg,
                     move |data: &[u16], _| {
-                        on_input(interleaved_to_mono_f32(data, in_channels, u16_to_f32));
+                        for chunk in data.chunks(chunk_samples) {
+                            let frames =
+                                fold_to_mono(chunk, in_channels, &mut mono_scratch[..], u16_to_f32);
+                            on_input(&mut mono_scratch[..frames]);
+                        }
                     },
                     |e| log::error!("Input stream error: {e}"),
                     None,
@@ -438,11 +486,21 @@ impl AudioEngine {
 
         in_stream.play().map_err(|e| e.to_string())?;
 
+        let meters_shared = shared.clone();
         std::thread::spawn(move || {
             let mut pending: Vec<MetersPayload> = Vec::with_capacity(8);
             let mut last_emit = Instant::now();
+            let mut last_logged_drops = 0u64;
 
             loop {
+                let drops = meters_shared.dropped_output_samples.load(Ordering::Relaxed);
+                if drops != last_logged_drops {
+                    log::warn!(
+                        "Dropping output samples because the playback ring buffer is full (total dropped: {drops})"
+                    );
+                    last_logged_drops = drops;
+                }
+
                 match meters_rx.recv_timeout(Duration::from_millis(20)) {
                     Ok(meters) => pending.push(meters),
                     Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -459,6 +517,7 @@ impl AudioEngine {
                         lufs_i: -70.0,
                         deess_gr_db: 0.0,
                         auto_gain_db: 0.0,
+                        neural_vad: 0.0,
                         spectrum: vec![],
                     });
 
@@ -501,6 +560,7 @@ impl AudioEngine {
             input_device_name,
             monitor_output_name,
             broadcast_output_name,
+            neural_available,
         })
     }
 }
@@ -558,6 +618,7 @@ impl RunningEngine {
             input_device_name: info.input_device_name,
             monitor_output_name: info.monitor_output_name,
             broadcast_output_name: info.broadcast_output_name,
+            neural_available: info.neural_available,
         })
     }
 
@@ -568,29 +629,88 @@ impl RunningEngine {
         }
     }
 
+    /// Capture a noise profile from the most recent input audio.
+    ///
+    /// Runs on the calling (control) thread: it snapshots the input history,
+    /// computes the noise spectrum here, then hands it to the audio callback
+    /// through `profile_slot` and waits for the callback to install it. The
+    /// whole operation times out after 2 s, as before.
     pub fn capture_noise_profile(&self) -> Result<(), String> {
-        let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+        if self.shared.capture_busy.swap(true, Ordering::AcqRel) {
+            return Err("Noise profile capture is already in progress".to_string());
+        }
+        let result = self.capture_noise_profile_inner();
+        self.shared.capture_busy.store(false, Ordering::Release);
+        result
+    }
+
+    fn capture_noise_profile_inner(&self) -> Result<(), String> {
+        let deadline = Instant::now() + CAPTURE_TIMEOUT;
+        let callbacks_at_start = self.shared.callback_count.load(Ordering::Relaxed);
+
+        // 1. Wait (briefly) until enough live audio has been recorded.
+        let snapshot = loop {
+            let history = self.shared.history.lock();
+            if history.len() >= MIN_PROFILE_SAMPLES {
+                let samples = history.snapshot();
+                drop(history);
+                break samples;
+            }
+            drop(history);
+            if Instant::now() >= deadline {
+                let callbacks_now = self.shared.callback_count.load(Ordering::Relaxed);
+                let message = if callbacks_now == callbacks_at_start {
+                    "Timed out while waiting for live audio to capture the noise profile"
+                } else {
+                    "Need at least a short burst of live audio before capturing a noise profile"
+                };
+                return Err(message.to_string());
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        };
+
+        // 2. Heavy lifting off the audio thread.
+        let profile = compute_noise_profile(&snapshot).ok_or_else(|| {
+            "Need at least a short burst of live audio before capturing a noise profile"
+                .to_string()
+        })?;
+
+        // 3. Hand over to the callback and wait for it to be installed.
+        let applied_before = self.shared.profile_applied.load(Ordering::Acquire);
         {
-            let mut slot = self.shared.capture_reply.lock();
-            if slot.is_some() {
-                return Err("Noise profile capture is already in progress".to_string());
-            }
-            *slot = Some(reply_tx);
+            let mut slot = self.shared.profile_slot.lock();
+            *slot = profile;
         }
+        self.shared.profile_pending.store(true, Ordering::Release);
 
-        self.shared.capture_requested.store(true, Ordering::Release);
-
-        match reply_rx.recv_timeout(Duration::from_secs(2)) {
-            Ok(result) => result,
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                self.shared.capture_reply.lock().take();
-                Err("Timed out while waiting for live audio to capture the noise profile".to_string())
+        loop {
+            if self.shared.profile_applied.load(Ordering::Acquire) != applied_before {
+                return Ok(());
             }
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                self.shared.capture_reply.lock().take();
-                Err("Audio engine stopped before the noise profile capture completed".to_string())
+            if Instant::now() >= deadline {
+                self.shared.profile_pending.store(false, Ordering::Release);
+                return Err(
+                    "Timed out while waiting for live audio to capture the noise profile"
+                        .to_string(),
+                );
             }
+            std::thread::sleep(Duration::from_millis(2));
         }
+    }
+
+    /// Current DSP processing latency in samples (0 when bypassed).
+    pub fn dsp_latency_samples(&self) -> u64 {
+        self.shared.dsp_latency_samples.load(Ordering::Relaxed)
+    }
+
+    /// Buffer latency plus current DSP processing latency, in ms.
+    pub fn total_latency_ms(&self) -> f32 {
+        let dsp_ms = if self.sample_rate > 0 {
+            self.dsp_latency_samples() as f32 * 1000.0 / self.sample_rate as f32
+        } else {
+            0.0
+        };
+        self.latency_ms + dsp_ms
     }
 
     pub fn noise_profile_ready(&self) -> bool {
@@ -823,23 +943,36 @@ fn db_to_lin(db: f32) -> f32 {
     10f32.powf(db / 20.0)
 }
 
-fn interleaved_to_mono_f32<T>(
+/// Fold interleaved samples into `out` as mono (channel average). Writes at
+/// most `out.len()` frames and returns the number written. Never allocates.
+fn fold_to_mono<T>(
     data: &[T],
     channels: usize,
+    out: &mut [f32],
     mut convert: impl FnMut(T) -> f32,
-) -> Vec<f32>
+) -> usize
 where
     T: Copy,
 {
-    if channels <= 1 {
-        return data.iter().copied().map(&mut convert).collect();
+    let channels = channels.max(1);
+    let frames = (data.len() / channels).min(out.len());
+
+    if channels == 1 {
+        for (dst, &src) in out[..frames].iter_mut().zip(data.iter()) {
+            *dst = convert(src);
+        }
+    } else {
+        let scale = 1.0 / channels as f32;
+        for (dst, frame) in out[..frames].iter_mut().zip(data.chunks_exact(channels)) {
+            let mut sum = 0.0f32;
+            for &sample in frame {
+                sum += convert(sample);
+            }
+            *dst = sum * scale;
+        }
     }
 
-    data.chunks(channels)
-        .map(|frame| {
-            frame.iter().copied().map(&mut convert).sum::<f32>() / channels as f32
-        })
-        .collect()
+    frames
 }
 
 fn write_output_data<T>(

@@ -24,15 +24,32 @@ test('syncNativeParams writes the expected native DSP contract', async () => {
     inputGainValue: 2,
   });
 
-  assert.equal(calls.length, 8);
+  assert.equal(calls.length, 9);
   assert.deepEqual(calls[0], {
     command: 'set_param_bool',
     payload: { key: 'gate_enabled', value: true },
   });
+  assert.ok(calls.some((c) => c.payload.key === 'neural_denoise' && c.payload.value === true));
   assert.deepEqual(calls.at(-1), {
     command: 'set_param',
     payload: { key: 'gain_db', value: 20 * Math.log10(2) },
   });
+});
+
+test('syncNativeParams turns neural denoise on for Voice Pattern Cleanse and off with both features off', async () => {
+  const sent = async (features) => {
+    const calls = [];
+    await syncNativeParams(async (command, payload) => { calls.push(payload); }, {
+      features,
+      isBypassed: false,
+      noiseFloorThreshold: -42,
+      inputGainValue: 1,
+    });
+    return calls.find((p) => p.key === 'neural_denoise').value;
+  };
+
+  assert.equal(await sent({ denoise: false, voicePattern: true }), true);
+  assert.equal(await sent({ denoise: false, voicePattern: false }), false);
 });
 
 test('native engine controller restarts through stop then start', async () => {

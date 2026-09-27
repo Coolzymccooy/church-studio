@@ -1,3 +1,5 @@
+use super::stage_switch::StageSwitch;
+
 /// Lookahead noise gate.
 /// Delays the signal by `lookahead_ms` so the gate opens *before* speech arrives.
 /// Uses RMS detection with attack / hold / release envelope.
@@ -37,12 +39,40 @@ impl Gate {
         }
     }
 
+    /// Lookahead delay in samples.
+    pub fn latency_samples(&self) -> usize {
+        self.delay_buf.len() - 1
+    }
+
+    /// Clear detector, envelope and lookahead delay line. No allocation.
+    pub fn reset(&mut self) {
+        for v in self.rms_buf.iter_mut() {
+            *v = 0.0;
+        }
+        for v in self.delay_buf.iter_mut() {
+            *v = 0.0;
+        }
+        self.rms_pos = 0;
+        self.rms_sum = 0.0;
+        self.env = 0.0;
+        self.hold_counter = 0;
+        self.delay_pos = 0;
+    }
+
     pub fn set_threshold_db(&mut self, db: f32) {
         self.threshold_lin = db_to_lin(db);
     }
 
     /// Process one sample. Returns (delayed_sample × gate_gain, gate_gain).
     pub fn tick(&mut self, x: f32) -> (f32, f32) {
+        let (delayed, gain) = self.tick_raw(x);
+        (delayed * gain, gain)
+    }
+
+    /// Process one sample without applying the gain. Returns
+    /// (delayed_sample, gate_gain). Lets a caller bypass the gate while
+    /// keeping its lookahead delay (constant latency).
+    pub fn tick_raw(&mut self, x: f32) -> (f32, f32) {
         let len = self.rms_buf.len();
 
         // Update RMS
@@ -76,9 +106,10 @@ impl Gate {
         self.delay_buf[self.delay_pos] = x;
         self.delay_pos = (self.delay_pos + 1) % self.delay_buf.len();
 
-        (delayed * self.env, self.env)
+        (delayed, self.env)
     }
 
+    #[allow(dead_code)] // the chain uses SwitchedGate, the mixer tick_raw
     pub fn process_block(&mut self, buf: &mut [f32]) -> f32 {
         let mut last_gain = 0.0;
         for s in buf.iter_mut() {
@@ -90,7 +121,118 @@ impl Gate {
     }
 }
 
+/// Gate with live-safe on/off (see `stage_switch.rs`): when disabled it is a
+/// zero-latency passthrough; enabling resets it, plays dry while the 20 ms
+/// lookahead fills, then crossfades to the gated signal; disabling
+/// crossfades back to dry.
+pub struct SwitchedGate {
+    gate: Gate,
+    switch: StageSwitch,
+    pub enabled: bool,
+}
+
+impl SwitchedGate {
+    pub fn new(sr: f64) -> Self {
+        let gate = Gate::new(sr);
+        let switch = StageSwitch::new(gate.latency_samples());
+        SwitchedGate { gate, switch, enabled: true }
+    }
+
+    pub fn set_threshold_db(&mut self, db: f32) {
+        self.gate.set_threshold_db(db);
+    }
+
+    /// Lookahead latency when enabled, 0 when disabled.
+    pub fn latency_samples(&self) -> usize {
+        if self.enabled {
+            self.gate.latency_samples()
+        } else {
+            0
+        }
+    }
+
+    /// Drop state; the next enabled block refills and fades in.
+    pub fn restart(&mut self) {
+        self.switch.force_restart();
+    }
+
+    /// Process in place. Returns the last gate gain (1.0 when disabled).
+    pub fn process_block(&mut self, buf: &mut [f32]) -> f32 {
+        if self.switch.update(self.enabled) {
+            self.gate.reset();
+        }
+        let mut last_gain = 1.0;
+        for s in buf.iter_mut() {
+            if !self.switch.is_running() {
+                break; // disabled (or fade-out done): rest stays dry
+            }
+            let x = *s;
+            let (gated, g) = self.gate.tick(x);
+            let mix = self.switch.next_mix();
+            *s = x + (gated - x) * mix;
+            last_gain = g;
+        }
+        last_gain
+    }
+}
+
 #[inline] fn db_to_lin(db: f32) -> f32 { 10f32.powf(db / 20.0) }
 #[inline] fn coef(ms: f64, sr: f64) -> f32 {
     (1.0 - (-2.2 / (ms * 0.001 * sr)).exp()) as f32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dsp::test_util::{run_blocks, sine, test_signal};
+
+    const SR: f64 = 48_000.0;
+
+    #[test]
+    fn disabled_gate_is_exact_zero_latency_passthrough() {
+        let input = test_signal(48_000, 3);
+        for &block in &[64usize, 480, 4096] {
+            let mut g = SwitchedGate::new(SR);
+            g.enabled = false;
+            assert_eq!(g.latency_samples(), 0);
+            let out = run_blocks(&input, block, |b| {
+                g.process_block(b);
+            });
+            assert_eq!(out, input);
+        }
+    }
+
+    #[test]
+    fn enabled_gate_is_block_size_invariant() {
+        let input = test_signal(48_000, 4);
+        let mut reference: Vec<Vec<f32>> = Vec::new();
+        for &block in &[64usize, 256, 480, 1000, 4096] {
+            let mut g = SwitchedGate::new(SR);
+            g.set_threshold_db(-30.0);
+            reference.push(run_blocks(&input, block, |b| {
+                g.process_block(b);
+            }));
+        }
+        for out in reference.iter().skip(1) {
+            assert_eq!(out, &reference[0]);
+        }
+    }
+
+    #[test]
+    fn toggling_gate_does_not_click() {
+        // Threshold far below the signal: the gate is fully open, so "wet" is
+        // the input delayed by the lookahead and only the switching is tested.
+        let input = sine(96_000, 440.0, 48_000.0, 0.5);
+        let mut g = SwitchedGate::new(SR);
+        g.set_threshold_db(-100.0);
+        let mut out = Vec::with_capacity(input.len());
+        for (i, chunk) in input.chunks(480).enumerate() {
+            g.enabled = (i / 20) % 2 == 1;
+            let mut block = chunk.to_vec();
+            g.process_block(&mut block);
+            out.extend_from_slice(&block);
+        }
+        let max_step = out.windows(2).fold(0.0f32, |m, w| m.max((w[1] - w[0]).abs()));
+        assert!(max_step < 0.04, "step {max_step}");
+    }
 }

@@ -81,6 +81,18 @@ impl Biquad {
         )
     }
 
+    /// Replace this filter's coefficients with `other`'s while keeping the
+    /// filter state, so a parameter change does not reset (click) the filter.
+    /// No allocation — safe on the audio thread.
+    #[allow(dead_code)] // used by the mixer, not yet wired into the engine
+    pub fn copy_coeffs_from(&mut self, other: &Biquad) {
+        self.b0 = other.b0;
+        self.b1 = other.b1;
+        self.b2 = other.b2;
+        self.a1 = other.a1;
+        self.a2 = other.a2;
+    }
+
     /// Process a single sample (Direct Form II Transposed)
     #[inline(always)]
     pub fn tick(&mut self, x: f32) -> f32 {
