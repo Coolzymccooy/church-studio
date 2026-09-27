@@ -4,7 +4,9 @@
 //! `mixer-meters` JSON shapes, and the mono level backwards-compat rule.
 use crate::dsp::mixer::{BusMeters, Mixer, StripMeters, BUS_MAIN, BUS_MONITOR, BUS_STREAM};
 use crate::dsp::test_util::{rms, sine};
-use crate::mixer_control::{scene_slug, MixerControl, StoredScene, MAX_STRIPS};
+use crate::mixer_control::{
+    scene_slug, MixerControl, StoredScene, MAX_STRIPS, OTHER_STRIPS_FADER_DB,
+};
 use crate::mixer_meters::{MixerMeterSlots, METER_FLOOR_DB};
 use crate::routing::{deinterleave, device_sample, push_stereo};
 use ringbuf::traits::{Consumer, Split};
@@ -168,6 +170,28 @@ fn rename_trims_bounds_and_defaults() {
     assert_eq!(state.strips[1].name, "Pastor");
     assert_eq!(state.strips[2].name.chars().count(), 24);
     assert_eq!(state.strips[3].name, "Ch 4");
+}
+
+#[test]
+fn only_the_first_strip_fader_is_up_by_default() {
+    let m = MixerControl::new();
+    let state = m.snapshot(MAX_STRIPS as u32, false, Vec::new());
+    assert_eq!(state.strips[0].fader_db, 0.0);
+    for strip in &state.strips[1..] {
+        assert_eq!(strip.fader_db, OTHER_STRIPS_FADER_DB, "strip {}", strip.index);
+    }
+    let v = serde_json::to_value(m.snapshot(2, false, Vec::new())).unwrap();
+    assert_eq!(v["strips"][1]["fader_db"], -90.0);
+
+    // A scene that only covers strip 0 resets the others to these defaults.
+    m.set_strip_param(3, "fader_db", 0.0).unwrap();
+    let mut scene = MixerControl::new().capture_scene("Short");
+    scene.mixer.strips.truncate(1);
+    scene.mixer.strips[0].fader_db = f32::NAN;
+    m.apply_scene(&scene);
+    let after = m.snapshot(4, false, Vec::new());
+    assert_eq!(after.strips[0].fader_db, 0.0);
+    assert_eq!(after.strips[3].fader_db, OTHER_STRIPS_FADER_DB);
 }
 
 // ── Voice chain exclusivity ─────────────────────────────────────────────────

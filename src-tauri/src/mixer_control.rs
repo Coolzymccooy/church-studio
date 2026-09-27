@@ -126,14 +126,29 @@ pub fn default_strip_name(index: usize) -> String {
     format!("Ch {}", index + 1)
 }
 
-/// Contract defaults for one strip (differs from `StripParams::new()`:
-/// HPF on, gate threshold −45 dB, Monitor send 0 dB pre-fader).
-fn reset_strip(p: &StripParams) {
+/// Fader of strips 2 and up at start: off (−inf), so a 2-channel mic keeps
+/// today's sound (only channel 1 is heard) until the operator raises it.
+pub const OTHER_STRIPS_FADER_DB: f32 = -90.0;
+
+/// Default fader for strip `index`: 0 dB on strip 0, off on the others.
+pub fn default_fader_db(index: usize) -> f32 {
+    if index == 0 {
+        0.0
+    } else {
+        OTHER_STRIPS_FADER_DB
+    }
+}
+
+/// Contract defaults for strip `index` (differs from `StripParams::new()`:
+/// HPF on, gate threshold −45 dB, Monitor send 0 dB pre-fader, and every
+/// strip but the first with its fader off).
+fn reset_strip(index: usize, p: &StripParams) {
     for spec in STRIP_F32_KEYS.iter() {
         if let Some(field) = strip_f32(p, spec.0) {
             field.store(spec.3, Relaxed);
         }
     }
+    p.fader_db.store(default_fader_db(index), Relaxed);
     for (key, default) in STRIP_BOOL_KEYS.iter() {
         if let Some(field) = strip_bool(p, key) {
             field.store(*default, Relaxed);
@@ -150,11 +165,16 @@ fn reset_bus(p: &BusParams) {
 
 /// Re-clamp every value (used after loading a scene file, which may carry
 /// out-of-range or NaN values).
-fn sanitize_strip(p: &StripParams) {
+fn sanitize_strip(index: usize, p: &StripParams) {
+    // A NaN fader falls back to this strip's own default (off above strip 0).
+    let fader_nan = p.fader_db.load(Relaxed).is_nan();
     for spec in STRIP_F32_KEYS.iter() {
         if let Some(field) = strip_f32(p, spec.0) {
             field.store(clamp_key(*spec, field.load(Relaxed)), Relaxed);
         }
+    }
+    if fader_nan {
+        p.fader_db.store(default_fader_db(index), Relaxed);
     }
 }
 
@@ -249,11 +269,12 @@ impl Default for MixerControl {
 }
 
 impl MixerControl {
-    /// 32 strips at the contract defaults; the voice chain on strip 0.
+    /// 32 strips at the contract defaults; the voice chain on strip 0;
+    /// only strip 0's fader is up.
     pub fn new() -> Self {
         let params = MixerParams::new(MAX_STRIPS);
-        for strip in params.strips.iter() {
-            reset_strip(strip);
+        for (index, strip) in params.strips.iter().enumerate() {
+            reset_strip(index, strip);
         }
         for bus in params.buses.iter() {
             reset_bus(bus);
@@ -425,9 +446,16 @@ impl MixerControl {
     /// Recall a scene onto the live params (click-free: the mixer ramps).
     /// Values are re-clamped; bad names fall back to the defaults.
     pub fn apply_scene(&self, scene: &StoredScene) {
+        // Strips the scene does not cover (a scene saved by an older build
+        // with fewer strips) go back to their defaults.
+        for (index, strip) in self.params.strips.iter().enumerate() {
+            if index >= scene.mixer.strips.len() {
+                reset_strip(index, strip);
+            }
+        }
         scene.mixer.apply(&self.params);
-        for strip in self.params.strips.iter() {
-            sanitize_strip(strip);
+        for (index, strip) in self.params.strips.iter().enumerate() {
+            sanitize_strip(index, strip);
         }
         for bus in self.params.buses.iter() {
             sanitize_bus(bus);
