@@ -218,7 +218,7 @@ impl DspChain {
     }
 
     /// Processing latency of the chain as currently configured, in samples:
-    /// the sum over the ACTIVE stages (neural 480, noise 1024, dereverb 1024,
+    /// the sum over the ACTIVE stages (neural 960, noise 1024, dereverb 1024,
     /// gate lookahead when the gate is on, limiter lookahead). Disabled
     /// stages are zero-latency passthroughs, and the global bypass is 0.
     /// Reflects the params from the most recent `sync_params`/`process_block`.
@@ -282,13 +282,13 @@ mod tests {
         params.dereverb_enabled.store(true, Ordering::Relaxed);
         params.neural_enabled.store(true, Ordering::Relaxed);
         chain.sync_params(&params);
-        assert_eq!(chain.total_latency_samples(), base + 1024 + 480);
+        assert_eq!(chain.total_latency_samples(), base + 1024 + crate::dsp::neural::LATENCY);
 
         let mut block = test_signal(512, 1);
         chain.process_block(&mut block, true);
         assert_eq!(chain.total_latency_samples(), 0);
         chain.process_block(&mut block, false);
-        assert_eq!(chain.total_latency_samples(), base + 1024 + 480);
+        assert_eq!(chain.total_latency_samples(), base + 1024 + crate::dsp::neural::LATENCY);
     }
 
     #[test]

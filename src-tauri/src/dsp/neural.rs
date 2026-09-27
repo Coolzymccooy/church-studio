@@ -4,7 +4,11 @@
 /// the i16 range. This wrapper keeps 480-sample input/output FIFOs so it
 /// accepts blocks of ANY length and allocates only in `new()`.
 ///
-/// Latency: 480 samples (10 ms) while enabled. When disabled the stage is a
+/// Latency: 960 samples (20 ms) while enabled — 480 for collecting a frame
+/// plus 480 inside RNNoise itself: `process_frame` returns the PREVIOUS
+/// frame's audio (its synthesis overlap-adds a 960-sample window). The dry
+/// path is delayed by the same frame so dry/wet mixing stays phase-aligned.
+/// When disabled the stage is a
 /// zero-latency passthrough (`latency_samples()` = 0) and the network is not
 /// run. Enabling it resets the FIFOs and crossfades from dry to wet (see
 /// `stage_switch.rs`); disabling crossfades back to dry. The RNN's hidden
@@ -19,6 +23,8 @@ use super::stage_switch::StageSwitch;
 use nnnoiseless::DenoiseState;
 
 pub const FRAME: usize = 480;
+/// Total stage latency: one frame of buffering + RNNoise's internal frame.
+pub const LATENCY: usize = 2 * FRAME;
 pub const REQUIRED_SAMPLE_RATE: f64 = 48_000.0;
 
 const I16_SCALE: f32 = 32_768.0;
@@ -28,8 +34,11 @@ pub struct NeuralDenoiser {
     switch: StageSwitch,
     /// Current input frame, already scaled to the i16 range.
     in_frame: Vec<f32>,
-    /// Network output for the current frame (i16 range).
+    /// Network output (i16 range). RNNoise delays by one frame, so this is
+    /// the denoised version of `prev_frame`, not of `in_frame`.
     net_out: Vec<f32>,
+    /// Previous input frame (i16 range): the dry signal aligned with `net_out`.
+    prev_frame: Vec<f32>,
     /// Finished output samples played out during the next frame.
     ready: Vec<f32>,
     pos: usize,
@@ -46,9 +55,10 @@ impl NeuralDenoiser {
         let available = (sample_rate - REQUIRED_SAMPLE_RATE).abs() < 0.5;
         NeuralDenoiser {
             state: if available { Some(DenoiseState::new()) } else { None },
-            switch: StageSwitch::new(FRAME),
+            switch: StageSwitch::new(LATENCY),
             in_frame: vec![0.0; FRAME],
             net_out: vec![0.0; FRAME],
+            prev_frame: vec![0.0; FRAME],
             ready: vec![0.0; FRAME],
             pos: 0,
             current_mix: 1.0,
@@ -63,10 +73,10 @@ impl NeuralDenoiser {
         self.state.is_some()
     }
 
-    /// Current processing latency: 480 when enabled and available, else 0.
+    /// Current processing latency: `LATENCY` when enabled and available, else 0.
     pub fn latency_samples(&self) -> usize {
         if self.available() && self.enabled {
-            FRAME
+            LATENCY
         } else {
             0
         }
@@ -93,6 +103,9 @@ impl NeuralDenoiser {
 
     fn reset_fifos(&mut self) {
         for v in self.in_frame.iter_mut() {
+            *v = 0.0;
+        }
+        for v in self.prev_frame.iter_mut() {
             *v = 0.0;
         }
         for v in self.ready.iter_mut() {
@@ -126,7 +139,7 @@ impl NeuralDenoiser {
         }
     }
 
-    /// Push one sample, get the (mix-applied) output FRAME samples behind it.
+    /// Push one sample, get the (mix-applied) output `LATENCY` samples behind it.
     #[inline]
     fn tick(&mut self, x: f32) -> f32 {
         let y = self.ready[self.pos];
@@ -151,13 +164,14 @@ impl NeuralDenoiser {
         let inv_scale = 1.0 / I16_SCALE;
         let step = (target_mix - start_mix) / FRAME as f32;
         for i in 0..FRAME {
-            let dry = self.in_frame[i] * inv_scale;
+            let dry = self.prev_frame[i] * inv_scale;
             let wet = self.net_out[i] * inv_scale;
             let wet = if wet.is_finite() { wet } else { 0.0 };
             let amount = start_mix + step * (i + 1) as f32;
             self.ready[i] = dry + (wet - dry) * amount;
         }
         self.current_mix = target_mix;
+        self.prev_frame.copy_from_slice(&self.in_frame[..]);
     }
 }
 
@@ -211,15 +225,29 @@ mod tests {
             let out = run_blocks(&input, block, |b| d.process_block(b));
             assert_eq!(out, input, "block {block}");
         }
-        assert_eq!(enabled().latency_samples(), FRAME);
+        assert_eq!(enabled().latency_samples(), LATENCY);
     }
 
     #[test]
-    fn enable_starts_dry_for_one_frame() {
+    fn enable_starts_dry_until_latency_is_filled() {
         let input = test_signal(SR / 2, 10);
         let mut d = enabled();
         let out = run_blocks(&input, 300, |b| d.process_block(b));
-        assert_eq!(&out[..FRAME], &input[..FRAME]);
+        assert_eq!(&out[..LATENCY], &input[..LATENCY]);
+    }
+
+    #[test]
+    fn zero_mix_wet_path_is_input_delayed_by_latency() {
+        // mix 0: the wet path is the aligned dry signal, so after the fill
+        // and crossfade the output must be the input delayed by LATENCY.
+        let input = test_signal(SR, 12);
+        let mut d = enabled();
+        d.mix = 0.0;
+        let out = run_blocks(&input, 256, |b| d.process_block(b));
+        let settle = LATENCY + crate::dsp::stage_switch::XFADE_SAMPLES;
+        for t in settle..out.len() {
+            assert!((out[t] - input[t - LATENCY]).abs() < 1e-5, "t={t}");
+        }
     }
 
     #[test]
