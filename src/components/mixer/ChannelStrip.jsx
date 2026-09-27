@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Sparkles } from 'lucide-react';
 
 import { faderDbToPosition, formatDb, positionToFaderDb } from '../../lib/mixerEngine.js';
@@ -62,7 +62,13 @@ export default function ChannelStrip({ strip, metersRef, onSetParam, onSetBool, 
     else setNameDraft(strip.name);
   };
 
-  const meter = () => metersRef.current.strips[strip.index] || {};
+  // Memoized so GateGrIndicator's requestAnimationFrame effect (keyed on
+  // this function's identity) isn't torn down and rebuilt on every
+  // ChannelStrip re-render (e.g. every optimistic update while dragging).
+  const meter = useCallback(
+    () => metersRef.current.strips[strip.index] || {},
+    [metersRef, strip.index],
+  );
   const faderPosition = faderDbToPosition(strip.fader_db);
 
   return (

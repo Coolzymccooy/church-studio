@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { applyStripChange } from '../../lib/mixerEngine.js';
+import { applyStripChange, clampStripValue } from '../../lib/mixerEngine.js';
 
 const TOAST_MS = 4000;
 
@@ -59,21 +59,35 @@ export function useMixer(controller) {
     };
   }, [controller, showToast]);
 
-  const withOptimism = useCallback((optimisticUpdate, call) => {
-    let previous;
+  // withOptimism applies an optimistic change immediately and, on failure,
+  // reverts only the field this specific call touched — and reverts it
+  // against whatever the *latest* state is at that point, not a stale
+  // snapshot taken before the call started. Rapid slider drags fire many
+  // overlapping invokes; capturing one full-state snapshot up front and
+  // restoring it wholesale on failure would silently discard every other
+  // change (from this call or others) that landed in between. buildRevert
+  // receives the pre-change state so it can capture the old value, and
+  // returns a function that reapplies just that value onto the latest state.
+  const withOptimism = useCallback((applyChange, buildRevert, call) => {
+    let revert = null;
     setState((prev) => {
-      previous = prev;
-      return prev ? optimisticUpdate(prev) : prev;
+      if (!prev) return prev;
+      revert = buildRevert(prev);
+      return applyChange(prev);
     });
     call().catch((err) => {
       showToast(describeMixerError(err));
-      setState(previous ?? null);
+      if (revert) setState((prev) => (prev ? revert(prev) : prev));
     });
   }, [showToast]);
 
   const setStripParam = useCallback((index, key, value) => {
     withOptimism(
       (prev) => applyStripChange(prev, index, key, value),
+      (prev) => {
+        const previousValue = prev.strips[index]?.[key];
+        return (latest) => applyStripChange(latest, index, key, previousValue);
+      },
       () => controller.setStripParam(index, key, value),
     );
   }, [controller, withOptimism]);
@@ -81,6 +95,10 @@ export function useMixer(controller) {
   const setStripBool = useCallback((index, key, value) => {
     withOptimism(
       (prev) => applyStripChange(prev, index, key, Boolean(value)),
+      (prev) => {
+        const previousValue = prev.strips[index]?.[key];
+        return (latest) => applyStripChange(latest, index, key, previousValue);
+      },
       () => controller.setStripBool(index, key, value),
     );
   }, [controller, withOptimism]);
@@ -92,6 +110,13 @@ export function useMixer(controller) {
         ...prev,
         strips: prev.strips.map((s, i) => (i === index ? { ...s, name: trimmed } : s)),
       }),
+      (prev) => {
+        const previousName = prev.strips[index]?.name;
+        return (latest) => ({
+          ...latest,
+          strips: latest.strips.map((s, i) => (i === index ? { ...s, name: previousName } : s)),
+        });
+      },
       () => controller.renameStrip(index, trimmed),
     );
   }, [controller, withOptimism]);
@@ -100,8 +125,15 @@ export function useMixer(controller) {
     withOptimism(
       (prev) => ({
         ...prev,
-        buses: prev.buses.map((b) => (b.id === bus ? { ...b, [key]: value } : b)),
+        buses: prev.buses.map((b) => (b.id === bus ? { ...b, [key]: clampStripValue(key, value) } : b)),
       }),
+      (prev) => {
+        const previousValue = prev.buses.find((b) => b.id === bus)?.[key];
+        return (latest) => ({
+          ...latest,
+          buses: latest.buses.map((b) => (b.id === bus ? { ...b, [key]: previousValue } : b)),
+        });
+      },
       () => controller.setBusParam(bus, key, value),
     );
   }, [controller, withOptimism]);
@@ -112,6 +144,13 @@ export function useMixer(controller) {
         ...prev,
         buses: prev.buses.map((b) => (b.id === bus ? { ...b, [key]: Boolean(value) } : b)),
       }),
+      (prev) => {
+        const previousValue = prev.buses.find((b) => b.id === bus)?.[key];
+        return (latest) => ({
+          ...latest,
+          buses: latest.buses.map((b) => (b.id === bus ? { ...b, [key]: previousValue } : b)),
+        });
+      },
       () => controller.setBusBool(bus, key, value),
     );
   }, [controller, withOptimism]);
