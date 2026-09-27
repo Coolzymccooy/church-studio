@@ -3,6 +3,7 @@ mod dsp;
 mod history;
 mod mixer_commands;
 mod mixer_control;
+mod mixer_meters;
 mod routing;
 
 use audio::{DeviceSelection, EngineState, RunningEngine};

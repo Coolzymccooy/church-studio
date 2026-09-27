@@ -24,7 +24,8 @@ use crate::dsp::mixer::{BUS_MAIN, BUS_MONITOR, BUS_STREAM};
 use crate::dsp::noise::compute_noise_profile;
 use crate::dsp::{AudioDeviceInfo, DspChain, DspParams, MetersPayload};
 use crate::history::HistoryRing;
-use crate::mixer_control::MixerLink;
+use crate::mixer_control::{MixerLink, MAX_STRIPS};
+use crate::mixer_meters::MixerMeterSlots;
 
 mod input_proc;
 use input_proc::{InputProcessor, OutputRoute};
@@ -37,6 +38,10 @@ const MAX_CALLBACK_FRAMES: usize = 4096;
 /// Constant latency of the mixer: 20 ms strip gate lookahead plus 5 ms bus
 /// limiter lookahead (see `dsp::mixer`), present on every path.
 const MIXER_LATENCY_MS: f32 = 25.0;
+
+/// `mixer-meters` emit period (the meters thread wakes at least every
+/// 20 ms, so the event arrives at roughly 18–20 Hz).
+const MIXER_METERS_INTERVAL_MS: u64 = 50;
 
 /// Which devices to open. Ids are the names/ids from `list_devices`;
 /// `None` means the default device (monitor, input) or "not opened"
@@ -316,6 +321,7 @@ impl AudioEngine {
             buffer_size: BufferSize::Fixed(buf_frames),
         };
 
+        let meter_slots = Arc::new(MixerMeterSlots::new(in_channels.min(MAX_STRIPS)));
         let mut processor = InputProcessor::new(
             sr,
             in_channels,
@@ -323,6 +329,7 @@ impl AudioEngine {
             params,
             shared.clone(),
             mixer,
+            meter_slots.clone(),
             routes,
             meters_tx,
         );
@@ -407,7 +414,7 @@ impl AudioEngine {
 
         in_stream.play().map_err(|e| e.to_string())?;
 
-        spawn_meters_thread(app, shared, meters_rx);
+        spawn_meters_thread(app, shared, meters_rx, meter_slots);
 
         Ok(Self {
             _in_stream: in_stream,
@@ -425,17 +432,20 @@ impl AudioEngine {
     }
 }
 
-/// Meters thread: logs dropped output samples and emits `audio-meters`
-/// (~20 Hz, spectrum averaged over the pending payloads). Exits when the
-/// input callback (the only sender) is dropped with the engine.
+/// Meters thread: logs dropped output samples, emits `audio-meters`
+/// (~20 Hz, spectrum averaged over the pending payloads) and `mixer-meters`
+/// (~20 Hz, read from the lock-free slots). Exits when the input callback
+/// (the only sender) is dropped with the engine.
 fn spawn_meters_thread(
     app: AppHandle,
     meters_shared: Arc<EngineShared>,
     meters_rx: mpsc::Receiver<MetersPayload>,
+    meter_slots: Arc<MixerMeterSlots>,
 ) {
     std::thread::spawn(move || {
         let mut pending: Vec<MetersPayload> = Vec::with_capacity(8);
         let mut last_emit = Instant::now();
+        let mut last_mixer_emit = Instant::now();
         let mut last_logged_drops = 0u64;
 
         loop {
@@ -451,6 +461,11 @@ fn spawn_meters_thread(
                 Ok(meters) => pending.push(meters),
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+
+            if last_mixer_emit.elapsed() >= Duration::from_millis(MIXER_METERS_INTERVAL_MS) {
+                let _ = app.emit("mixer-meters", &meter_slots.take_payload());
+                last_mixer_emit = Instant::now();
             }
 
             if last_emit.elapsed().as_millis() >= 50 && !pending.is_empty() {

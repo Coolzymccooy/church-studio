@@ -9,13 +9,15 @@
 //! 2. The strip holding `voice_chain` runs the `DspChain` in place on its
 //!    buffer (history for noise-profile capture, noise-profile install,
 //!    params sync, spectrum and `audio-meters` all follow that strip).
-//! 3. `Mixer::process` sums the strips into Main, Stream and Monitor.
+//! 3. `Mixer::process` sums the strips into Main, Stream and Monitor; the
+//!    strip and bus meters are published to lock-free slots.
 //! 4. Each output device gets its bus as stereo (see `routing`); the
 //!    Monitor bus is still scaled by `monitor_gain_db`.
 use super::{db_to_lin, EngineShared, MAX_CALLBACK_FRAMES};
 use crate::dsp::mixer::{Mixer, BUS_MONITOR};
 use crate::dsp::{DspChain, DspParams, MetersPayload};
 use crate::mixer_control::{MixerLink, MAX_STRIPS};
+use crate::mixer_meters::MixerMeterSlots;
 use crate::routing::{deinterleave, push_stereo};
 use ringbuf::traits::Producer;
 use rustfft::{num_complex::Complex32, Fft, FftPlanner};
@@ -105,6 +107,8 @@ pub(super) struct InputProcessor<P> {
     shared: Arc<EngineShared>,
     voice_strip: Arc<AtomicUsize>,
     mixer: Mixer,
+    /// Mixer meters for the meters thread (`mixer-meters`).
+    meter_slots: Arc<MixerMeterSlots>,
     outputs: Vec<OutputRoute<P>>,
     spectrum: Spectrum,
     meters_tx: mpsc::SyncSender<MetersPayload>,
@@ -121,6 +125,7 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
         params: Arc<DspParams>,
         shared: Arc<EngineShared>,
         mixer: MixerLink,
+        meter_slots: Arc<MixerMeterSlots>,
         outputs: Vec<OutputRoute<P>>,
         meters_tx: mpsc::SyncSender<MetersPayload>,
     ) -> Self {
@@ -143,6 +148,7 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
             shared,
             voice_strip: mixer.voice_strip,
             mixer: engine_mixer,
+            meter_slots,
             outputs,
             spectrum: Spectrum::new(),
             meters_tx,
@@ -178,6 +184,8 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
         }
         let strips = self.chan_bufs.len();
         self.mixer.process(&inputs[..strips], n);
+        self.meter_slots
+            .publish(self.mixer.strip_meters(), &self.mixer.bus_meters()[..]);
 
         // Outputs: one stereo bus per device.
         let mut dropped = 0u64;
