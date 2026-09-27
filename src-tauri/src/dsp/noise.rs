@@ -2,15 +2,19 @@
 ///
 /// Runs on the streaming STFT engine (`stft.rs`): N=1024, HOP=256, Hann
 /// analysis + synthesis, state carried across callbacks, no allocation in
-/// `process_block`, any block length. Fixed latency = `latency_samples()`
-/// (1024 samples) whether the stage is enabled or not — when disabled (or
-/// before a profile exists) the audio passes through the same delay line, so
-/// toggling never jumps in time.
+/// `process_block`, any block length.
+///
+/// Latency: 1024 samples (N) while active. When disabled, or before a profile
+/// exists, the stage is a zero-latency passthrough (`latency_samples()` = 0)
+/// and does no work. Switching it on resets the STFT and crossfades from dry
+/// to wet (see `stage_switch.rs`); switching off crossfades back to dry.
+use super::stage_switch::StageSwitch;
 use super::stft::{periodic_hann, StreamingStft, HALF, HOP, N};
 use rustfft::{num_complex::Complex32, FftPlanner};
 
 pub struct SpectralDenoiser {
     stft: StreamingStft,
+    switch: StageSwitch,
     /// sqrt of the captured noise power per bin.
     noise_mag: Vec<f32>,
     pub has_profile: bool,
@@ -23,6 +27,7 @@ impl SpectralDenoiser {
     pub fn new() -> Self {
         Self {
             stft: StreamingStft::new(),
+            switch: StageSwitch::new(N),
             noise_mag: vec![0.0; HALF],
             has_profile: false,
             alpha: 1.5,
@@ -31,8 +36,23 @@ impl SpectralDenoiser {
         }
     }
 
+    fn wants_active(&self) -> bool {
+        self.enabled && self.has_profile
+    }
+
+    /// Current processing latency: N when active, 0 when bypassed.
     pub fn latency_samples(&self) -> usize {
-        self.stft.latency_samples()
+        if self.wants_active() {
+            self.stft.latency_samples()
+        } else {
+            0
+        }
+    }
+
+    /// Drop the streaming state; the next active block fades in from dry.
+    /// Used when the whole chain comes back from bypass.
+    pub fn restart(&mut self) {
+        self.switch.force_restart();
     }
 
     /// Install a noise power spectrum (HALF bins) computed by
@@ -60,19 +80,34 @@ impl SpectralDenoiser {
     }
 
     pub fn process_block(&mut self, buf: &mut [f32]) {
-        let active = self.enabled && self.has_profile;
+        if self.switch.update(self.wants_active()) {
+            self.stft.reset();
+        }
+        if !self.switch.is_running() {
+            return; // zero-latency passthrough
+        }
+
         let noise_mag = &self.noise_mag;
         let alpha = self.alpha;
         let beta = self.beta;
-
-        self.stft.process(buf, active, |spec| {
+        let mut shape = |spec: &mut [Complex32]| {
             for k in 0..HALF {
                 let mag = spec[k].norm();
                 let suppressed = (mag - alpha * noise_mag[k]).max(beta * mag);
                 let gain = if mag > 1e-10 { suppressed / mag } else { beta };
                 spec[k] *= gain;
             }
-        });
+        };
+
+        for s in buf.iter_mut() {
+            if !self.switch.is_running() {
+                break; // fade-out finished mid-block: rest stays dry
+            }
+            let x = *s;
+            let wet = self.stft.tick(x, &mut shape);
+            let mix = self.switch.next_mix();
+            *s = x + (wet - x) * mix;
+        }
     }
 }
 
@@ -119,7 +154,8 @@ pub fn compute_noise_profile(samples: &[f32]) -> Option<Vec<f32>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dsp::test_util::{max_abs_diff, rms, run_blocks, test_signal, white_noise};
+    use crate::dsp::stage_switch::XFADE_SAMPLES;
+    use crate::dsp::test_util::{max_abs_diff, rms, run_blocks, sine, test_signal, white_noise};
 
     const SR: usize = 48_000;
 
@@ -146,28 +182,80 @@ mod tests {
     }
 
     #[test]
+    fn block_size_invariance_when_disabled() {
+        let input = test_signal(SR, 12);
+        let outputs: Vec<Vec<f32>> = [64usize, 256, 480, 1000, 4096]
+            .iter()
+            .map(|&block| {
+                let mut d = denoiser_with_white_profile();
+                d.enabled = false;
+                run_blocks(&input, block, |b| d.process_block(b))
+            })
+            .collect();
+        for out in outputs.iter() {
+            assert_eq!(out, &input);
+        }
+    }
+
+    #[test]
     fn zero_profile_is_perfect_reconstruction() {
         let input = test_signal(SR * 2, 3);
         let mut d = SpectralDenoiser::new();
         assert!(d.set_profile(&[0.0f32; HALF]));
         let lat = d.latency_samples();
+        assert_eq!(lat, N);
         let out = run_blocks(&input, 480, |b| d.process_block(b));
-        for t in lat..out.len() {
+        // Dry while the STFT fills, then a crossfade, then input delayed by N.
+        assert_eq!(&out[..lat], &input[..lat]);
+        for t in lat + XFADE_SAMPLES..out.len() {
             assert!((out[t] - input[t - lat]).abs() < 1e-4, "t={t}");
         }
-        assert!(out[..lat].iter().all(|s| s.abs() < 1e-6));
     }
 
     #[test]
-    fn disabled_passes_through_with_same_latency() {
+    fn disabled_is_exact_zero_latency_passthrough() {
         let input = test_signal(SR, 5);
         let mut d = denoiser_with_white_profile();
         d.enabled = false;
-        let lat = d.latency_samples();
+        assert_eq!(d.latency_samples(), 0);
         let out = run_blocks(&input, 333, |b| d.process_block(b));
-        for t in lat..out.len() {
-            assert!((out[t] - input[t - lat]).abs() < 1e-4, "t={t}");
+        assert_eq!(out, input);
+
+        let mut no_profile = SpectralDenoiser::new();
+        no_profile.enabled = true;
+        assert_eq!(no_profile.latency_samples(), 0);
+        let out = run_blocks(&input, 333, |b| no_profile.process_block(b));
+        assert_eq!(out, input);
+    }
+
+    #[test]
+    fn toggling_does_not_click() {
+        let input = sine(SR * 2, 440.0, SR as f32, 0.5);
+        let mut d = SpectralDenoiser::new();
+        assert!(d.set_profile(&[0.0f32; HALF]));
+        d.enabled = false;
+        let mut out = Vec::with_capacity(input.len());
+        for (i, chunk) in input.chunks(480).enumerate() {
+            d.enabled = (i / 20) % 2 == 1; // toggle every 200 ms
+            let mut block = chunk.to_vec();
+            d.process_block(&mut block);
+            out.extend_from_slice(&block);
         }
+        // A 440 Hz sine at 0.5 moves < 0.03 per sample; the crossfade adds at
+        // most 2 × 0.5 / 480. Anything larger is a click.
+        let max_step = out.windows(2).fold(0.0f32, |m, w| m.max((w[1] - w[0]).abs()));
+        assert!(max_step < 0.04, "step {max_step}");
+    }
+
+    #[test]
+    fn restart_after_bypass_fades_back_in() {
+        let input = test_signal(SR, 8);
+        let mut d = SpectralDenoiser::new();
+        assert!(d.set_profile(&[0.0f32; HALF]));
+        let _ = run_blocks(&input, 512, |b| d.process_block(b));
+        d.restart();
+        let out = run_blocks(&input, 512, |b| d.process_block(b));
+        assert_eq!(&out[..N], &input[..N]);
     }
 
     #[test]

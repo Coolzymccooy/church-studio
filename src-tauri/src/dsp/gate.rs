@@ -37,6 +37,11 @@ impl Gate {
         }
     }
 
+    /// Lookahead delay in samples.
+    pub fn latency_samples(&self) -> usize {
+        self.delay_buf.len() - 1
+    }
+
     pub fn set_threshold_db(&mut self, db: f32) {
         self.threshold_lin = db_to_lin(db);
     }

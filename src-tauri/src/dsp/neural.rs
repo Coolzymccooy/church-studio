@@ -2,18 +2,20 @@
 ///
 /// RNNoise works on fixed 480-sample frames at 48 kHz with samples scaled to
 /// the i16 range. This wrapper keeps 480-sample input/output FIFOs so it
-/// accepts blocks of ANY length, allocates only in `new()`, and has a fixed
-/// latency of 480 samples (10 ms).
+/// accepts blocks of ANY length and allocates only in `new()`.
 ///
-/// Latency / bypass: consistent with the spectral stages, the stage keeps the
-/// same 480-sample delay line when disabled (dry signal passes through the
-/// FIFO), so toggling never jumps in time. The wet/dry amount is ramped
-/// linearly across each frame, so toggling or moving `mix` does not click.
-/// While fully dry the network is not run (no CPU cost).
+/// Latency: 480 samples (10 ms) while enabled. When disabled the stage is a
+/// zero-latency passthrough (`latency_samples()` = 0) and the network is not
+/// run. Enabling it resets the FIFOs and crossfades from dry to wet (see
+/// `stage_switch.rs`); disabling crossfades back to dry. The RNN's hidden
+/// state is NOT reset on re-enable (rebuilding `DenoiseState` would allocate
+/// on the audio thread); it re-adapts within a few frames, which the dry fill
+/// and crossfade cover. Moving `mix` is ramped linearly across each frame.
 ///
 /// Sample rate: RNNoise is trained for 48 kHz only. At any other engine rate
 /// the stage is inactive — `available()` is false, `process_block` leaves the
 /// audio untouched and the latency is 0. Resampling is future work.
+use super::stage_switch::StageSwitch;
 use nnnoiseless::DenoiseState;
 
 pub const FRAME: usize = 480;
@@ -23,6 +25,7 @@ const I16_SCALE: f32 = 32_768.0;
 
 pub struct NeuralDenoiser {
     state: Option<Box<DenoiseState<'static>>>,
+    switch: StageSwitch,
     /// Current input frame, already scaled to the i16 range.
     in_frame: Vec<f32>,
     /// Network output for the current frame (i16 range).
@@ -30,8 +33,8 @@ pub struct NeuralDenoiser {
     /// Finished output samples played out during the next frame.
     ready: Vec<f32>,
     pos: usize,
-    /// Wet amount actually applied at the end of the previous frame.
-    current_wet: f32,
+    /// `mix` actually applied at the end of the previous frame.
+    current_mix: f32,
     last_vad: f32,
     pub enabled: bool,
     /// Wet amount 0..1 (1 = fully denoised).
@@ -43,11 +46,12 @@ impl NeuralDenoiser {
         let available = (sample_rate - REQUIRED_SAMPLE_RATE).abs() < 0.5;
         NeuralDenoiser {
             state: if available { Some(DenoiseState::new()) } else { None },
+            switch: StageSwitch::new(FRAME),
             in_frame: vec![0.0; FRAME],
             net_out: vec![0.0; FRAME],
             ready: vec![0.0; FRAME],
             pos: 0,
-            current_wet: 0.0,
+            current_mix: 1.0,
             last_vad: 0.0,
             enabled: false,
             mix: 1.0,
@@ -59,9 +63,9 @@ impl NeuralDenoiser {
         self.state.is_some()
     }
 
-    /// Fixed latency in samples (0 when unavailable).
+    /// Current processing latency: 480 when enabled and available, else 0.
     pub fn latency_samples(&self) -> usize {
-        if self.available() {
+        if self.available() && self.enabled {
             FRAME
         } else {
             0
@@ -73,66 +77,94 @@ impl NeuralDenoiser {
         self.last_vad
     }
 
+    /// Drop the streaming state; the next enabled block fades in from dry.
+    /// Used when the whole chain comes back from bypass.
+    pub fn restart(&mut self) {
+        self.switch.force_restart();
+    }
+
+    fn target_mix(&self) -> f32 {
+        if self.mix.is_finite() {
+            self.mix.clamp(0.0, 1.0)
+        } else {
+            1.0
+        }
+    }
+
+    fn reset_fifos(&mut self) {
+        for v in self.in_frame.iter_mut() {
+            *v = 0.0;
+        }
+        for v in self.ready.iter_mut() {
+            *v = 0.0;
+        }
+        self.pos = 0;
+        self.current_mix = self.target_mix();
+    }
+
     pub fn process_block(&mut self, buf: &mut [f32]) {
         if self.state.is_none() {
             return;
         }
+        if self.switch.update(self.enabled) {
+            self.reset_fifos();
+        }
+        if !self.switch.is_running() {
+            self.last_vad = 0.0;
+            return; // zero-latency passthrough
+        }
+
         for s in buf.iter_mut() {
-            let x = *s;
-            *s = self.ready[self.pos];
-            self.in_frame[self.pos] = x * I16_SCALE;
-            self.pos += 1;
-            if self.pos == FRAME {
-                self.pos = 0;
-                self.run_frame();
+            if !self.switch.is_running() {
+                self.last_vad = 0.0;
+                break; // fade-out finished mid-block: rest stays dry
             }
+            let x = *s;
+            let wet = self.tick(x);
+            let amount = self.switch.next_mix();
+            *s = x + (wet - x) * amount;
         }
     }
 
-    fn run_frame(&mut self) {
-        let target_wet = if self.enabled {
-            if self.mix.is_finite() {
-                self.mix.clamp(0.0, 1.0)
-            } else {
-                1.0
-            }
-        } else {
-            0.0
-        };
-        let start_wet = self.current_wet;
+    /// Push one sample, get the (mix-applied) output FRAME samples behind it.
+    #[inline]
+    fn tick(&mut self, x: f32) -> f32 {
+        let y = self.ready[self.pos];
+        self.in_frame[self.pos] = x * I16_SCALE;
+        self.pos += 1;
+        if self.pos == FRAME {
+            self.pos = 0;
+            self.run_frame();
+        }
+        y
+    }
 
-        let run_network = start_wet > 0.0 || target_wet > 0.0;
-        if run_network {
-            if let Some(state) = self.state.as_mut() {
-                let vad = state.process_frame(&mut self.net_out[..], &self.in_frame[..]);
-                self.last_vad = if vad.is_finite() { vad } else { 0.0 };
-            }
-        } else {
-            self.last_vad = 0.0;
+    fn run_frame(&mut self) {
+        let target_mix = self.target_mix();
+        let start_mix = self.current_mix;
+
+        if let Some(state) = self.state.as_mut() {
+            let vad = state.process_frame(&mut self.net_out[..], &self.in_frame[..]);
+            self.last_vad = if vad.is_finite() { vad } else { 0.0 };
         }
 
         let inv_scale = 1.0 / I16_SCALE;
-        let step = (target_wet - start_wet) / FRAME as f32;
+        let step = (target_mix - start_mix) / FRAME as f32;
         for i in 0..FRAME {
             let dry = self.in_frame[i] * inv_scale;
-            let out = if run_network {
-                let wet_amount = start_wet + step * (i + 1) as f32;
-                let wet = self.net_out[i] * inv_scale;
-                let wet = if wet.is_finite() { wet } else { 0.0 };
-                dry + (wet - dry) * wet_amount
-            } else {
-                dry
-            };
-            self.ready[i] = out;
+            let wet = self.net_out[i] * inv_scale;
+            let wet = if wet.is_finite() { wet } else { 0.0 };
+            let amount = start_mix + step * (i + 1) as f32;
+            self.ready[i] = dry + (wet - dry) * amount;
         }
-        self.current_wet = target_wet;
+        self.current_mix = target_mix;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dsp::test_util::{max_abs_diff, rms, run_blocks, test_signal, white_noise};
+    use crate::dsp::test_util::{max_abs_diff, rms, run_blocks, sine, test_signal, white_noise};
 
     const SR: usize = 48_000;
 
@@ -147,8 +179,8 @@ mod tests {
         assert!(NeuralDenoiser::new(48_000.0).available());
         let mut d = NeuralDenoiser::new(44_100.0);
         assert!(!d.available());
-        assert_eq!(d.latency_samples(), 0);
         d.enabled = true;
+        assert_eq!(d.latency_samples(), 0);
         let input = test_signal(4_000, 1);
         let out = run_blocks(&input, 256, |b| d.process_block(b));
         assert_eq!(out, input);
@@ -171,16 +203,42 @@ mod tests {
     }
 
     #[test]
-    fn disabled_passes_through_with_same_latency() {
+    fn disabled_is_exact_zero_latency_passthrough() {
         let input = test_signal(SR, 9);
-        let mut d = NeuralDenoiser::new(SR as f64);
-        let lat = d.latency_samples();
-        assert_eq!(lat, FRAME);
-        let out = run_blocks(&input, 300, |b| d.process_block(b));
-        for t in lat..out.len() {
-            assert!((out[t] - input[t - lat]).abs() < 1e-6, "t={t}");
+        for &block in &[64usize, 256, 480, 1000, 4096] {
+            let mut d = NeuralDenoiser::new(SR as f64);
+            assert_eq!(d.latency_samples(), 0);
+            let out = run_blocks(&input, block, |b| d.process_block(b));
+            assert_eq!(out, input, "block {block}");
         }
-        assert!(out[..lat].iter().all(|s| *s == 0.0));
+        assert_eq!(enabled().latency_samples(), FRAME);
+    }
+
+    #[test]
+    fn enable_starts_dry_for_one_frame() {
+        let input = test_signal(SR / 2, 10);
+        let mut d = enabled();
+        let out = run_blocks(&input, 300, |b| d.process_block(b));
+        assert_eq!(&out[..FRAME], &input[..FRAME]);
+    }
+
+    #[test]
+    fn toggling_does_not_click() {
+        let input = sine(SR * 2, 440.0, SR as f32, 0.5);
+        let mut d = NeuralDenoiser::new(SR as f64);
+        // mix 0: "wet" is the delayed dry signal, so this measures only the
+        // on/off switching (dry fill + crossfade), not RNNoise's own output.
+        d.mix = 0.0;
+        let mut out = Vec::with_capacity(input.len());
+        for (i, chunk) in input.chunks(480).enumerate() {
+            d.enabled = (i / 20) % 2 == 1;
+            let mut block = chunk.to_vec();
+            d.process_block(&mut block);
+            out.extend_from_slice(&block);
+        }
+        // Sine slope < 0.03/sample; the crossfade adds ≤ 2 × 0.5 / 480.
+        let max_step = out.windows(2).fold(0.0f32, |m, w| m.max((w[1] - w[0]).abs()));
+        assert!(max_step < 0.04, "step {max_step}");
     }
 
     #[test]
@@ -188,7 +246,7 @@ mod tests {
         let mut d = enabled();
         let noise = white_noise(SR * 3, 17, 0.1);
         let out = run_blocks(&noise, 512, |b| d.process_block(b));
-        let skip = SR + d.latency_samples(); // 1 s warm-up
+        let skip = SR; // 1 s warm-up (covers fill + crossfade)
         let in_rms = rms(&noise[skip..]);
         let out_rms = rms(&out[skip..]);
         let reduction_db = 20.0 * (in_rms / out_rms.max(1e-12)).log10();

@@ -153,7 +153,8 @@ async fn start_audio_engine(
     let info = serde_json::json!({
         "sample_rate": engine.sample_rate,
         "buffer_frames": engine.buffer_frames,
-        "latency_ms": engine.latency_ms,
+        "latency_ms": engine.total_latency_ms(),
+        "buffer_latency_ms": engine.latency_ms,
         "callback_avg_ms": engine.callback_avg_ms(),
         "callback_peak_ms": engine.callback_peak_ms(),
         "cpu_load_pct": engine.cpu_load_pct(),
@@ -232,7 +233,8 @@ fn serialize_engine_status(engine: &RunningEngine) -> serde_json::Value {
         "running": true,
         "sample_rate": engine.sample_rate,
         "buffer_frames": engine.buffer_frames,
-        "latency_ms": engine.latency_ms,
+        "latency_ms": engine.total_latency_ms(),
+        "buffer_latency_ms": engine.latency_ms,
         "callback_avg_ms": engine.callback_avg_ms(),
         "callback_peak_ms": engine.callback_peak_ms(),
         "cpu_load_pct": engine.cpu_load_pct(),
@@ -242,7 +244,7 @@ fn serialize_engine_status(engine: &RunningEngine) -> serde_json::Value {
         "broadcast_output_name": engine.broadcast_output_name,
         "noise_profile_ready": engine.noise_profile_ready(),
         "neural_available": engine.neural_available,
-        "dsp_latency_samples": engine.dsp_latency_samples,
+        "dsp_latency_samples": engine.dsp_latency_samples(),
         "dropped_output_samples": engine.dropped_output_samples(),
     })
 }

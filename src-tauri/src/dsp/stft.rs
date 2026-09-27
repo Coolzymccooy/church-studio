@@ -12,12 +12,11 @@
 /// allocated in `new()`; `process` never allocates.
 ///
 /// Latency: exactly `N` samples. Output sample `t` is input sample `t - N`
-/// after spectral processing (zeros for `t < N`).
+/// after spectral processing (zeros for `t < N` or right after `reset`).
 ///
-/// When `active == false` the frame skips the FFT and adds `x · w²` to the
-/// overlap-add accumulator instead. That reconstructs the input perfectly with
-/// the SAME latency, so switching a stage on or off never jumps in time and the
-/// overlap-add gives a natural N-sample crossfade between processed and dry.
+/// On/off handling lives in the stages (see `stage_switch.rs`): a disabled
+/// stage does not call this engine at all (zero latency), and re-enabling it
+/// calls `reset` and crossfades.
 use rustfft::{num_complex::Complex32, Fft, FftPlanner};
 use std::sync::Arc;
 
@@ -74,28 +73,55 @@ impl StreamingStft {
         N
     }
 
-    /// Process `buf` in place.
+    /// Clear all streaming state (input history, overlap-add accumulator,
+    /// pending/ready hops). No allocation.
+    pub fn reset(&mut self) {
+        for v in self.frame.iter_mut() {
+            *v = 0.0;
+        }
+        for v in self.pending.iter_mut() {
+            *v = 0.0;
+        }
+        for v in self.out_acc.iter_mut() {
+            *v = 0.0;
+        }
+        for v in self.ready.iter_mut() {
+            *v = 0.0;
+        }
+        self.hop_pos = 0;
+    }
+
+    /// Push one input sample, get the output sample `N` samples behind it.
     ///
     /// `shape` receives the full N-bin spectrum of each frame and must modify
     /// bins `0..HALF` only; the engine restores Hermitian symmetry afterwards.
-    /// It is only called when `active` is true.
-    pub fn process<F>(&mut self, buf: &mut [f32], active: bool, mut shape: F)
+    #[inline]
+    pub fn tick<F>(&mut self, x: f32, shape: &mut F) -> f32
+    where
+        F: FnMut(&mut [Complex32]),
+    {
+        let y = self.ready[self.hop_pos];
+        self.pending[self.hop_pos] = x;
+        self.hop_pos += 1;
+        if self.hop_pos == HOP {
+            self.hop_pos = 0;
+            self.run_frame(shape);
+        }
+        y
+    }
+
+    /// Process `buf` in place (every sample through `tick`).
+    #[allow(dead_code)] // the stages use `tick`; kept for tests and tools
+    pub fn process<F>(&mut self, buf: &mut [f32], mut shape: F)
     where
         F: FnMut(&mut [Complex32]),
     {
         for s in buf.iter_mut() {
-            let x = *s;
-            *s = self.ready[self.hop_pos];
-            self.pending[self.hop_pos] = x;
-            self.hop_pos += 1;
-            if self.hop_pos == HOP {
-                self.hop_pos = 0;
-                self.run_frame(active, &mut shape);
-            }
+            *s = self.tick(*s, &mut shape);
         }
     }
 
-    fn run_frame<F>(&mut self, active: bool, shape: &mut F)
+    fn run_frame<F>(&mut self, shape: &mut F)
     where
         F: FnMut(&mut [Complex32]),
     {
@@ -103,35 +129,27 @@ impl StreamingStft {
         self.frame.copy_within(HOP.., 0);
         self.frame[N - HOP..].copy_from_slice(&self.pending[..]);
 
-        if active {
-            for i in 0..N {
-                self.spec[i] = Complex32::new(self.frame[i] * self.window[i], 0.0);
-            }
-            self.fft
-                .process_with_scratch(&mut self.spec[..], &mut self.scratch[..]);
+        for i in 0..N {
+            self.spec[i] = Complex32::new(self.frame[i] * self.window[i], 0.0);
+        }
+        self.fft
+            .process_with_scratch(&mut self.spec[..], &mut self.scratch[..]);
 
-            shape(&mut self.spec[..]);
+        shape(&mut self.spec[..]);
 
-            // Real signal: keep the spectrum Hermitian.
-            for k in 1..HALF - 1 {
-                self.spec[N - k] = self.spec[k].conj();
-            }
-            self.spec[0].im = 0.0;
-            self.spec[HALF - 1].im = 0.0;
+        // Real signal: keep the spectrum Hermitian.
+        for k in 1..HALF - 1 {
+            self.spec[N - k] = self.spec[k].conj();
+        }
+        self.spec[0].im = 0.0;
+        self.spec[HALF - 1].im = 0.0;
 
-            self.ifft
-                .process_with_scratch(&mut self.spec[..], &mut self.scratch[..]);
+        self.ifft
+            .process_with_scratch(&mut self.spec[..], &mut self.scratch[..]);
 
-            let scale = 1.0 / (N as f32 * COLA_SUM);
-            for i in 0..N {
-                self.out_acc[i] += self.spec[i].re * self.window[i] * scale;
-            }
-        } else {
-            let scale = 1.0 / COLA_SUM;
-            for i in 0..N {
-                let w = self.window[i];
-                self.out_acc[i] += self.frame[i] * w * w * scale;
-            }
+        let scale = 1.0 / (N as f32 * COLA_SUM);
+        for i in 0..N {
+            self.out_acc[i] += self.spec[i].re * self.window[i] * scale;
         }
 
         // The first hop of the accumulator has received all 4 overlapping
@@ -178,7 +196,7 @@ mod tests {
         let input = crate::dsp::test_util::test_signal(48_000, 1);
         let mut out = input.clone();
         let mut stft = StreamingStft::new();
-        stft.process(&mut out, true, |_spec| {});
+        stft.process(&mut out, |_spec| {});
         for t in 0..out.len() {
             let expected = if t >= N { input[t - N] } else { 0.0 };
             assert!((out[t] - expected).abs() < 1e-4, "t={t}");
@@ -186,14 +204,16 @@ mod tests {
     }
 
     #[test]
-    fn inactive_path_reconstructs_with_same_latency() {
-        let input = crate::dsp::test_util::test_signal(48_000, 2);
-        let mut out = input.clone();
+    fn reset_restarts_from_silence() {
+        let input = crate::dsp::test_util::test_signal(8_000, 2);
         let mut stft = StreamingStft::new();
-        stft.process(&mut out, false, |_spec| {});
-        for t in 0..out.len() {
-            let expected = if t >= N { input[t - N] } else { 0.0 };
-            assert!((out[t] - expected).abs() < 1e-5, "t={t}");
-        }
+        let mut junk = input.clone();
+        stft.process(&mut junk[..3_000], |_spec| {});
+        stft.reset();
+        let mut out = input.clone();
+        stft.process(&mut out, |_spec| {});
+        let mut fresh = input.clone();
+        StreamingStft::new().process(&mut fresh, |_spec| {});
+        assert_eq!(out, fresh);
     }
 }

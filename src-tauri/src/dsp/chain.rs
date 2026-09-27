@@ -57,6 +57,10 @@ pub struct DspChain {
     pub last_input_db: f32,
     pub last_output_db: f32,
     pub last_auto_gain_db: f32,
+
+    /// True while the global bypass is engaged (block-latency stages are
+    /// restarted with a crossfade when it is released).
+    bypassed: bool,
 }
 
 impl DspChain {
@@ -86,6 +90,7 @@ impl DspChain {
             last_input_db: -96.0,
             last_output_db: -96.0,
             last_auto_gain_db: 0.0,
+            bypassed: false,
         }
     }
 
@@ -124,7 +129,19 @@ impl DspChain {
     /// Process one block of mono samples in-place.
     /// Returns the latest LUFS readings if a new 100ms block completed.
     pub fn process_block(&mut self, buf: &mut [f32], bypass: bool) {
-        if bypass || buf.is_empty() { return; }
+        if bypass {
+            self.bypassed = true;
+            return;
+        }
+        if self.bypassed {
+            // Coming back from bypass: the neural/spectral FIFOs hold stale
+            // audio. Restart them so they refill and crossfade in from dry.
+            self.bypassed = false;
+            self.neural.restart();
+            self.noise.restart();
+            self.dereverb.restart();
+        }
+        if buf.is_empty() { return; }
 
         let gain_lin = db_to_lin(self.input_gain_db);
 
@@ -200,13 +217,21 @@ impl DspChain {
         self.neural.last_vad()
     }
 
-    /// Fixed latency added by the block-based stages (neural + spectral), in
-    /// samples. Constant for the lifetime of the chain: disabled stages keep
-    /// their delay line running so toggling never shifts time.
-    pub fn latency_samples(&self) -> usize {
+    /// Processing latency of the chain as currently configured, in samples:
+    /// the sum over the ACTIVE stages (neural 480, noise 1024, dereverb 1024,
+    /// gate lookahead when the gate is on, limiter lookahead). Disabled
+    /// stages are zero-latency passthroughs, and the global bypass is 0.
+    /// Reflects the params from the most recent `sync_params`/`process_block`.
+    pub fn total_latency_samples(&self) -> usize {
+        if self.bypassed {
+            return 0;
+        }
+        let gate = if self.gate_enabled { self.gate.latency_samples() } else { 0 };
         self.neural.latency_samples()
             + self.noise.latency_samples()
             + self.dereverb.latency_samples()
+            + gate
+            + self.limiter.latency_samples()
     }
 
     /// Install a noise power spectrum computed off the audio thread by
@@ -235,4 +260,50 @@ fn rms(buf: &[f32]) -> f32 {
 #[inline] fn lin_to_db(lin: f32) -> f32 { 20.0 * lin.max(1e-9).log10() }
 #[inline] fn coef(ms: f64, sr: f64) -> f32 {
     (1.0 - (-2.2 / (ms * 0.001 * sr)).exp()) as f32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dsp::test_util::test_signal;
+
+    const SR: f64 = 48_000.0;
+
+    #[test]
+    fn total_latency_counts_only_active_stages() {
+        let params = Arc::new(DspParams::defaults());
+        let mut chain = DspChain::new(SR);
+        chain.sync_params(&params);
+        // Defaults: gate on (20 ms lookahead) + limiter (5 ms); spectral and
+        // neural stages off, so they add nothing.
+        let base = chain.gate.latency_samples() + chain.limiter.latency_samples();
+        assert_eq!(chain.total_latency_samples(), base);
+
+        params.dereverb_enabled.store(true, Ordering::Relaxed);
+        params.neural_enabled.store(true, Ordering::Relaxed);
+        chain.sync_params(&params);
+        assert_eq!(chain.total_latency_samples(), base + 1024 + 480);
+
+        let mut block = test_signal(512, 1);
+        chain.process_block(&mut block, true);
+        assert_eq!(chain.total_latency_samples(), 0);
+        chain.process_block(&mut block, false);
+        assert_eq!(chain.total_latency_samples(), base + 1024 + 480);
+    }
+
+    #[test]
+    fn unbypass_restarts_block_stages_without_nan() {
+        let params = Arc::new(DspParams::defaults());
+        params.dereverb_enabled.store(true, Ordering::Relaxed);
+        let mut chain = DspChain::new(SR);
+        let input = test_signal(48_000, 2);
+        let mut out = Vec::with_capacity(input.len());
+        for (i, chunk) in input.chunks(480).enumerate() {
+            chain.sync_params(&params);
+            let mut block = chunk.to_vec();
+            chain.process_block(&mut block, (i / 25) % 2 == 1);
+            out.extend_from_slice(&block);
+        }
+        assert!(out.iter().all(|s| s.is_finite()));
+    }
 }

@@ -8,6 +8,7 @@ pub mod lufs;
 pub mod mixer;
 pub mod neural;
 pub mod noise;
+pub mod stage_switch;
 pub mod stft;
 
 #[cfg(test)]

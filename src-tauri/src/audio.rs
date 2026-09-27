@@ -42,8 +42,6 @@ pub struct AudioEngine {
     pub input_device_name: String,
     pub monitor_output_name: String,
     pub broadcast_output_name: Option<String>,
-    /// Fixed latency of the block-based DSP stages, in samples.
-    pub dsp_latency_samples: usize,
     /// RNNoise stage usable (engine at 48 kHz).
     pub neural_available: bool,
 }
@@ -60,8 +58,6 @@ pub struct RunningEngine {
     pub input_device_name: String,
     pub monitor_output_name: String,
     pub broadcast_output_name: Option<String>,
-    /// Fixed latency of the block-based DSP stages, in samples.
-    pub dsp_latency_samples: usize,
     /// RNNoise stage usable (engine at 48 kHz).
     pub neural_available: bool,
 }
@@ -78,7 +74,6 @@ struct EngineInfo {
     input_device_name: String,
     monitor_output_name: String,
     broadcast_output_name: Option<String>,
-    dsp_latency_samples: usize,
     neural_available: bool,
 }
 
@@ -98,6 +93,9 @@ struct EngineShared {
     profile_applied: AtomicU64,
     capture_busy: AtomicBool,
     noise_profile_ready: AtomicBool,
+    /// Current processing latency of the DSP chain (samples), published by
+    /// the callback after every block.
+    dsp_latency_samples: AtomicU64,
     dropped_output_samples: AtomicU64,
     callback_count: AtomicU64,
     callback_total_ns: AtomicU64,
@@ -112,6 +110,7 @@ impl EngineShared {
             profile_pending: AtomicBool::new(false),
             profile_applied: AtomicU64::new(0),
             capture_busy: AtomicBool::new(false),
+            dsp_latency_samples: AtomicU64::new(0),
             noise_profile_ready: AtomicBool::new(false),
             dropped_output_samples: AtomicU64::new(0),
             callback_count: AtomicU64::new(0),
@@ -162,7 +161,6 @@ impl AudioEngine {
             input_device_name: self.input_device_name.clone(),
             monitor_output_name: self.monitor_output_name.clone(),
             broadcast_output_name: self.broadcast_output_name.clone(),
-            dsp_latency_samples: self.dsp_latency_samples,
             neural_available: self.neural_available,
         }
     }
@@ -264,7 +262,10 @@ impl AudioEngine {
 
         let (meters_tx, meters_rx) = mpsc::sync_channel::<MetersPayload>(32);
         let mut dsp = DspChain::new(sr as f64);
-        let dsp_latency_samples = dsp.latency_samples();
+        dsp.sync_params(&params);
+        shared
+            .dsp_latency_samples
+            .store(dsp.total_latency_samples() as u64, Ordering::Relaxed);
         let neural_available = dsp.neural_available();
         let shared_cb = shared.clone();
 
@@ -304,6 +305,9 @@ impl AudioEngine {
             dsp.sync_params(&params_cb);
             let bypass = params_cb.bypass.load(Ordering::Relaxed);
             dsp.process_block(&mut *block, bypass);
+            shared_cb
+                .dsp_latency_samples
+                .store(dsp.total_latency_samples() as u64, Ordering::Relaxed);
 
             let monitor_gain =
                 db_to_lin(params_cb.monitor_gain_db.load(Ordering::Relaxed));
@@ -545,7 +549,6 @@ impl AudioEngine {
             input_device_name,
             monitor_output_name,
             broadcast_output_name,
-            dsp_latency_samples,
             neural_available,
         })
     }
@@ -604,7 +607,6 @@ impl RunningEngine {
             input_device_name: info.input_device_name,
             monitor_output_name: info.monitor_output_name,
             broadcast_output_name: info.broadcast_output_name,
-            dsp_latency_samples: info.dsp_latency_samples,
             neural_available: info.neural_available,
         })
     }
@@ -683,6 +685,21 @@ impl RunningEngine {
             }
             std::thread::sleep(Duration::from_millis(2));
         }
+    }
+
+    /// Current DSP processing latency in samples (0 when bypassed).
+    pub fn dsp_latency_samples(&self) -> u64 {
+        self.shared.dsp_latency_samples.load(Ordering::Relaxed)
+    }
+
+    /// Buffer latency plus current DSP processing latency, in ms.
+    pub fn total_latency_ms(&self) -> f32 {
+        let dsp_ms = if self.sample_rate > 0 {
+            self.dsp_latency_samples() as f32 * 1000.0 / self.sample_rate as f32
+        } else {
+            0.0
+        };
+        self.latency_ms + dsp_ms
     }
 
     pub fn noise_profile_ready(&self) -> bool {

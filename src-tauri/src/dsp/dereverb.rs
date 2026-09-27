@@ -2,11 +2,14 @@
 ///
 /// Runs on the streaming STFT engine (`stft.rs`): N=1024, HOP=256 (75%
 /// overlap), Hann analysis + synthesis, state carried across callbacks, no
-/// allocation in `process_block`, any block length. Fixed latency =
-/// `latency_samples()` (1024 samples) whether enabled or not — when disabled
-/// the audio passes through the same delay line so toggling never jumps in
-/// time. The reverb estimate is only updated while the stage is enabled.
-use super::stft::{StreamingStft, HALF};
+/// allocation in `process_block`, any block length.
+///
+/// Latency: 1024 samples (N) while enabled. When disabled the stage is a
+/// zero-latency passthrough (`latency_samples()` = 0) and does no work.
+/// Enabling it resets the STFT and the reverb estimate and crossfades from dry
+/// to wet (see `stage_switch.rs`); disabling crossfades back to dry.
+use super::stage_switch::StageSwitch;
+use super::stft::{StreamingStft, HALF, N};
 use rustfft::num_complex::Complex32;
 
 /// Per-bin reverb tail estimate (fast + slow running minimum).
@@ -24,6 +27,21 @@ impl ReverbEstimate {
             slow_min: vec![1e-6; HALF],
             fast_age: vec![0; HALF],
             slow_age: vec![0; HALF],
+        }
+    }
+
+    fn reset(&mut self) {
+        for v in self.fast_min.iter_mut() {
+            *v = 1e-6;
+        }
+        for v in self.slow_min.iter_mut() {
+            *v = 1e-6;
+        }
+        for v in self.fast_age.iter_mut() {
+            *v = 0;
+        }
+        for v in self.slow_age.iter_mut() {
+            *v = 0;
         }
     }
 
@@ -63,6 +81,7 @@ impl ReverbEstimate {
 
 pub struct SpectralDereverb {
     stft: StreamingStft,
+    switch: StageSwitch,
     estimate: ReverbEstimate,
     pub strength: f32, // 0.0–1.0
     pub floor: f32,    // spectral floor (prevent over-suppression)
@@ -73,6 +92,7 @@ impl SpectralDereverb {
     pub fn new() -> Self {
         SpectralDereverb {
             stft: StreamingStft::new(),
+            switch: StageSwitch::new(N),
             estimate: ReverbEstimate::new(),
             strength: 0.6,
             floor: 0.08,
@@ -80,17 +100,44 @@ impl SpectralDereverb {
         }
     }
 
+    /// Current processing latency: N when enabled, 0 when bypassed.
     pub fn latency_samples(&self) -> usize {
-        self.stft.latency_samples()
+        if self.enabled {
+            self.stft.latency_samples()
+        } else {
+            0
+        }
+    }
+
+    /// Drop the streaming state; the next enabled block fades in from dry.
+    /// Used when the whole chain comes back from bypass.
+    pub fn restart(&mut self) {
+        self.switch.force_restart();
     }
 
     pub fn process_block(&mut self, buf: &mut [f32]) {
-        let active = self.enabled;
+        if self.switch.update(self.enabled) {
+            self.stft.reset();
+            self.estimate.reset();
+        }
+        if !self.switch.is_running() {
+            return; // zero-latency passthrough
+        }
+
         let strength = self.strength;
         let floor = self.floor;
         let estimate = &mut self.estimate;
-        self.stft
-            .process(buf, active, |spec| estimate.apply(spec, strength, floor));
+        let mut shape = |spec: &mut [Complex32]| estimate.apply(spec, strength, floor);
+
+        for s in buf.iter_mut() {
+            if !self.switch.is_running() {
+                break; // fade-out finished mid-block: rest stays dry
+            }
+            let x = *s;
+            let wet = self.stft.tick(x, &mut shape);
+            let mix = self.switch.next_mix();
+            *s = x + (wet - x) * mix;
+        }
     }
 }
 
@@ -103,7 +150,8 @@ impl Default for SpectralDereverb {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dsp::test_util::{max_abs_diff, run_blocks, test_signal};
+    use crate::dsp::stage_switch::XFADE_SAMPLES;
+    use crate::dsp::test_util::{max_abs_diff, run_blocks, sine, test_signal};
 
     const SR: usize = 48_000;
 
@@ -124,27 +172,54 @@ mod tests {
     }
 
     #[test]
+    fn block_size_invariance_when_disabled() {
+        let input = test_signal(SR, 22);
+        for &block in &[64usize, 256, 480, 1000, 4096] {
+            let mut d = SpectralDereverb::new();
+            d.enabled = false;
+            let out = run_blocks(&input, block, |b| d.process_block(b));
+            assert_eq!(out, input, "block {block}");
+        }
+    }
+
+    #[test]
     fn zero_strength_is_perfect_reconstruction() {
         let input = test_signal(SR * 2, 4);
         let mut d = SpectralDereverb::new();
         d.strength = 0.0;
         let lat = d.latency_samples();
+        assert_eq!(lat, N);
         let out = run_blocks(&input, 480, |b| d.process_block(b));
-        for t in lat..out.len() {
+        assert_eq!(&out[..lat], &input[..lat]);
+        for t in lat + XFADE_SAMPLES..out.len() {
             assert!((out[t] - input[t - lat]).abs() < 1e-4, "t={t}");
         }
     }
 
     #[test]
-    fn disabled_passes_through_with_same_latency() {
+    fn disabled_is_exact_zero_latency_passthrough() {
         let input = test_signal(SR, 6);
         let mut d = SpectralDereverb::new();
         d.enabled = false;
-        let lat = d.latency_samples();
+        assert_eq!(d.latency_samples(), 0);
         let out = run_blocks(&input, 1000, |b| d.process_block(b));
-        for t in lat..out.len() {
-            assert!((out[t] - input[t - lat]).abs() < 1e-4, "t={t}");
+        assert_eq!(out, input);
+    }
+
+    #[test]
+    fn toggling_does_not_click() {
+        let input = sine(SR * 2, 440.0, SR as f32, 0.5);
+        let mut d = SpectralDereverb::new();
+        d.strength = 0.0;
+        let mut out = Vec::with_capacity(input.len());
+        for (i, chunk) in input.chunks(480).enumerate() {
+            d.enabled = (i / 20) % 2 == 1;
+            let mut block = chunk.to_vec();
+            d.process_block(&mut block);
+            out.extend_from_slice(&block);
         }
+        let max_step = out.windows(2).fold(0.0f32, |m, w| m.max((w[1] - w[0]).abs()));
+        assert!(max_step < 0.04, "step {max_step}");
     }
 
     #[test]

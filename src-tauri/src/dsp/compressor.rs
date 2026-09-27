@@ -79,6 +79,11 @@ impl Limiter {
     }
 
     /// Set the brick-wall ceiling in dBFS.
+    /// Lookahead delay in samples.
+    pub fn latency_samples(&self) -> usize {
+        self.lookahead
+    }
+
     #[allow(dead_code)] // used by the mixer, not yet wired into the engine
     pub fn set_threshold_db(&mut self, db: f32) {
         self.threshold = db_to_lin(db);
