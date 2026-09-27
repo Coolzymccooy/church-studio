@@ -71,10 +71,38 @@ test('buildNativeEngineArgs preserves dedicated monitor and broadcast outputs', 
   });
 
   assert.deepEqual(args, {
-    input_device: 'mic-1',
-    monitor_output_device: 'monitor-1',
-    broadcast_output_device: 'broadcast-1',
+    inputDevice: 'mic-1',
+    monitorOutputDevice: 'monitor-1',
+    broadcastOutputDevice: 'broadcast-1',
+    mainOutputId: null,
   });
+});
+
+test('buildNativeEngineArgs uses the camelCase names Tauri 2 matches', () => {
+  const args = buildNativeEngineArgs({
+    inputId: 'default',
+    outputId: 'default',
+    broadcastBus: 'Not set',
+    mainOutputId: 'PA Out',
+  });
+
+  assert.deepEqual(Object.keys(args).sort(), [
+    'broadcastOutputDevice',
+    'inputDevice',
+    'mainOutputId',
+    'monitorOutputDevice',
+  ]);
+  assert.deepEqual(args, {
+    inputDevice: null,
+    monitorOutputDevice: null,
+    broadcastOutputDevice: null,
+    mainOutputId: 'PA Out',
+  });
+  assert.equal(
+    buildNativeEngineArgs({ inputId: 'default', outputId: 'default', mainOutputId: 'default' })
+      .mainOutputId,
+    null,
+  );
 });
 
 test('resolveBroadcastLabel mirrors monitor label when requested', () => {

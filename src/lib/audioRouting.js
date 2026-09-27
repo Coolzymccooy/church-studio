@@ -67,11 +67,19 @@ export function resolveBroadcastLabel(selectedDevices, outputs) {
   return resolveDeviceLabel(outputs, broadcastDeviceId, { missingLabel: 'Broadcast Device' });
 }
 
+export function resolveMainOutputId(selectedDevices) {
+  const { mainOutputId } = selectedDevices;
+  return mainOutputId && mainOutputId !== 'default' ? mainOutputId : null;
+}
+
+// Tauri 2 matches command arguments by their camelCase names
+// (Rust `input_device` -> `inputDevice`); snake_case keys are ignored.
 export function buildNativeEngineArgs(selectedDevices) {
   return {
-    input_device: selectedDevices.inputId !== 'default' ? selectedDevices.inputId : null,
-    monitor_output_device: selectedDevices.outputId !== 'default' ? selectedDevices.outputId : null,
-    broadcast_output_device: resolveBroadcastDeviceId(selectedDevices),
+    inputDevice: selectedDevices.inputId !== 'default' ? selectedDevices.inputId : null,
+    monitorOutputDevice: selectedDevices.outputId !== 'default' ? selectedDevices.outputId : null,
+    broadcastOutputDevice: resolveBroadcastDeviceId(selectedDevices),
+    mainOutputId: resolveMainOutputId(selectedDevices),
   };
 }
 
