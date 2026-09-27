@@ -41,6 +41,8 @@ export function syncNativeParams(invoke, {
   return Promise.allSettled([
     setParamBool('gate_enabled', features.denoise),
     setParamBool('noise_enabled', features.denoise),
+    // RNNoise follows the same features as in the browser engine.
+    setParamBool('neural_denoise', Boolean(features.denoise || features.voicePattern)),
     setParamBool('comp_enabled', true),
     setParamBool('deess_enabled', features.dynamicDeEsser !== false),
     setParamBool('dereverb_enabled', features.dereverb),
