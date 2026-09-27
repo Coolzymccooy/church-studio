@@ -1,5 +1,6 @@
 mod audio;
 mod dsp;
+mod history;
 
 use audio::{EngineState, RunningEngine};
 use dsp::{AudioDeviceInfo, DspParams};

@@ -51,6 +51,7 @@ impl SpectralDenoiser {
     }
 
     /// Convenience: compute and install a profile in one step (allocates).
+    #[allow(dead_code)]
     pub fn capture_profile(&mut self, samples: &[f32]) -> bool {
         match compute_noise_profile(samples) {
             Some(profile) => self.set_profile(&profile),

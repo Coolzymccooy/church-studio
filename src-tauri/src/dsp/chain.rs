@@ -116,7 +116,7 @@ impl DspChain {
 
     /// Process one block of mono samples in-place.
     /// Returns the latest LUFS readings if a new 100ms block completed.
-    pub fn process_block(&mut self, buf: &mut Vec<f32>, bypass: bool) {
+    pub fn process_block(&mut self, buf: &mut [f32], bypass: bool) {
         if bypass || buf.is_empty() { return; }
 
         let gain_lin = db_to_lin(self.input_gain_db);
@@ -180,8 +180,10 @@ impl DspChain {
         self.last_output_db = lin_to_db(self.out_peak_env.max(1e-9));
     }
 
-    pub fn capture_noise_profile(&mut self, samples: &[f32]) {
-        self.noise.capture_profile(samples);
+    /// Install a noise power spectrum computed off the audio thread by
+    /// `noise::compute_noise_profile`. Copies only — safe in the callback.
+    pub fn set_noise_profile(&mut self, noise_pow: &[f32]) -> bool {
+        self.noise.set_profile(noise_pow)
     }
 
     fn update_auto_gain(&mut self, rms_in: f32) {
