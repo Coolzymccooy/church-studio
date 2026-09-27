@@ -73,9 +73,10 @@ test('native engine controller restarts through stop then start', async () => {
     'start_audio_engine',
   ]);
   assert.deepEqual(calls[1].payload, {
-    input_device: 'mic-1',
-    monitor_output_device: 'monitor-1',
-    broadcast_output_device: 'broadcast-1',
+    inputDevice: 'mic-1',
+    monitorOutputDevice: 'monitor-1',
+    broadcastOutputDevice: 'broadcast-1',
+    mainOutputId: null,
   });
 });
 

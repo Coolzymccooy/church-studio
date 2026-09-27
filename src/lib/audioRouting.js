@@ -33,6 +33,12 @@ export function reconcileSelectedDevices(selectedDevices, availableDevices) {
     next.broadcastBus = resolveCurrentDeviceId(next.broadcastBus, outputs, 'Not set');
   }
 
+  // The Main (PA) output is desktop-only and optional; a device that has
+  // gone away falls back to "Not set" rather than to the system default.
+  next.mainOutputId = resolveMainOutputId(next)
+    ? resolveCurrentDeviceId(next.mainOutputId, outputs, 'Not set')
+    : 'Not set';
+
   return next;
 }
 
@@ -67,11 +73,19 @@ export function resolveBroadcastLabel(selectedDevices, outputs) {
   return resolveDeviceLabel(outputs, broadcastDeviceId, { missingLabel: 'Broadcast Device' });
 }
 
+export function resolveMainOutputId(selectedDevices) {
+  const { mainOutputId } = selectedDevices;
+  return mainOutputId && mainOutputId !== 'default' && mainOutputId !== 'Not set' ? mainOutputId : null;
+}
+
+// Tauri 2 matches command arguments by their camelCase names
+// (Rust `input_device` -> `inputDevice`); snake_case keys are ignored.
 export function buildNativeEngineArgs(selectedDevices) {
   return {
-    input_device: selectedDevices.inputId !== 'default' ? selectedDevices.inputId : null,
-    monitor_output_device: selectedDevices.outputId !== 'default' ? selectedDevices.outputId : null,
-    broadcast_output_device: resolveBroadcastDeviceId(selectedDevices),
+    inputDevice: selectedDevices.inputId !== 'default' ? selectedDevices.inputId : null,
+    monitorOutputDevice: selectedDevices.outputId !== 'default' ? selectedDevices.outputId : null,
+    broadcastOutputDevice: resolveBroadcastDeviceId(selectedDevices),
+    mainOutputId: resolveMainOutputId(selectedDevices),
   };
 }
 

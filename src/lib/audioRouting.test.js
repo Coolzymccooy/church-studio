@@ -37,6 +37,7 @@ test('reconcileSelectedDevices resets missing devices to safe defaults', () => {
     inputId: 'default',
     outputId: 'default',
     broadcastBus: 'Not set',
+    mainOutputId: 'Not set',
   });
 });
 
@@ -60,6 +61,7 @@ test('reconcileSelectedDevices migrates legacy tauri ids to current device ids',
     inputId: 'USB Audio Codec',
     outputId: 'USB Audio Codec',
     broadcastBus: 'VB-CABLE Input',
+    mainOutputId: 'Not set',
   });
 });
 
@@ -71,10 +73,38 @@ test('buildNativeEngineArgs preserves dedicated monitor and broadcast outputs', 
   });
 
   assert.deepEqual(args, {
-    input_device: 'mic-1',
-    monitor_output_device: 'monitor-1',
-    broadcast_output_device: 'broadcast-1',
+    inputDevice: 'mic-1',
+    monitorOutputDevice: 'monitor-1',
+    broadcastOutputDevice: 'broadcast-1',
+    mainOutputId: null,
   });
+});
+
+test('buildNativeEngineArgs uses the camelCase names Tauri 2 matches', () => {
+  const args = buildNativeEngineArgs({
+    inputId: 'default',
+    outputId: 'default',
+    broadcastBus: 'Not set',
+    mainOutputId: 'PA Out',
+  });
+
+  assert.deepEqual(Object.keys(args).sort(), [
+    'broadcastOutputDevice',
+    'inputDevice',
+    'mainOutputId',
+    'monitorOutputDevice',
+  ]);
+  assert.deepEqual(args, {
+    inputDevice: null,
+    monitorOutputDevice: null,
+    broadcastOutputDevice: null,
+    mainOutputId: 'PA Out',
+  });
+  assert.equal(
+    buildNativeEngineArgs({ inputId: 'default', outputId: 'default', mainOutputId: 'default' })
+      .mainOutputId,
+    null,
+  );
 });
 
 test('resolveBroadcastLabel mirrors monitor label when requested', () => {
@@ -110,4 +140,21 @@ test('describeBroadcastRoute reports a dedicated native broadcast route', () => 
     broadcast: 'VB-CABLE Input',
     hasNativeBroadcastRoute: true,
   });
+});
+
+test('reconcileSelectedDevices keeps a present Main output and drops a missing one', () => {
+  const outputs = [{ deviceId: 'pa-1', label: 'PA Interface' }];
+  const kept = reconcileSelectedDevices(
+    { inputId: 'default', outputId: 'default', broadcastBus: 'Not set', mainOutputId: 'PA Interface' },
+    { inputs: [], outputs },
+  );
+  assert.equal(kept.mainOutputId, 'pa-1');
+  assert.equal(buildNativeEngineArgs(kept).mainOutputId, 'pa-1');
+
+  const dropped = reconcileSelectedDevices(
+    { inputId: 'default', outputId: 'default', broadcastBus: 'Not set', mainOutputId: 'gone' },
+    { inputs: [], outputs },
+  );
+  assert.equal(dropped.mainOutputId, 'Not set');
+  assert.equal(buildNativeEngineArgs(dropped).mainOutputId, null);
 });

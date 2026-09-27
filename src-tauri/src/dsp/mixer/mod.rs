@@ -1,8 +1,9 @@
 //! Mixer DSP core: mono input strips summed into three stereo buses
 //! (Main = room/PA, Stream = livestream/record, Monitor = stage/headphones).
 //!
-//! Pure DSP — not yet wired to the audio engine. The control thread owns an
-//! `Arc<MixerParams>` (atomics only) and the audio thread owns the `Mixer`.
+//! Pure DSP. The engine (`audio::input_proc`) owns the `Mixer` on the audio
+//! thread; the control side (`mixer_control`) owns the shared
+//! `Arc<MixerParams>` (atomics only).
 //!
 //! API (allocation-free after `new`):
 //!   `mixer.process(&inputs, frames)` where `inputs[i]` feeds strip `i`
@@ -12,8 +13,9 @@
 //!   slices of that length. Owning the bus buffers inside the mixer keeps the
 //!   signature simple and avoids juggling six `&mut` slices per call.
 //!
-//! Latency: 20 ms (strip gate lookahead, always present) + 5 ms (bus limiter
-//! lookahead, always present) — constant, identical on every path.
+//! Latency: 5 ms bus limiter lookahead (always present) plus 20 ms on a strip
+//! only while its gate is on (switched gate, zero latency when off). See
+//! `latency_samples` / `path_latency_samples`.
 //! Smoothing: all gains, pans, sends and mutes ramp linearly over 10 ms.
 #![allow(dead_code, unused_imports)]
 
@@ -126,6 +128,29 @@ impl Mixer {
         self.max_block
     }
 
+    /// Bus latency in samples (limiter lookahead; the same on every bus).
+    pub fn bus_latency_samples(&self) -> usize {
+        self.buses[0].latency_samples()
+    }
+
+    /// Input-to-bus latency in samples for what is active right now: the
+    /// slowest strip (strips run in parallel) plus the bus limiter.
+    /// `insert_latency` is added to strip `insert_strip` for an external
+    /// insert run before the mixer (the voice chain); pass 0 for none.
+    pub fn path_latency_samples(&self, insert_strip: usize, insert_latency: usize) -> usize {
+        let slowest_strip = self
+            .strips
+            .iter()
+            .enumerate()
+            .map(|(i, strip)| {
+                let insert = if i == insert_strip { insert_latency } else { 0 };
+                strip.latency_samples() + insert
+            })
+            .max()
+            .unwrap_or(0);
+        slowest_strip + self.bus_latency_samples()
+    }
+
     /// Process one block. See the module docs for the contract.
     pub fn process(&mut self, inputs: &[&[f32]], frames: usize) -> usize {
         let n = frames.min(self.max_block);
@@ -137,7 +162,7 @@ impl Mixer {
         }
 
         let params = &*self.params;
-        let any_solo = params.any_solo();
+        let any_solo = params.any_solo(self.strips.len());
         let empty: &[f32] = &[];
 
         for (i, strip) in self.strips.iter_mut().enumerate() {

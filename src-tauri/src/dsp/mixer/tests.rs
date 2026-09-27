@@ -7,7 +7,8 @@ use std::sync::Arc;
 const SR: f64 = 48_000.0;
 const SRU: usize = 48_000;
 const BLOCK: usize = 512;
-const CENTRE: f32 = std::f32::consts::FRAC_1_SQRT_2;
+/// Per-side gain of a centred strip: the pan law is normalised to 0 dB.
+const CENTRE: f32 = 1.0;
 
 struct BusOut {
     left: Vec<f32>,
@@ -63,6 +64,19 @@ fn unity_passthrough_is_centre_panned() {
     }
     // Monitor send defaults to off.
     assert!(peak(&out[BUS_MONITOR].left) < 1e-9);
+}
+
+#[test]
+fn solo_on_an_inactive_strip_does_not_silence_monitor() {
+    // A 32-strip bank driving a 2-channel device, with strip 8 left soloed.
+    let params = Arc::new(MixerParams::new(32));
+    let mut mixer = Mixer::new(SR, BLOCK, 2, params.clone());
+    params.strips[0].send_db[BUS_MONITOR].store(0.0, Relaxed);
+    params.strips[8].solo.store(true, Relaxed);
+    let out = run(&mut mixer, &[dc(SRU, 0.5), dc(SRU, 0.0)], BLOCK);
+    for &s in tail(&out[BUS_MONITOR].left, 1_000) {
+        assert!((s - 0.5 * CENTRE).abs() < 1e-3, "monitor: {s}");
+    }
 }
 
 #[test]
@@ -202,19 +216,21 @@ fn no_nan_on_silence_with_all_processing_on() {
 fn fader_jump_is_ramped_without_clicks() {
     let (p, mut mixer) = new_mixer(1);
     p.strips[0].fader_db.store(MIN_DB, Relaxed);
-    let input = dc(SRU, 1.0);
+    // 0.5 keeps the centred level (0 dB pan law) below the −1 dBFS bus
+    // limiter, so only the fader ramp shapes the output.
+    let input = dc(SRU, 0.5);
     let _ = run(&mut mixer, &[input[..SRU / 2].to_vec()], BLOCK);
     p.strips[0].fader_db.store(0.0, Relaxed);
     let out = run(&mut mixer, &[input[SRU / 2..].to_vec()], BLOCK);
 
     let ramp = smooth::ramp_samples(SR) as f32;
     assert!(ramp >= 0.005 * SR as f32, "ramp must be at least 5 ms");
-    let max_step = CENTRE / ramp * 1.01 + 1e-6;
+    let max_step = 0.5 * CENTRE / ramp * 1.01 + 1e-6;
     let main = &out[BUS_MAIN].left;
     for w in main.windows(2) {
         assert!((w[1] - w[0]).abs() <= max_step, "step {}", (w[1] - w[0]).abs());
     }
-    assert!((main[main.len() - 1] - CENTRE).abs() < 1e-3);
+    assert!((main[main.len() - 1] - 0.5 * CENTRE).abs() < 1e-3);
 }
 
 #[test]
@@ -254,4 +270,48 @@ fn compressor_toggle_is_crossfaded() {
     assert!(max_step < 0.04, "step {max_step}");
     // And the compressor really acts when on.
     assert!(mixer.strip_meters()[0].gain_reduction_db < -6.0);
+}
+
+#[test]
+fn latency_counts_only_active_stages() {
+    let (p, mut mixer) = new_mixer(3);
+    let bus = mixer.bus_latency_samples();
+    assert_eq!(bus, (SR * 0.005) as usize, "bus limiter lookahead is 5 ms");
+    let silent = vec![0.0f32; BLOCK];
+    let inputs: [&[f32]; 3] = [&silent, &silent, &silent];
+
+    // Defaults: every strip gate off → only the bus limiter.
+    mixer.process(&inputs, BLOCK);
+    assert_eq!(mixer.path_latency_samples(usize::MAX, 0), bus);
+    assert_eq!(mixer.path_latency_samples(0, 100), bus + 100);
+
+    // One gate on: its 20 ms lookahead counts once (strips are parallel).
+    p.strips[2].gate_enabled.store(true, Relaxed);
+    mixer.process(&inputs, BLOCK);
+    let gate = (SR * 0.020) as usize;
+    assert_eq!(mixer.path_latency_samples(usize::MAX, 0), bus + gate);
+    assert_eq!(mixer.path_latency_samples(0, 100), bus + gate);
+    assert_eq!(mixer.path_latency_samples(2, 100), bus + gate + 100);
+    assert_eq!(mixer.path_latency_samples(1, 5_000), bus + 5_000);
+
+    // Gate off again: back to the limiter only.
+    p.strips[2].gate_enabled.store(false, Relaxed);
+    mixer.process(&inputs, BLOCK);
+    assert_eq!(mixer.path_latency_samples(usize::MAX, 0), bus);
+}
+
+#[test]
+fn ungated_strip_adds_no_delay() {
+    // An impulse leaves the bus exactly one limiter lookahead later: a strip
+    // with its gate off adds no latency of its own.
+    let (_p, mut mixer) = new_mixer(1);
+    let mut input = vec![0.0f32; SRU / 10];
+    input[100] = 0.5;
+    let out = run(&mut mixer, &[input], BLOCK);
+    let main = &out[BUS_MAIN].left;
+    let (peak_at, _) = main
+        .iter()
+        .enumerate()
+        .fold((0usize, 0.0f32), |(bi, bv), (i, &v)| if v.abs() > bv { (i, v.abs()) } else { (bi, bv) });
+    assert_eq!(peak_at, 100 + mixer.bus_latency_samples());
 }

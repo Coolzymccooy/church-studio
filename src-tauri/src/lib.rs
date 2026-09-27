@@ -1,8 +1,16 @@
 mod audio;
 mod dsp;
 mod history;
+mod mixer_commands;
+mod mixer_control;
+#[cfg(test)]
+mod mixer_engine_tests;
+mod mixer_meters;
+mod mixer_model;
+mod routing;
 
-use audio::{EngineState, RunningEngine};
+use audio::{DeviceSelection, EngineState, RunningEngine};
+use mixer_control::MixerControl;
 use dsp::{AudioDeviceInfo, DspParams};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
@@ -134,9 +142,11 @@ async fn start_audio_engine(
     app: AppHandle,
     state: State<'_, EngineState>,
     params: State<'_, SharedParams>,
+    mixer: State<'_, MixerControl>,
     input_device: Option<String>,
     monitor_output_device: Option<String>,
     broadcast_output_device: Option<String>,
+    main_output_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let mut guard = state.inner().lock().unwrap();
     if guard.is_some() {
@@ -146,9 +156,13 @@ async fn start_audio_engine(
     let engine = RunningEngine::spawn(
         app,
         params.0.clone(),
-        input_device,
-        monitor_output_device,
-        broadcast_output_device,
+        mixer.link(),
+        DeviceSelection {
+            input_id: input_device,
+            monitor_output_id: monitor_output_device,
+            broadcast_output_id: broadcast_output_device,
+            main_output_id,
+        },
     )?;
     let info = serde_json::json!({
         "sample_rate": engine.sample_rate,
@@ -163,6 +177,8 @@ async fn start_audio_engine(
         "input_device_name": engine.input_device_name,
         "monitor_output_name": engine.monitor_output_name,
         "broadcast_output_name": engine.broadcast_output_name,
+        "main_output_name": engine.main_output_name,
+        "inputChannels": engine.input_channels,
     });
 
     *guard = Some(engine);
@@ -242,6 +258,8 @@ fn serialize_engine_status(engine: &RunningEngine) -> serde_json::Value {
         "input_device_name": engine.input_device_name,
         "monitor_output_name": engine.monitor_output_name,
         "broadcast_output_name": engine.broadcast_output_name,
+        "main_output_name": engine.main_output_name,
+        "inputChannels": engine.input_channels,
         "noise_profile_ready": engine.noise_profile_ready(),
         "neural_available": engine.neural_available,
         "dsp_latency_samples": engine.dsp_latency_samples(),
@@ -265,6 +283,8 @@ fn engine_status(state: State<'_, EngineState>) -> serde_json::Value {
             "input_device_name": null,
             "monitor_output_name": null,
             "broadcast_output_name": null,
+            "main_output_name": null,
+            "inputChannels": 1,
             "noise_profile_ready": false,
             "neural_available": false,
             "dropped_output_samples": 0,
@@ -287,6 +307,7 @@ pub fn run() {
         .plugin(tauri_plugin_os::init())
         .manage(Mutex::new(None::<RunningEngine>) as EngineState)
         .manage(SharedParams(Arc::new(DspParams::defaults())))
+        .manage(MixerControl::new())
         .invoke_handler(tauri::generate_handler![
             start_audio_engine,
             stop_audio_engine,
@@ -296,6 +317,16 @@ pub fn run() {
             set_param_bool,
             capture_noise_profile,
             engine_status,
+            mixer_commands::mixer_state,
+            mixer_commands::mixer_set_strip_param,
+            mixer_commands::mixer_set_strip_bool,
+            mixer_commands::mixer_rename_strip,
+            mixer_commands::mixer_set_bus_param,
+            mixer_commands::mixer_set_bus_bool,
+            mixer_commands::mixer_list_scenes,
+            mixer_commands::mixer_save_scene,
+            mixer_commands::mixer_load_scene,
+            mixer_commands::mixer_delete_scene,
         ])
         .setup(|app| {
             #[cfg(desktop)]

@@ -8,6 +8,8 @@ import {
   X,
 } from 'lucide-react';
 
+import MainOutputSelect from './MainOutputSelect';
+
 function VirtualCableHint({ outputs }) {
   const vcKeywords = ['vb-cable', 'vb cable', 'blackhole', 'black hole', 'loopback', 'virtual'];
   const detected = outputs.filter((device) =>
@@ -168,6 +170,12 @@ export default function DeviceSettingsModal({
             Set this to VB-CABLE Input (Windows) or BlackHole 2ch (Mac). Then in OBS, choose the same device as your Audio Input Capture source.
           </p>
         </div>
+
+        <MainOutputSelect
+          selectedDevices={selectedDevices}
+          outputs={availableDevices.outputs}
+          onChange={(mainOutputId) => onSelectedDevicesChange({ mainOutputId })}
+        />
 
         <div className="grid grid-cols-2 gap-4">
           <div
