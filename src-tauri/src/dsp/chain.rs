@@ -7,7 +7,7 @@ use super::{
     compressor::{Compressor, Limiter},
     desser::DeEsser,
     dereverb::SpectralDereverb,
-    gate::Gate,
+    gate::SwitchedGate,
     lufs::{LufsMeter, LufsReadings},
     neural::NeuralDenoiser,
     noise::SpectralDenoiser,
@@ -19,13 +19,12 @@ use std::sync::Arc;
 pub struct DspChain {
     sr: f64,
     input_gain_db: f32,
-    gate_enabled: bool,
     compressor_enabled: bool,
 
     // Pre-processing
     hpf: Biquad,
     neural: NeuralDenoiser,
-    gate: Gate,
+    gate: SwitchedGate,
     noise: SpectralDenoiser,
 
     // EQ
@@ -68,11 +67,10 @@ impl DspChain {
         DspChain {
             sr,
             input_gain_db: 0.0,
-            gate_enabled: true,
             compressor_enabled: true,
             hpf: Biquad::hpf(80.0, sr),
             neural: NeuralDenoiser::new(sr),
-            gate: Gate::new(sr),
+            gate: SwitchedGate::new(sr),
             noise: SpectralDenoiser::new(),
             eq_warmth: Biquad::low_shelf(200.0, 3.0, sr),
             eq_clarity: Biquad::peaking(3000.0, 0.8, 2.0, sr),
@@ -101,7 +99,7 @@ impl DspChain {
         self.input_gain_db = p.gain_db.load(Relaxed);
 
         // Gate
-        self.gate_enabled = p.gate_enabled.load(Relaxed);
+        self.gate.enabled = p.gate_enabled.load(Relaxed);
         self.gate.set_threshold_db(p.gate_threshold_db.load(Relaxed));
 
         // Compressor
@@ -134,9 +132,10 @@ impl DspChain {
             return;
         }
         if self.bypassed {
-            // Coming back from bypass: the neural/spectral FIFOs hold stale
-            // audio. Restart them so they refill and crossfade in from dry.
+            // Coming back from bypass: the gate/neural/spectral delay lines
+            // hold stale audio. Restart them so they refill and crossfade in.
             self.bypassed = false;
+            self.gate.restart();
             self.neural.restart();
             self.noise.restart();
             self.dereverb.restart();
@@ -158,16 +157,14 @@ impl DspChain {
         // 2b. Neural denoise (RNNoise; inactive unless the engine runs at 48 kHz)
         self.neural.process_block(buf);
 
-        // 3. Gate
-        let gate_gain = if self.gate_enabled {
-            self.gate.process_block(buf)
-        } else { 1.0 };
-        self.last_gate_gain = gate_gain;
+        // 3. Gate (20 ms lookahead when on; zero-latency passthrough when off,
+        //    crossfaded on toggle)
+        self.last_gate_gain = self.gate.process_block(buf);
 
-        // 4. Noise reduction (streaming STFT, fixed 1024-sample latency)
+        // 4. Noise reduction (streaming STFT, 1024 samples when on, 0 when off)
         self.noise.process_block(buf);
 
-        // 5. Dereverb (streaming STFT, fixed 1024-sample latency)
+        // 5. Dereverb (streaming STFT, 1024 samples when on, 0 when off)
         self.dereverb.process_block(buf);
 
         // 6. EQ
@@ -226,11 +223,10 @@ impl DspChain {
         if self.bypassed {
             return 0;
         }
-        let gate = if self.gate_enabled { self.gate.latency_samples() } else { 0 };
         self.neural.latency_samples()
             + self.noise.latency_samples()
             + self.dereverb.latency_samples()
-            + gate
+            + self.gate.latency_samples()
             + self.limiter.latency_samples()
     }
 
@@ -278,6 +274,12 @@ mod tests {
         // neural stages off, so they add nothing.
         let base = chain.gate.latency_samples() + chain.limiter.latency_samples();
         assert_eq!(chain.total_latency_samples(), base);
+
+        params.gate_enabled.store(false, Ordering::Relaxed);
+        chain.sync_params(&params);
+        assert_eq!(chain.total_latency_samples(), chain.limiter.latency_samples());
+        params.gate_enabled.store(true, Ordering::Relaxed);
+        chain.sync_params(&params);
 
         params.dereverb_enabled.store(true, Ordering::Relaxed);
         params.neural_enabled.store(true, Ordering::Relaxed);
