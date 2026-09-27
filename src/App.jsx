@@ -15,6 +15,7 @@ import HelpCorner from './components/HelpCorner';
 import LandingPage from './components/LandingPage';
 import StudioStatusBar from './components/StudioStatusBar';
 import DeviceSettingsModal from './components/DeviceSettingsModal';
+import MainOutputSelect from './components/MainOutputSelect';
 import InputRackAiTab from './components/InputRackAiTab';
 import MixerConsole from './components/mixer/MixerConsole';
 import { createMixerController, createMockMixerController } from './lib/mixerEngine';
@@ -185,8 +186,8 @@ const AudioProcessor = ({ goHome }) => {
   const [selectedDevices, setSelectedDevices] = useState(() => {
     try {
       const saved = window.localStorage.getItem('tiwaton:devices');
-      return saved ? JSON.parse(saved) : { inputId: 'default', outputId: 'default', broadcastBus: 'Not set' };
-    } catch { return { inputId: 'default', outputId: 'default', broadcastBus: 'Not set' }; }
+      return saved ? JSON.parse(saved) : { inputId: 'default', outputId: 'default', broadcastBus: 'Not set', mainOutputId: 'Not set' };
+    } catch { return { inputId: 'default', outputId: 'default', broadcastBus: 'Not set', mainOutputId: 'Not set' }; }
   });
 
   const [audioStats, setAudioStats] = useState({
@@ -392,6 +393,7 @@ const AudioProcessor = ({ goHome }) => {
       inputId: 'default',
       outputId: 'default',
       broadcastBus: 'Not set',
+      mainOutputId: 'Not set',
     });
   }, []);
 
@@ -433,6 +435,7 @@ const AudioProcessor = ({ goHome }) => {
         next.inputId === prev.inputId
         && next.outputId === prev.outputId
         && next.broadcastBus === prev.broadcastBus
+        && next.mainOutputId === prev.mainOutputId
       ) ? prev : next;
     });
   }, [availableDevices]);
@@ -1190,6 +1193,7 @@ const AudioProcessor = ({ goHome }) => {
           resolvedDevices.inputId !== selectedDevices.inputId
           || resolvedDevices.outputId !== selectedDevices.outputId
           || resolvedDevices.broadcastBus !== selectedDevices.broadcastBus
+          || resolvedDevices.mainOutputId !== selectedDevices.mainOutputId
         ) {
           setSelectedDevices(resolvedDevices);
         }
@@ -3474,6 +3478,12 @@ const AudioProcessor = ({ goHome }) => {
                 Set this to VB-CABLE Input (Windows) or BlackHole 2ch (Mac). Then in OBS, choose the same device as your Audio Input Capture source.
               </p>
             </div>
+
+            <MainOutputSelect
+              selectedDevices={selectedDevices}
+              outputs={availableDevices.outputs}
+              onChange={(mainOutputId) => setSelectedDevices({ ...selectedDevices, mainOutputId })}
+            />
 
             <div className="grid grid-cols-2 gap-4">
               <div

@@ -33,6 +33,12 @@ export function reconcileSelectedDevices(selectedDevices, availableDevices) {
     next.broadcastBus = resolveCurrentDeviceId(next.broadcastBus, outputs, 'Not set');
   }
 
+  // The Main (PA) output is desktop-only and optional; a device that has
+  // gone away falls back to "Not set" rather than to the system default.
+  next.mainOutputId = resolveMainOutputId(next)
+    ? resolveCurrentDeviceId(next.mainOutputId, outputs, 'Not set')
+    : 'Not set';
+
   return next;
 }
 
@@ -69,7 +75,7 @@ export function resolveBroadcastLabel(selectedDevices, outputs) {
 
 export function resolveMainOutputId(selectedDevices) {
   const { mainOutputId } = selectedDevices;
-  return mainOutputId && mainOutputId !== 'default' ? mainOutputId : null;
+  return mainOutputId && mainOutputId !== 'default' && mainOutputId !== 'Not set' ? mainOutputId : null;
 }
 
 // Tauri 2 matches command arguments by their camelCase names
