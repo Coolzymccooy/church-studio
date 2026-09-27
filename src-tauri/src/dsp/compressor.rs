@@ -78,6 +78,12 @@ impl Limiter {
         }
     }
 
+    /// Set the brick-wall ceiling in dBFS.
+    #[allow(dead_code)] // used by the mixer, not yet wired into the engine
+    pub fn set_threshold_db(&mut self, db: f32) {
+        self.threshold = db_to_lin(db);
+    }
+
     pub fn process_block(&mut self, buf: &mut [f32]) {
         let la = self.lookahead;
         for s in buf.iter_mut() {

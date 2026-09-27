@@ -43,6 +43,14 @@ impl Gate {
 
     /// Process one sample. Returns (delayed_sample × gate_gain, gate_gain).
     pub fn tick(&mut self, x: f32) -> (f32, f32) {
+        let (delayed, gain) = self.tick_raw(x);
+        (delayed * gain, gain)
+    }
+
+    /// Process one sample without applying the gain. Returns
+    /// (delayed_sample, gate_gain). Lets a caller bypass the gate while
+    /// keeping its lookahead delay (constant latency).
+    pub fn tick_raw(&mut self, x: f32) -> (f32, f32) {
         let len = self.rms_buf.len();
 
         // Update RMS
@@ -76,7 +84,7 @@ impl Gate {
         self.delay_buf[self.delay_pos] = x;
         self.delay_pos = (self.delay_pos + 1) % self.delay_buf.len();
 
-        (delayed * self.env, self.env)
+        (delayed, self.env)
     }
 
     pub fn process_block(&mut self, buf: &mut [f32]) -> f32 {

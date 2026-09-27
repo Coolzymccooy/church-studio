@@ -5,6 +5,7 @@ pub mod desser;
 pub mod dereverb;
 pub mod gate;
 pub mod lufs;
+pub mod mixer;
 pub mod neural;
 pub mod noise;
 pub mod stft;
