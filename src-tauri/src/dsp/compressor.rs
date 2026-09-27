@@ -73,7 +73,7 @@ impl Limiter {
             lookahead: la,
             buf: vec![0.0; la + 1],
             pos: 0,
-            env: 0.0,
+            env: 1.0, // unity: no fade-in at start (gain only drops when needed)
             release_coef: coef(100.0, sr),
         }
     }
@@ -126,4 +126,30 @@ impl Limiter {
 #[inline] fn lin_to_db(lin: f32) -> f32 { 20.0 * lin.log10() }
 #[inline] fn coef(ms: f64, sr: f64) -> f32 {
     (1.0 - (-2.2 / (ms * 0.001 * sr)).exp()) as f32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn limiter_starts_at_unity_gain() {
+        let mut lim = Limiter::new(48_000.0);
+        let la = lim.latency_samples();
+        let mut buf = vec![0.5f32; 2_000];
+        lim.process_block(&mut buf);
+        // After the lookahead delay the signal is passed at full level
+        // immediately — no 100 ms fade-in.
+        assert!(buf[..la].iter().all(|s| *s == 0.0));
+        assert!(buf[la..].iter().all(|s| (*s - 0.5).abs() < 1e-6));
+    }
+
+    #[test]
+    fn limiter_holds_ceiling_from_first_sample() {
+        let mut lim = Limiter::new(48_000.0);
+        let mut buf: Vec<f32> = (0..4_800).map(|i| if i % 2 == 0 { 2.0 } else { -2.0 }).collect();
+        lim.process_block(&mut buf);
+        let ceiling = db_to_lin(-1.0);
+        assert!(buf.iter().all(|s| s.abs() <= ceiling + 1e-6));
+    }
 }
