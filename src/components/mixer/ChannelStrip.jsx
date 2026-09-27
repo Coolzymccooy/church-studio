@@ -6,7 +6,7 @@ import { LabeledSlider, ToggleChip, VerticalFader } from './mixerControls.jsx';
 import Meter from './Meter.jsx';
 
 /**
- * GateGrIndicator â€” gate-open dot and gain-reduction readout, updated
+ * GateGrIndicator — gate-open dot and gain-reduction readout, updated
  * imperatively from a requestAnimationFrame loop (never via setState) so the
  * 20 Hz mixer-meters stream never re-renders ChannelStrip.
  */
@@ -42,7 +42,7 @@ function GateGrIndicator({ getMeter }) {
 }
 
 /**
- * ChannelStrip â€” one input channel: name, voice-chain badge, trim + toggle
+ * ChannelStrip — one input channel: name, voice-chain badge, trim + toggle
  * chips, 3-band EQ, three sends, pan, mute/solo, fader + pre/post meter.
  */
 export default function ChannelStrip({ strip, metersRef, onSetParam, onSetBool, onRename }) {
@@ -115,7 +115,7 @@ export default function ChannelStrip({ strip, metersRef, onSetParam, onSetBool, 
         <ToggleChip label="HPF" active={strip.hpf_enabled} onClick={() => onSetBool('hpf_enabled', !strip.hpf_enabled)} title="High-pass filter" />
         <ToggleChip label="GATE" active={strip.gate_enabled} onClick={() => onSetBool('gate_enabled', !strip.gate_enabled)} title="Noise gate" />
         <ToggleChip label="COMP" active={strip.comp_enabled} onClick={() => onSetBool('comp_enabled', !strip.comp_enabled)} title="Compressor" />
-        <ToggleChip label="Ã˜" active={strip.polarity} activeColor="#FFB800" onClick={() => onSetBool('polarity', !strip.polarity)} title="Invert polarity" />
+        <ToggleChip label="Ø" active={strip.polarity} activeColor="#FFB800" onClick={() => onSetBool('polarity', !strip.polarity)} title="Invert polarity" />
       </div>
 
       {/* EQ */}

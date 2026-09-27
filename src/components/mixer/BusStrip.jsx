@@ -3,7 +3,7 @@ import { LabeledSlider, VerticalFader } from './mixerControls.jsx';
 import Meter from './Meter.jsx';
 
 /**
- * BusStrip â€” Main / Stream / Monitor: fader, mute, limiter ceiling, L/R meter.
+ * BusStrip — Main / Stream / Monitor: fader, mute, limiter ceiling, L/R meter.
  */
 export default function BusStrip({ bus, label, metersRef, onSetParam, onSetBool }) {
   const meter = () => metersRef.current.buses.find((b) => b.id === bus.id) || {};

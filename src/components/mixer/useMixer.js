@@ -5,11 +5,11 @@ import { applyStripChange, clampStripValue, createCoalescer } from '../../lib/mi
 const TOAST_MS = 4000;
 
 /**
- * useMixer(controller) Ã¢â‚¬â€ drives a MixerConsole from any object implementing
+ * useMixer(controller) — drives a MixerConsole from any object implementing
  * the mixerEngine controller interface (real Tauri controller or the mock).
  *
  * Meters arrive at ~20 Hz and are kept in a ref (`metersRef`), never in React
- * state, so the console doesn't re-render on every tick Ã¢â‚¬â€ Meter.jsx reads the
+ * state, so the console doesn't re-render on every tick — Meter.jsx reads the
  * ref directly from a requestAnimationFrame loop.
  *
  * Every mutation is optimistic: local state updates immediately, the
@@ -63,7 +63,7 @@ export function useMixer(controller) {
   }, [controller, showToast]);
 
   // withOptimism applies an optimistic change immediately and, on failure,
-  // reverts only the field this specific call touched Ã¢â‚¬â€ and reverts it
+  // reverts only the field this specific call touched — and reverts it
   // against whatever the *latest* state is at that point, not a stale
   // snapshot taken before the call started. Rapid slider drags fire many
   // overlapping invokes; capturing one full-state snapshot up front and
