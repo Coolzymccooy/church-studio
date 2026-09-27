@@ -493,7 +493,7 @@ const AudioProcessor = ({ goHome }) => {
     const rnDry = processingRefs.current.rnnoiseDryGain;
     const rnWet = processingRefs.current.rnnoiseWetGain;
     if (rnDry && rnWet) {
-      const wantRnnoise = features.voicePattern || features.denoise;
+      const wantRnnoise = !isBypassed && (features.voicePattern || features.denoise);
       const now = audioContext?.currentTime || 0;
       const end = now + 0.004;
       for (const [param, target] of [[rnDry.gain, wantRnnoise ? 0 : 1], [rnWet.gain, wantRnnoise ? 1 : 0]]) {
@@ -678,7 +678,10 @@ const AudioProcessor = ({ goHome }) => {
     }
   };
 
+  // Read by the audio-graph builder, which can run from an older render.
+  const isBypassedRef = useRef(isBypassed);
   useEffect(() => {
+    isBypassedRef.current = isBypassed;
     setAbMode(isBypassed ? 'A' : 'B');
   }, [isBypassed]);
 
@@ -1019,7 +1022,9 @@ const AudioProcessor = ({ goHome }) => {
       if (rnnoiseNode) {
         rnnoiseDryGain = ctx.createGain();
         rnnoiseWetGain = ctx.createGain();
-        const wantRnnoise = featuresRef.current.voicePattern || featuresRef.current.denoise;
+        // BYPASS AI means raw audio, so it selects the dry path too.
+        const wantRnnoise = !isBypassedRef.current
+          && (featuresRef.current.voicePattern || featuresRef.current.denoise);
         rnnoiseDryGain.gain.value = wantRnnoise ? 0 : 1;
         rnnoiseWetGain.gain.value = wantRnnoise ? 1 : 0;
 
