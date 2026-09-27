@@ -137,10 +137,10 @@ impl DspChain {
         } else { 1.0 };
         self.last_gate_gain = gate_gain;
 
-        // 4. Noise reduction (block-level OLA)
+        // 4. Noise reduction (streaming STFT, fixed 1024-sample latency)
         self.noise.process_block(buf);
 
-        // 5. Dereverb (block-level OLA)
+        // 5. Dereverb (streaming STFT, fixed 1024-sample latency)
         self.dereverb.process_block(buf);
 
         // 6. EQ

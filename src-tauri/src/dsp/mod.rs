@@ -6,6 +6,10 @@ pub mod dereverb;
 pub mod gate;
 pub mod lufs;
 pub mod noise;
+pub mod stft;
+
+#[cfg(test)]
+pub(crate) mod test_util;
 
 pub use chain::DspChain;
 
