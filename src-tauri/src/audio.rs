@@ -44,6 +44,8 @@ pub struct AudioEngine {
     pub broadcast_output_name: Option<String>,
     /// RNNoise stage usable (engine at 48 kHz).
     pub neural_available: bool,
+    /// Input channels of the open input device (one mixer strip each).
+    pub input_channels: u32,
 }
 
 pub type EngineState = std::sync::Mutex<Option<RunningEngine>>;
@@ -60,6 +62,8 @@ pub struct RunningEngine {
     pub broadcast_output_name: Option<String>,
     /// RNNoise stage usable (engine at 48 kHz).
     pub neural_available: bool,
+    /// Input channels of the open input device (one mixer strip each).
+    pub input_channels: u32,
 }
 
 enum EngineCommand {
@@ -75,6 +79,7 @@ struct EngineInfo {
     monitor_output_name: String,
     broadcast_output_name: Option<String>,
     neural_available: bool,
+    input_channels: u32,
 }
 
 /// State shared between the audio callback and the control (Tauri) thread.
@@ -162,6 +167,7 @@ impl AudioEngine {
             monitor_output_name: self.monitor_output_name.clone(),
             broadcast_output_name: self.broadcast_output_name.clone(),
             neural_available: self.neural_available,
+            input_channels: self.input_channels,
         }
     }
 
@@ -561,6 +567,7 @@ impl AudioEngine {
             monitor_output_name,
             broadcast_output_name,
             neural_available,
+            input_channels: in_channels as u32,
         })
     }
 }
@@ -619,6 +626,7 @@ impl RunningEngine {
             monitor_output_name: info.monitor_output_name,
             broadcast_output_name: info.broadcast_output_name,
             neural_available: info.neural_available,
+            input_channels: info.input_channels,
         })
     }
 

@@ -1,6 +1,8 @@
 mod audio;
 mod dsp;
 mod history;
+mod mixer_commands;
+mod mixer_control;
 
 use audio::{EngineState, RunningEngine};
 use dsp::{AudioDeviceInfo, DspParams};
@@ -287,6 +289,7 @@ pub fn run() {
         .plugin(tauri_plugin_os::init())
         .manage(Mutex::new(None::<RunningEngine>) as EngineState)
         .manage(SharedParams(Arc::new(DspParams::defaults())))
+        .manage(mixer_control::MixerControl::new())
         .invoke_handler(tauri::generate_handler![
             start_audio_engine,
             stop_audio_engine,
@@ -296,6 +299,16 @@ pub fn run() {
             set_param_bool,
             capture_noise_profile,
             engine_status,
+            mixer_commands::mixer_state,
+            mixer_commands::mixer_set_strip_param,
+            mixer_commands::mixer_set_strip_bool,
+            mixer_commands::mixer_rename_strip,
+            mixer_commands::mixer_set_bus_param,
+            mixer_commands::mixer_set_bus_bool,
+            mixer_commands::mixer_list_scenes,
+            mixer_commands::mixer_save_scene,
+            mixer_commands::mixer_load_scene,
+            mixer_commands::mixer_delete_scene,
         ])
         .setup(|app| {
             #[cfg(desktop)]
