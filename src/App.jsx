@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   adjustPageZoom,
   isDesktopApp,
@@ -18,6 +18,7 @@ import DeviceSettingsModal from './components/DeviceSettingsModal';
 import InputRackAiTab from './components/InputRackAiTab';
 import { getExportAvailability } from './lib/exportFlow';
 import { loadRnnoiseAssets } from './lib/rnnoise';
+import { pickVideoMimeType } from './lib/mediaFormats';
 import {
   describeBroadcastRoute,
   normalizeTauriDevices,
@@ -140,6 +141,19 @@ const AudioProcessor = ({ goHome }) => {
   const [recordedUrl, setRecordedUrl] = useState(null);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [gainRiderDb, setGainRiderDb] = useState(0); // Smart Gain Rider readout
+
+  // Negotiated once per session: which video container MediaRecorder will
+  // actually produce here. Drives both the download extension and every
+  // "MP4"/"WebM" label in the UI, so we never call a WebM file "MP4".
+  const videoFormat = useMemo(
+    () =>
+      pickVideoMimeType(
+        typeof MediaRecorder !== 'undefined'
+          ? MediaRecorder.isTypeSupported.bind(MediaRecorder)
+          : undefined,
+      ),
+    [],
+  );
 
   // playback tracking for record-check review
   const [playbackPosition, setPlaybackPosition] = useState(0);
@@ -1661,14 +1675,9 @@ const AudioProcessor = ({ goHome }) => {
       ...audioTracks,
     ]);
 
-    // Prefer WebM/VP8 (universal), fallback to whatever browser supports
-    const mimeTypes = [
-      'video/webm;codecs=vp8,opus',
-      'video/webm;codecs=vp9,opus',
-      'video/webm',
-      'video/mp4',
-    ];
-    const mimeType = mimeTypes.find(t => MediaRecorder.isTypeSupported(t)) || 'video/webm';
+    // Use the container we already negotiated for this browser, so the file
+    // extension always matches what MediaRecorder actually produced.
+    const { mimeType, extension } = videoFormat;
 
     const recorder = new MediaRecorder(combinedStream, { mimeType, videoBitsPerSecond: 2500000 });
     const chunks = [];
@@ -1676,11 +1685,10 @@ const AudioProcessor = ({ goHome }) => {
     recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
     recorder.onstop = () => {
       const blob = new Blob(chunks, { type: mimeType });
-      const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `TIWATON_session_${Date.now()}.${ext}`;
+      a.download = `TIWATON_session_${Date.now()}.${extension}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -1698,7 +1706,7 @@ const AudioProcessor = ({ goHome }) => {
     }, 10000);
 
     return recorder; // caller can stop early with recorder.stop()
-  }, []);
+  }, [videoFormat]);
 
   // --- FILE MODE: PROCESS & EXPORT (AI MASTER) ---
   const processAndExportFile = () => {
@@ -3281,6 +3289,7 @@ const AudioProcessor = ({ goHome }) => {
         onSetMainTab={setMainTab}
         onSnapshotSave={handleSnapshotSave}
         onExportMp4={exportMp4}
+        videoExportLabel={videoFormat.label}
         onShareRecording={shareRecording}
         onDownloadWaveform={downloadWaveform}
         isLive={isLive}
@@ -3947,7 +3956,7 @@ const AudioProcessor = ({ goHome }) => {
                       <div className="w-px h-3 bg-slate-600"/>
                       <button onClick={downloadWaveform} className="px-2 py-1 hover:bg-slate-700 font-bold text-cyan-400 flex items-center gap-1"><Activity size={9}/>PNG</button>
                       <div className="w-px h-3 bg-slate-600"/>
-                      <button onClick={exportMp4} className="px-2 py-1 hover:bg-slate-700 rounded-r-full font-bold text-purple-400 flex items-center gap-1"><Video size={9}/>MP4</button>
+                      <button onClick={exportMp4} className="px-2 py-1 hover:bg-slate-700 rounded-r-full font-bold text-purple-400 flex items-center gap-1"><Video size={9}/>{videoFormat.extension.toUpperCase()}</button>
                     </div>
                   )}
                 </div>
@@ -4228,9 +4237,9 @@ const AudioProcessor = ({ goHome }) => {
           {isLive && (
             <button onClick={exportMp4} disabled={!exportAvailability.canExportMp4} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[9px] font-semibold hover:opacity-80 disabled:opacity-40"
               style={{background:'#0D1428', borderColor:'rgba(168,85,247,0.4)', color:'#c084fc'}}
-              title="Record 10s of canvas + processed audio as MP4/WebM">
+              title={`Record 10s of canvas + processed audio as ${videoFormat.label}`}>
               {exportStatus === 'sharing' ? <span className="w-2.5 h-2.5 rounded-full border border-purple-400 border-t-transparent animate-spin"/> : <Video className="w-3 h-3"/>}
-              {exportStatus === 'done' ? 'Saved!' : exportStatus === 'sharing' ? 'Recording...' : 'MP4'}
+              {exportStatus === 'done' ? 'Saved!' : exportStatus === 'sharing' ? 'Recording...' : videoFormat.label}
             </button>
           )}
           <button onClick={hardReset} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[9px] font-semibold hover:opacity-80"
