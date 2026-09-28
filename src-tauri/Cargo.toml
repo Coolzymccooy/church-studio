@@ -36,5 +36,12 @@ parking_lot = "0.12"   # Fast mutex for noise profile transfers
 # RNNoise neural denoiser (pure Rust). Default features pull in CLI-only deps.
 nnnoiseless = { version = "0.5", default-features = false }
 
+# ── Tiwaton Link (loopback HTTP server for Lumina) ───────────────────────────
+# axum 0.7 (MSRV 1.66) on the tokio runtime Tauri already ships; only the
+# features the server uses. getrandom 0.2 (MSRV 1.36) for the per-install token.
+axum = { version = "0.7", default-features = false, features = ["http1", "json", "tokio"] }
+tokio = { version = "1", features = ["net", "sync"] }
+getrandom = "0.2"
+
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-updater = "2"
