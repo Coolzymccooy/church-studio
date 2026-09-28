@@ -367,9 +367,27 @@ impl AudioEngine {
 
         // NDI inputs: one receiver thread + ring per source, each read by
         // the callback as a strip after the hardware channels.
+        // Never receive one of this engine's own outputs: it would feed the
+        // mix back into itself. The UI flags these, but a saved selection or
+        // a renamed output can still match, so the engine checks too.
+        let own_outputs: Vec<String> = ndi
+            .outputs
+            .plan()
+            .into_iter()
+            .map(|(_, name)| name)
+            .collect();
+        let receivable = NdiInputs {
+            sources: ndi
+                .inputs
+                .sources
+                .iter()
+                .filter(|source| !crate::ndi::receive::is_own_source(source, &own_outputs))
+                .cloned()
+                .collect(),
+        };
         let hardware_strips = StripLayout::new(in_channels, 0).hardware;
         let ndi_in = crate::ndi::receive::start_receivers(
-            &ndi.inputs,
+            &receivable,
             sr,
             hardware_strips,
             StripLayout::ndi_room(in_channels),
