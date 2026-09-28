@@ -25,6 +25,9 @@ pub struct FltpFramer {
     next_channel: usize,
 }
 
+// Accessors and `push_stereo` are part of the framer's API (and tested)
+// even where the sender does not need them.
+#[allow(dead_code)]
 impl FltpFramer {
     pub fn new(channels: usize, frame_samples: usize) -> Self {
         let channels = channels.max(1);

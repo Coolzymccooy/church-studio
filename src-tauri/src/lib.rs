@@ -8,10 +8,12 @@ mod mixer_engine_tests;
 mod mixer_meters;
 mod mixer_model;
 mod ndi;
+mod ndi_commands;
 mod routing;
 
 use audio::{DeviceSelection, EngineState, RunningEngine};
 use mixer_control::MixerControl;
+use ndi::NdiSettings;
 use dsp::{AudioDeviceInfo, DspParams};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
@@ -144,6 +146,7 @@ async fn start_audio_engine(
     state: State<'_, EngineState>,
     params: State<'_, SharedParams>,
     mixer: State<'_, MixerControl>,
+    ndi: State<'_, NdiSettings>,
     input_device: Option<String>,
     monitor_output_device: Option<String>,
     broadcast_output_device: Option<String>,
@@ -164,6 +167,7 @@ async fn start_audio_engine(
             broadcast_output_id: broadcast_output_device,
             main_output_id,
         },
+        ndi.snapshot(),
     )?;
     let info = serde_json::json!({
         "sample_rate": engine.sample_rate,
@@ -265,6 +269,7 @@ fn serialize_engine_status(engine: &RunningEngine) -> serde_json::Value {
         "neural_available": engine.neural_available,
         "dsp_latency_samples": engine.dsp_latency_samples(),
         "dropped_output_samples": engine.dropped_output_samples(),
+        "ndi": ndi_commands::engine_ndi_status(Some(engine)),
     })
 }
 
@@ -289,6 +294,7 @@ fn engine_status(state: State<'_, EngineState>) -> serde_json::Value {
             "noise_profile_ready": false,
             "neural_available": false,
             "dropped_output_samples": 0,
+            "ndi": ndi_commands::engine_ndi_status(None),
         })
     }
 }
@@ -309,6 +315,7 @@ pub fn run() {
         .manage(Mutex::new(None::<RunningEngine>) as EngineState)
         .manage(SharedParams(Arc::new(DspParams::defaults())))
         .manage(MixerControl::new())
+        .manage(NdiSettings::new())
         .invoke_handler(tauri::generate_handler![
             start_audio_engine,
             stop_audio_engine,
@@ -328,6 +335,9 @@ pub fn run() {
             mixer_commands::mixer_save_scene,
             mixer_commands::mixer_load_scene,
             mixer_commands::mixer_delete_scene,
+            ndi_commands::ndi_status,
+            ndi_commands::ndi_get_outputs,
+            ndi_commands::ndi_set_outputs,
         ])
         .setup(|app| {
             #[cfg(desktop)]
