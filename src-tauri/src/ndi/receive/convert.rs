@@ -212,11 +212,14 @@ mod tests {
 
     #[test]
     fn mono_is_duplicated_and_extra_channels_dropped() {
+        let one: &[f32] = &[1.0, 2.0];
+        let two: &[f32] = &[-1.0, -2.0];
+        let three: &[f32] = &[9.0, 9.0];
         let mut out = Vec::new();
-        interleave_stereo(&[&[1.0, 2.0]], &mut out);
+        interleave_stereo(&[one], &mut out);
         assert_eq!(out, vec![1.0, 1.0, 2.0, 2.0]);
         out.clear();
-        interleave_stereo(&[&[1.0, 2.0], &[-1.0, -2.0], &[9.0, 9.0]], &mut out);
+        interleave_stereo(&[one, two, three], &mut out);
         assert_eq!(out, vec![1.0, -1.0, 2.0, -2.0]);
         out.clear();
         interleave_stereo(&[], &mut out);
@@ -277,7 +280,7 @@ mod tests {
     fn converter_handles_mono_at_another_rate() {
         let mut conv = SourceConverter::new(48_000);
         let plane = vec![0.5f32; 441];
-        let out = conv.convert(44_100, &[&plane]).to_vec();
+        let out = conv.convert(44_100, &[plane.as_slice()]).to_vec();
         assert!((478..=482).contains(&(out.len() / 2)), "{}", out.len());
         assert!(out.iter().all(|s| (s - 0.5).abs() < 1e-6));
     }
