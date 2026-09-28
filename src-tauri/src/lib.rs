@@ -7,6 +7,7 @@ mod mixer_control;
 mod mixer_engine_tests;
 mod mixer_meters;
 mod mixer_model;
+mod ndi;
 mod routing;
 
 use audio::{DeviceSelection, EngineState, RunningEngine};
