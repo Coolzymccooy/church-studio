@@ -134,6 +134,22 @@ pub fn load_or_create(path: &Path) -> Result<LinkConfig, String> {
     Ok(config)
 }
 
+/// Create `path` readable by the owner only on Unix (it holds the token).
+/// On Windows the app data folder's inherited ACL is already per-user.
+fn write_private(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    file.write_all(data)?;
+    file.sync_all()
+}
+
 /// Write via a temp file and rename, so a crash never leaves half a file.
 pub fn save(path: &Path, config: &LinkConfig) -> Result<(), String> {
     if let Some(dir) = path.parent() {
@@ -141,7 +157,9 @@ pub fn save(path: &Path, config: &LinkConfig) -> Result<(), String> {
     }
     let json = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
     let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, json).map_err(|e| format!("cannot write link.json: {e}"))?;
+    // A leftover temp file would keep its old (possibly wider) permissions.
+    let _ = fs::remove_file(&tmp);
+    write_private(&tmp, json.as_bytes()).map_err(|e| format!("cannot write link.json: {e}"))?;
     fs::rename(&tmp, path).map_err(|e| {
         let _ = fs::remove_file(&tmp);
         format!("cannot save link.json: {e}")
