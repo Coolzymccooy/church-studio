@@ -20,6 +20,8 @@ pub mod server;
 mod protocol_tests;
 #[cfg(test)]
 mod rules_tests;
+#[cfg(test)]
+mod server_tests;
 
 use std::sync::{Mutex, MutexGuard};
 
