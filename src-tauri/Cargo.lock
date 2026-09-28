@@ -4869,6 +4869,7 @@ version = "1.4.3"
 dependencies = [
  "atomic_float",
  "cpal",
+ "libloading 0.8.9",
  "log",
  "nnnoiseless",
  "parking_lot",
