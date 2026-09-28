@@ -1,5 +1,7 @@
 import React from 'react';
 
+import ObsStatusPill from './obs/ObsStatusPill.jsx';
+
 export default function StudioStatusBar({
   isLive,
   isPlayingFile,
@@ -17,6 +19,7 @@ export default function StudioStatusBar({
         <span className={`w-2 h-2 rounded-full ${isLive || isPlayingFile ? 'bg-[#00E676] animate-pulse' : 'bg-slate-700'}`} />
         {isLive ? 'ENGINE ACTIVE' : isPlayingFile ? 'FILE PLAYBACK' : 'STANDBY'}
       </span>
+      <ObsStatusPill />
       <div className="h-3 w-px bg-slate-800" />
       <span className="text-slate-600">SR: <span className="text-slate-300">{audioStats.sampleRate > 0 ? `${(audioStats.sampleRate / 1000).toFixed(1)}kHz` : '--'}</span></span>
       <span className="text-slate-600">BUFFER: <span className="text-slate-300">{audioStats.bufferSize || '--'}</span></span>
