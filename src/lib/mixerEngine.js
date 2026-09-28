@@ -120,6 +120,35 @@ export function applyStripChange(state, index, key, value) {
 }
 
 // ── Real controller — thin wrapper over the Tauri commands ─────────────────
+/**
+ * listen(event) wrapper that can be disposed before `listen` resolves.
+ * Returns { ready, dispose }.
+ */
+export function subscribeTauriEvent(listen, eventName, cb) {
+  let disposed = false;
+  let unlisten = null;
+  const ready = listen(eventName, (event) => {
+    if (!disposed) cb(event.payload);
+  }).then((fn) => {
+    if (disposed) {
+      fn();
+      return null;
+    }
+    unlisten = fn;
+    return fn;
+  });
+  return {
+    ready,
+    dispose() {
+      disposed = true;
+      if (unlisten) {
+        unlisten();
+        unlisten = null;
+      }
+    },
+  };
+}
+
 export function createMixerController({ invoke, listen }) {
   return {
     getState() {
@@ -153,28 +182,12 @@ export function createMixerController({ invoke, listen }) {
       return invoke('mixer_delete_scene', { name });
     },
     subscribeMeters(cb) {
-      let disposed = false;
-      let unlisten = null;
-      const ready = listen('mixer-meters', (event) => {
-        if (!disposed) cb(event.payload);
-      }).then((fn) => {
-        if (disposed) {
-          fn();
-          return null;
-        }
-        unlisten = fn;
-        return fn;
-      });
-      return {
-        ready,
-        dispose() {
-          disposed = true;
-          if (unlisten) {
-            unlisten();
-            unlisten = null;
-          }
-        },
-      };
+      return subscribeTauriEvent(listen, 'mixer-meters', cb);
+    },
+    // Fired by the engine when something other than this view changed the
+    // mix (e.g. Tiwaton Link loading a scene); the payload is a MixerState.
+    subscribeStateChanges(cb) {
+      return subscribeTauriEvent(listen, 'mixer-state-changed', cb);
     },
   };
 }

@@ -7,9 +7,13 @@
 //! - `config` / `activity`: settings file and the activity ring.
 //! - `server`: the loopback HTTP server (depends only on `LinkBackend`).
 //! - `runtime` / `handle` / `commands`: the Tauri glue.
+pub mod activity;
+pub mod commands;
 pub mod config;
+pub mod handle;
 pub mod protocol;
 pub mod rules;
+pub mod runtime;
 pub mod server;
 
 #[cfg(test)]

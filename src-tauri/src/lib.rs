@@ -309,6 +309,7 @@ pub fn run() {
         .manage(Mutex::new(None::<RunningEngine>) as EngineState)
         .manage(SharedParams(Arc::new(DspParams::defaults())))
         .manage(MixerControl::new())
+        .manage(mixer_commands::CurrentScene::default())
         .invoke_handler(tauri::generate_handler![
             start_audio_engine,
             stop_audio_engine,
@@ -328,11 +329,22 @@ pub fn run() {
             mixer_commands::mixer_save_scene,
             mixer_commands::mixer_load_scene,
             mixer_commands::mixer_delete_scene,
+            link::commands::link_get_config,
+            link::commands::link_set_enabled,
+            link::commands::link_set_rules,
+            link::commands::link_regenerate_token,
+            link::commands::link_activity,
+            link::commands::link_undo,
+            link::commands::link_set_automation_paused,
         ])
         .setup(|app| {
             #[cfg(desktop)]
             app.handle()
                 .plugin(tauri_plugin_updater::Builder::new().build())?;
+
+            // Tiwaton Link: loopback server for Lumina's bridge events.
+            let link_runtime = link::handle::LinkRuntime::init(app.handle());
+            app.manage(link_runtime);
 
             #[cfg(all(desktop, not(debug_assertions)))]
             {

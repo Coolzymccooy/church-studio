@@ -375,3 +375,21 @@ test('createCoalescer rejects when the surviving call fails and schedules again 
   flushes[1]();
   assert.equal(await later, 'ok');
 });
+
+test('createMixerController.subscribeStateChanges listens on mixer-state-changed', async () => {
+  let registered = null;
+  let unlistened = 0;
+  const listen = async (name, handler) => {
+    registered = { name, handler };
+    return () => { unlistened += 1; };
+  };
+  const controller = createMixerController({ invoke: async () => null, listen });
+  const received = [];
+  const sub = controller.subscribeStateChanges((payload) => received.push(payload));
+  await sub.ready;
+  assert.equal(registered.name, 'mixer-state-changed');
+  registered.handler({ payload: { running: false } });
+  assert.deepEqual(received, [{ running: false }]);
+  sub.dispose();
+  assert.equal(unlistened, 1);
+});

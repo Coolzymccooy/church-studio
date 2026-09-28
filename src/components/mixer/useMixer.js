@@ -73,9 +73,18 @@ export function useMixer(controller) {
       }
     });
 
+    // Another part of the app (Tiwaton Link) loaded a scene: refetch.
+    const stateSub = controller.subscribeStateChanges?.(() => {
+      if (cancelled) return;
+      controller.getState()
+        .then((next) => { if (!cancelled) setState(next); })
+        .catch(() => {});
+    });
+
     return () => {
       cancelled = true;
       sub.dispose();
+      stateSub?.dispose();
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     };
   }, [controller, showToast]);
