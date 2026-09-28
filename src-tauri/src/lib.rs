@@ -328,6 +328,14 @@ pub fn run() {
             mixer_commands::mixer_save_scene,
             mixer_commands::mixer_load_scene,
             mixer_commands::mixer_delete_scene,
+            obs::commands::obs_get_config,
+            obs::commands::obs_set_config,
+            obs::commands::obs_status,
+            obs::commands::obs_set_scene,
+            obs::commands::obs_start_stream,
+            obs::commands::obs_stop_stream,
+            obs::commands::obs_start_record,
+            obs::commands::obs_stop_record,
         ])
         .setup(|app| {
             #[cfg(desktop)]
