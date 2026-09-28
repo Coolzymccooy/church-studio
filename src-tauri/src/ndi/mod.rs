@@ -3,5 +3,7 @@
 //!
 //! - `runtime`: loads the installed NDI Runtime at run time.
 //! - `audio_frame`: interleaved stereo → 480-sample planar float frames.
+//! - `sender`: one sender thread per enabled bus, fed by a lock-free ring.
 pub mod audio_frame;
 pub mod runtime;
+pub mod sender;
