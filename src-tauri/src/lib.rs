@@ -7,6 +7,7 @@ mod mixer_control;
 mod mixer_engine_tests;
 mod mixer_meters;
 mod mixer_model;
+mod obs;
 mod routing;
 
 use audio::{DeviceSelection, EngineState, RunningEngine};
@@ -332,6 +333,10 @@ pub fn run() {
             #[cfg(desktop)]
             app.handle()
                 .plugin(tauri_plugin_updater::Builder::new().build())?;
+
+            let obs_manager = obs::ObsManager::new(app.handle().clone());
+            app.manage(obs_manager.clone());
+            obs_manager.start();
 
             #[cfg(all(desktop, not(debug_assertions)))]
             {
