@@ -3,17 +3,20 @@ mod dsp;
 mod history;
 mod mixer_commands;
 mod mixer_control;
+mod mixer_layout;
 #[cfg(test)]
 mod mixer_engine_tests;
 mod mixer_meters;
 mod mixer_model;
 mod ndi;
 mod ndi_commands;
+mod ndi_input_commands;
 mod routing;
 
 use audio::{DeviceSelection, EngineState, RunningEngine};
 use mixer_control::MixerControl;
-use ndi::NdiSettings;
+use ndi::receive::NdiInputSettings;
+use ndi::{NdiEngineConfig, NdiSettings};
 use dsp::{AudioDeviceInfo, DspParams};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
@@ -147,6 +150,7 @@ async fn start_audio_engine(
     params: State<'_, SharedParams>,
     mixer: State<'_, MixerControl>,
     ndi: State<'_, NdiSettings>,
+    ndi_inputs: State<'_, NdiInputSettings>,
     input_device: Option<String>,
     monitor_output_device: Option<String>,
     broadcast_output_device: Option<String>,
@@ -167,8 +171,18 @@ async fn start_audio_engine(
             broadcast_output_id: broadcast_output_device,
             main_output_id,
         },
-        ndi.snapshot(),
+        NdiEngineConfig {
+            outputs: ndi.snapshot(),
+            inputs: ndi_inputs.snapshot(),
+        },
     )?;
+    // NDI strips are named after their sources (the operator can rename).
+    let ndi_labels: Vec<(usize, String)> = engine
+        .ndi_inputs
+        .iter()
+        .map(|input| (input.strip, input.label.clone()))
+        .collect();
+    mixer.label_strips(&ndi_labels);
     let info = serde_json::json!({
         "sample_rate": engine.sample_rate,
         "buffer_frames": engine.buffer_frames,
@@ -184,6 +198,7 @@ async fn start_audio_engine(
         "broadcast_output_name": engine.broadcast_output_name,
         "main_output_name": engine.main_output_name,
         "inputChannels": engine.input_channels,
+        "ndiStrips": engine.ndi_inputs.len(),
     });
 
     *guard = Some(engine);
@@ -316,6 +331,7 @@ pub fn run() {
         .manage(SharedParams(Arc::new(DspParams::defaults())))
         .manage(MixerControl::new())
         .manage(NdiSettings::new())
+        .manage(NdiInputSettings::new())
         .invoke_handler(tauri::generate_handler![
             start_audio_engine,
             stop_audio_engine,
@@ -338,6 +354,9 @@ pub fn run() {
             ndi_commands::ndi_status,
             ndi_commands::ndi_get_outputs,
             ndi_commands::ndi_set_outputs,
+            ndi_input_commands::ndi_list_sources,
+            ndi_input_commands::ndi_get_inputs,
+            ndi_input_commands::ndi_set_inputs,
         ])
         .setup(|app| {
             // Load the NDI runtime off the main thread; ndi_status reports
@@ -345,6 +364,8 @@ pub fn run() {
             ndi::runtime::preload();
             let saved_ndi = ndi_commands::load_saved_outputs(app.handle());
             app.state::<NdiSettings>().replace(saved_ndi);
+            let saved_inputs = ndi_input_commands::load_saved_inputs(app.handle());
+            app.state::<NdiInputSettings>().replace(saved_inputs);
 
             #[cfg(desktop)]
             app.handle()
