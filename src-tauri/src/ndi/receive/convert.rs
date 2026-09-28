@@ -8,7 +8,7 @@
 //! - rate: linear interpolation when the source rate differs from the
 //!   engine's, continuous across frames (`StreamResampler`).
 use super::super::ffi::FOURCC_AUDIO_FLTP;
-use ringbuf::traits::{Observer, Producer};
+use ringbuf::traits::Producer;
 
 /// Stereo: two interleaved samples per frame.
 pub const STEREO: usize = 2;

@@ -179,6 +179,14 @@ impl NdiApi {
             send_create: resolve::<SendCreateFn>(lib, b"NDIlib_send_create\0")?,
             send_destroy: resolve::<SendDestroyFn>(lib, b"NDIlib_send_destroy\0")?,
             send_audio_v3: resolve::<SendAudioV3Fn>(lib, b"NDIlib_send_send_audio_v3\0")?,
+            // Optional: a runtime without the receive group still sends.
+            receive: match ReceiveApi::resolve(lib) {
+                Ok(api) => Some(api),
+                Err(err) => {
+                    log::warn!("NDI receive unavailable: {err}");
+                    None
+                }
+            },
         })
     }
 }

@@ -14,7 +14,7 @@
 //! Real-time safe: `read` runs on the audio callback and only does atomic
 //! ring operations and arithmetic (no locks, allocation or logging).
 use super::convert::STEREO;
-use ringbuf::traits::{Consumer, Observer};
+use ringbuf::traits::Consumer;
 
 /// Fill the reader holds the ring at.
 pub const TARGET_FILL_MS: usize = 40;

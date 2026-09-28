@@ -5,7 +5,7 @@
 //!   interleaved channels. A 1-channel device gets (L + R) / 2; a device with
 //!   2 or more channels gets L on channel 1, R on channel 2 and silence on
 //!   the rest.
-use ringbuf::traits::{Observer, Producer};
+use ringbuf::traits::Producer;
 
 /// Split interleaved `data` (`stride` channels per frame) into `outs`, one
 /// buffer per channel starting at channel 0. Channels beyond `outs.len()`
