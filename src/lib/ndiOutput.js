@@ -2,7 +2,7 @@
  * ndiOutput.js — UI-side helpers for NDI® audio output (desktop app only).
  *
  * Tauri commands (see src-tauri/src/ndi_commands.rs):
- *   ndi_status()               → { available, loading, version, path, error }
+ *   ndi_status()               → { available, loading, version, path, error, receive }
  *                                 (loading: the runtime is still loading in the background)
  *   ndi_get_outputs()          → { stream, main, monitor, base_name }
  *   ndi_set_outputs({outputs}) → { outputs, running, restart_required, message, save_error }
