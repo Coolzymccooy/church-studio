@@ -1,6 +1,7 @@
 mod audio;
 mod dsp;
 mod history;
+mod link;
 mod mixer_commands;
 mod mixer_control;
 #[cfg(test)]
