@@ -90,6 +90,7 @@ export default function MenuBar({
   videoExportLabel = 'Video (WebM)',
   onShareRecording,
   onDownloadWaveform,
+  onOpenLink,
   // State
   isLive,
   mode,
@@ -174,6 +175,7 @@ export default function MenuBar({
         { label: 'Learn Mic Fingerprint (5s)', action: onStartMicLearn, disabled: !isLive },
         { label: 'Capture Room Noise Profile', action: onCaptureNoise, disabled: !isLive },
         { separator: true },
+        { label: 'Lumina Link…', action: onOpenLink, disabled: !onOpenLink },
         { label: 'Audio Device Settings', shortcut: 'Ctrl+,', action: onShowSettings },
       ],
     },
