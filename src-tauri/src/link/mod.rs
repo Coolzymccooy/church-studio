@@ -8,9 +8,12 @@
 //! - `server`: the loopback HTTP server (depends only on `LinkBackend`).
 //! - `runtime` / `handle` / `commands`: the Tauri glue.
 pub mod protocol;
+pub mod rules;
 
 #[cfg(test)]
 mod protocol_tests;
+#[cfg(test)]
+mod rules_tests;
 
 use std::sync::{Mutex, MutexGuard};
 
