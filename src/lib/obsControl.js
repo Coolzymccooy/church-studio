@@ -58,6 +58,33 @@ export function createObsController({ invoke, listen }) {
   };
 }
 
+/**
+ * Follow OBS status: register the `obs-status` listener first, then read the
+ * snapshot, so a change between the two can never be missed. A snapshot that
+ * lands after an event is older than that event and is ignored. Returns a
+ * dispose function.
+ */
+export function followObsStatus(controller, onStatus) {
+  let disposed = false;
+  let sawEvent = false;
+  const sub = controller.subscribeStatus((next) => {
+    if (disposed || !next) return;
+    sawEvent = true;
+    onStatus(next);
+  });
+  Promise.resolve(sub.ready)
+    .catch(() => {})
+    .then(() => (disposed ? null : controller.getStatus()))
+    .then((next) => {
+      if (!disposed && !sawEvent && next) onStatus(next);
+    })
+    .catch(() => {});
+  return () => {
+    disposed = true;
+    sub.dispose();
+  };
+}
+
 let desktopController = null;
 
 export function getDesktopObsController() {

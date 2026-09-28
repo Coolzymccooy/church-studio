@@ -7,6 +7,7 @@ import {
   connectionState,
   createObsController,
   describeObsError,
+  followObsStatus,
   lookupLink,
   normalizeSceneLink,
   obsPillText,
@@ -156,4 +157,59 @@ test('normalizeSceneLink fills defaults', () => {
     studioToObs: { A: 'B' },
     obsToStudio: {},
   });
+});
+
+function fakeStatusController() {
+  let emit = null;
+  let resolveReady;
+  let resolveSnapshot;
+  const calls = [];
+  const controller = {
+    subscribeStatus(cb) {
+      emit = cb;
+      return { ready: new Promise((r) => { resolveReady = r; }), dispose() { emit = null; } };
+    },
+    getStatus() {
+      calls.push('getStatus');
+      return new Promise((r) => { resolveSnapshot = r; });
+    },
+  };
+  return {
+    controller,
+    calls,
+    emit: (s) => emit && emit(s),
+    ready: () => resolveReady(),
+    snapshot: (s) => resolveSnapshot(s),
+  };
+}
+
+const tick = () => new Promise((r) => setTimeout(r, 0));
+
+test('followObsStatus reads the snapshot only once the listener is ready', async () => {
+  const f = fakeStatusController();
+  const seen = [];
+  followObsStatus(f.controller, (s) => seen.push(s.state));
+  await tick();
+  assert.deepEqual(f.calls, [], 'no snapshot before the listener is registered');
+  f.ready();
+  await tick();
+  assert.deepEqual(f.calls, ['getStatus']);
+  f.snapshot({ state: 'connected' });
+  await tick();
+  assert.deepEqual(seen, ['connected']);
+});
+
+test('followObsStatus ignores a snapshot that lands after a newer event', async () => {
+  const f = fakeStatusController();
+  const seen = [];
+  const dispose = followObsStatus(f.controller, (s) => seen.push(s.state));
+  f.ready();
+  await tick();
+  f.emit({ state: 'connected' });
+  f.snapshot({ state: 'disconnected' });
+  await tick();
+  assert.deepEqual(seen, ['connected']);
+  dispose();
+  f.emit({ state: 'error' });
+  assert.deepEqual(seen, ['connected']);
 });
