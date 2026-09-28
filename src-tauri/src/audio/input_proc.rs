@@ -5,7 +5,9 @@
 //!
 //! Per chunk of at most `MAX_CALLBACK_FRAMES` frames:
 //! 1. De-interleave every input channel (up to `MAX_STRIPS`) into its own
-//!    buffer; strip i reads input channel i. No mono fold.
+//!    buffer; strip i reads input channel i. No mono fold. Each NDI input
+//!    then fills the buffer of its strip after the hardware ones, read from
+//!    its ring with drift correction (`crate::ndi::receive`).
 //! 2. The strip holding `voice_chain` runs the `DspChain` in place on its
 //!    buffer (history for noise-profile capture, noise-profile install,
 //!    params sync, spectrum and `audio-meters` all follow that strip).
@@ -20,8 +22,10 @@ use crate::dsp::mixer::{Mixer, BUS_MONITOR};
 use crate::dsp::{DspChain, DspParams, MetersPayload};
 use crate::mixer_control::{MixerLink, MAX_STRIPS};
 use crate::mixer_meters::MixerMeterSlots;
+use crate::ndi::receive::NdiInputFeed;
 use crate::routing::{deinterleave, push_stereo};
 use ringbuf::traits::Producer;
+use ringbuf::HeapCons;
 use rustfft::{num_complex::Complex32, Fft, FftPlanner};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
@@ -102,8 +106,12 @@ impl Spectrum {
 pub(super) struct InputProcessor<P> {
     /// Channels per interleaved input frame (the device's channel count).
     stride: usize,
-    /// One buffer per strip (min(stride, MAX_STRIPS)), MAX_CALLBACK_FRAMES long.
+    /// Strips fed by input channels: min(stride, MAX_STRIPS).
+    hardware: usize,
+    /// One buffer per strip (hardware, then NDI), MAX_CALLBACK_FRAMES long.
     chan_bufs: Vec<Vec<f32>>,
+    /// NDI inputs, feeding strips `hardware..`.
+    ndi_inputs: Vec<NdiInputFeed<HeapCons<f32>>>,
     dsp: DspChain,
     params: Arc<DspParams>,
     shared: Arc<EngineShared>,
@@ -132,10 +140,13 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
         meter_slots: Arc<MixerMeterSlots>,
         outputs: Vec<OutputRoute<P>>,
         ndi_outputs: Vec<OutputRoute<P>>,
+        mut ndi_inputs: Vec<NdiInputFeed<HeapCons<f32>>>,
         meters_tx: mpsc::SyncSender<MetersPayload>,
     ) -> Self {
         let stride = stride.max(1);
-        let strips = stride.min(MAX_STRIPS);
+        let hardware = stride.min(MAX_STRIPS);
+        ndi_inputs.truncate(MAX_STRIPS - hardware);
+        let strips = hardware + ndi_inputs.len();
         let chan_bufs = (0..strips)
             .map(|_| vec![0.0f32; MAX_CALLBACK_FRAMES])
             .collect();
@@ -147,7 +158,9 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
         );
         let processor = InputProcessor {
             stride,
+            hardware,
             chan_bufs,
+            ndi_inputs,
             dsp,
             params,
             shared,
@@ -173,7 +186,8 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
         let started = Instant::now();
         let chunk_samples = self.stride * MAX_CALLBACK_FRAMES;
         for chunk in data.chunks(chunk_samples) {
-            let frames = deinterleave(chunk, self.stride, &mut self.chan_bufs[..], &convert);
+            let frames =
+                deinterleave(chunk, self.stride, &mut self.chan_bufs[..self.hardware], &convert);
             if frames > 0 {
                 self.process_frames(frames);
             }
@@ -183,6 +197,7 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
 
     fn process_frames(&mut self, n: usize) {
         let monitor_gain = db_to_lin(self.params.monitor_gain_db.load(Ordering::Relaxed));
+        self.pull_ndi_inputs(n);
         self.run_voice_chain(n, monitor_gain);
 
         // Mixer: strip i reads input channel i.
@@ -214,6 +229,15 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
         self.push_ndi();
 
         self.send_voice_meters(n);
+    }
+
+    /// Fill each NDI strip's buffer from its input ring (silence while it
+    /// buffers). Lock- and allocation-free.
+    fn pull_ndi_inputs(&mut self, n: usize) {
+        let ndi_bufs = &mut self.chan_bufs[self.hardware..];
+        for (feed, buf) in self.ndi_inputs.iter_mut().zip(ndi_bufs.iter_mut()) {
+            feed.pull(&mut buf[..n]);
+        }
     }
 
     /// Copy each NDI bus into its ring at unity gain. Drops what does not

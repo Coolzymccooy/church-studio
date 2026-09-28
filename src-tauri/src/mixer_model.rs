@@ -45,6 +45,9 @@ pub struct BusState {
 #[serde(rename_all = "camelCase")]
 pub struct MixerState {
     pub input_channels: u32,
+    /// Strips after the hardware ones that carry NDI inputs (serialized
+    /// `ndiStrips`); they are the last `ndi_strips` entries of `strips`.
+    pub ndi_strips: u32,
     pub running: bool,
     pub strips: Vec<StripState>,
     pub buses: Vec<BusState>,

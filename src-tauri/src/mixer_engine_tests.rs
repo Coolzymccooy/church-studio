@@ -308,8 +308,9 @@ fn mixer_state_json_shape_matches_contract() {
 
     assert_eq!(
         keys(&v),
-        set(&["inputChannels", "running", "strips", "buses", "scenes"])
+        set(&["inputChannels", "ndiStrips", "running", "strips", "buses", "scenes"])
     );
+    assert_eq!(v["ndiStrips"], 0);
     assert_eq!(v["inputChannels"], 2);
     assert_eq!(v["running"], true);
     assert_eq!(v["scenes"], serde_json::json!(["Sermon"]));
@@ -446,4 +447,33 @@ fn centred_mono_strip_keeps_the_old_level_on_stream_and_monitor() {
             assert!((ratio - 1.0).abs() < 0.01, "bus {bus} {label}: ratio {ratio}");
         }
     }
+}
+
+// ── NDI strips ──────────────────────────────────────────────────────────────
+
+#[test]
+fn ndi_inputs_add_strips_after_the_hardware_channels() {
+    let m = MixerControl::new();
+    m.label_strips(&[(2, "Keys".to_string()), (3, "\u{7}".to_string())]);
+    let state = m.snapshot_with_ndi(2, 2, true, Vec::new());
+    assert_eq!(state.input_channels, 2);
+    assert_eq!(state.ndi_strips, 2);
+    assert_eq!(state.strips.len(), 4);
+    assert_eq!(state.strips[2].name, "Keys");
+    // An invalid label falls back to the default name.
+    assert_eq!(state.strips[3].name, "Ch 4");
+    // NDI strips start with the fader off like every strip after the first.
+    assert_eq!(state.strips[3].fader_db, OTHER_STRIPS_FADER_DB);
+    // They can host the voice chain like any strip.
+    m.set_strip_bool(3, "voice_chain", true).unwrap();
+    assert!(m.snapshot_with_ndi(2, 2, true, Vec::new()).strips[3].voice_chain);
+}
+
+#[test]
+fn ndi_strips_never_push_past_max_strips() {
+    let m = MixerControl::new();
+    let state = m.snapshot_with_ndi(MAX_STRIPS as u32 - 1, 4, true, Vec::new());
+    assert_eq!(state.strips.len(), MAX_STRIPS);
+    assert_eq!(state.ndi_strips, 1);
+    assert_eq!(m.snapshot(2, false, Vec::new()).ndi_strips, 0);
 }

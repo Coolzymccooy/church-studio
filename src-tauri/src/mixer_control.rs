@@ -12,6 +12,7 @@ use crate::dsp::mixer::params::{
     clamp_or, BusParams, StripParams, BUS_MAIN, BUS_MONITOR, BUS_STREAM, NUM_BUSES,
 };
 use crate::dsp::mixer::{MixerParams, MixerScene};
+use crate::mixer_layout::StripLayout;
 pub use crate::mixer_model::{BusState, MixerState, StoredScene, StripState};
 use atomic_float::AtomicF32;
 use parking_lot::Mutex;
@@ -336,6 +337,18 @@ impl MixerControl {
         Ok(())
     }
 
+    /// Name strips after what feeds them (the NDI inputs at engine start).
+    /// Invalid names fall back to the default; the operator can rename.
+    pub fn label_strips(&self, labels: &[(usize, String)]) {
+        let mut names = self.names.lock();
+        for (index, label) in labels {
+            if let Some(slot) = names.get_mut(*index) {
+                *slot = clean_strip_name(*index, label)
+                    .unwrap_or_else(|_| default_strip_name(*index));
+            }
+        }
+    }
+
     pub fn rename_strip(&self, index: u32, name: &str) -> Result<(), String> {
         self.strip(index)?;
         let clean = clean_strip_name(index as usize, name)?;
@@ -403,7 +416,20 @@ impl MixerControl {
     /// engine's channel count (1 when stopped); one strip is listed per
     /// input channel, capped at `MAX_STRIPS`.
     pub fn snapshot(&self, input_channels: u32, running: bool, scenes: Vec<String>) -> MixerState {
-        let count = (input_channels as usize).clamp(1, MAX_STRIPS);
+        self.snapshot_with_ndi(input_channels, 0, running, scenes)
+    }
+
+    /// `snapshot`, plus one strip per running NDI input after the hardware
+    /// strips (`StripLayout`).
+    pub fn snapshot_with_ndi(
+        &self,
+        input_channels: u32,
+        ndi_inputs: u32,
+        running: bool,
+        scenes: Vec<String>,
+    ) -> MixerState {
+        let layout = StripLayout::new(input_channels as usize, ndi_inputs as usize);
+        let count = layout.total();
         let names: Vec<String> = self.names.lock().clone();
         let strips = (0..count)
             .map(|i| {
@@ -423,6 +449,7 @@ impl MixerControl {
             .collect();
         MixerState {
             input_channels: input_channels.max(1),
+            ndi_strips: layout.ndi as u32,
             running,
             strips,
             buses,

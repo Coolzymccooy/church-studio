@@ -76,6 +76,7 @@ Rules:
 ```json
 {
   "inputChannels": 2,
+  "ndiStrips": 0,
   "running": true,
   "strips": [{ "index": 0, "name": "Ch 1", "trim_db": 0, "polarity": false, "hpf_enabled": true, "hpf_hz": 80,
     "gate_enabled": false, "gate_threshold_db": -45, "eq_low_db": 0, "eq_mid_db": 0, "eq_high_db": 0,
@@ -88,7 +89,7 @@ Rules:
   "scenes": ["Sermon", "Worship"]
 }
 ```
-`inputChannels` is the running engine's input channel count, or 1 when stopped; `strips` lists one entry per input channel (capped at 32). The top-level fields are camelCase (`inputChannels`, `running`). Strip and bus fields use the snake_case key names, so the UI sends back exactly the key it reads.
+`inputChannels` is the running engine's input channel count, or 1 when stopped; `strips` lists one entry per input channel (capped at 32). `ndiStrips` is the number of received NDI® sources (0–4, see decision 5 of `2026-09-28-integrations-design.md`); they are extra strips after the hardware ones, named after the source, and the total never exceeds 32. They start with the fader off, like every strip after the first. The top-level fields are camelCase (`inputChannels`, `running`). Strip and bus fields use the snake_case key names, so the UI sends back exactly the key it reads.
 
 ## Event `mixer-meters` (~20 Hz while running)
 
