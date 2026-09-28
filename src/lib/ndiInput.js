@@ -78,6 +78,15 @@ export function mergeSourceList(found, selected) {
   return rows;
 }
 
+/**
+ * `ndi_status` → whether this runtime can receive. `null` while the runtime
+ * is still loading (ask again), so the panel keeps its optimistic default.
+ */
+export function receiveAvailableFromStatus(status) {
+  if (status?.loading) return null;
+  return Boolean(status?.receive);
+}
+
 const count = (value) => (Number.isFinite(value) ? value : 0);
 
 /** Live input status from `engine_status`. */

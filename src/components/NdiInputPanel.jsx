@@ -6,10 +6,13 @@ import {
   MAX_NDI_INPUTS,
   createNdiInputClient,
   mergeSourceList,
+  receiveAvailableFromStatus,
   toggleNdiSource,
 } from '../lib/ndiInput';
 
 const STATUS_POLL_MS = 2000;
+/** How soon to ask again while the NDI runtime is still loading. */
+const STATUS_RETRY_MS = 500;
 
 const tauriInvoke = (command, args) => (
   import('@tauri-apps/api/core').then(({ invoke }) => invoke(command, args))
@@ -84,13 +87,26 @@ function NdiInputCard({ isLive }) {
 
   useEffect(() => {
     let cancelled = false;
+    let retry = null;
     client.getInputs()
       .then((inputs) => { if (!cancelled) setSelected(inputs.sources); })
       .catch((err) => { if (!cancelled) setNotice({ error: true, text: describeError(err) }); });
-    runtimeClient.getStatus()
-      .then((status) => { if (!cancelled && status && !status.loading) setReceiveAvailable(Boolean(status.receive)); })
-      .catch(() => {});
-    return () => { cancelled = true; };
+    // The runtime loads in the background; ask again until it is done.
+    const pollStatus = () => {
+      runtimeClient.getStatus()
+        .then((status) => {
+          if (cancelled) return;
+          const available = receiveAvailableFromStatus(status);
+          if (available === null) {
+            retry = setTimeout(pollStatus, STATUS_RETRY_MS);
+          } else {
+            setReceiveAvailable(available);
+          }
+        })
+        .catch(() => {});
+    };
+    pollStatus();
+    return () => { cancelled = true; clearTimeout(retry); };
   }, [client, runtimeClient]);
 
   const toggle = async (name, checked) => {

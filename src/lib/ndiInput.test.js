@@ -10,6 +10,7 @@ import {
   mergeSourceList,
   normalizeNdiInputs,
   normalizeNdiSources,
+  receiveAvailableFromStatus,
   sanitizeNdiSourceList,
   toggleNdiSource,
 } from './ndiInput.js';
@@ -114,4 +115,12 @@ test('createNdiInputClient calls the Tauri commands with the right arguments', a
   const live = await client.getInputStatus();
   assert.equal(live[0].strip, 1);
   assert.equal(live[0].connected, false);
+});
+
+test('receiveAvailableFromStatus waits while the runtime loads', () => {
+  assert.equal(receiveAvailableFromStatus({ loading: true, receive: false }), null);
+  assert.equal(receiveAvailableFromStatus(null), false);
+  assert.equal(receiveAvailableFromStatus({ loading: false, available: true, receive: true }), true);
+  assert.equal(receiveAvailableFromStatus({ loading: false, available: true, receive: false }), false);
+  assert.equal(receiveAvailableFromStatus({ loading: false, available: false }), false);
 });
