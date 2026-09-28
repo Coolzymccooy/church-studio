@@ -55,7 +55,7 @@ fn start() -> Harness {
     let port = listener.local_addr().unwrap().port();
     let (tx, rx) = oneshot::channel();
     let dyn_backend: Arc<dyn LinkBackend> = backend.clone();
-    tokio::spawn(serve(listener, router(dyn_backend), rx));
+    tokio::spawn(serve(listener, router(dyn_backend, port), rx));
     Harness {
         port,
         backend,
@@ -63,8 +63,12 @@ fn start() -> Harness {
     }
 }
 
+/// Placeholder in `request()` output; `send` fills in `127.0.0.1:<port>`.
+const HOST_SLOT: &str = "__HOST__";
+
 /// Send one raw request (`Connection: close`) and return (status, full text).
 async fn send(port: u16, raw: String) -> (u16, String) {
+    let raw = raw.replace(HOST_SLOT, &format!("127.0.0.1:{port}"));
     let mut stream = TcpStream::connect(("127.0.0.1", port)).await.expect("connect");
     stream.write_all(raw.as_bytes()).await.expect("write");
     let mut buf = Vec::new();
@@ -80,7 +84,7 @@ async fn send(port: u16, raw: String) -> (u16, String) {
 
 fn request(method: &str, path: &str, headers: &[(&str, &str)], body: &str) -> String {
     let mut raw = format!(
-        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\nContent-Length: {}\r\n",
+        "{method} {path} HTTP/1.1\r\nHost: {HOST_SLOT}\r\nConnection: close\r\nContent-Length: {}\r\n",
         body.len()
     );
     for (name, value) in headers {
@@ -180,6 +184,47 @@ async fn health_needs_no_token() {
     let (status, text) = send(h.port, request("GET", "/api/health", &[], "")).await;
     assert_eq!(status, 200);
     assert!(text.contains("tiwaton-ai-studio"));
+    assert!(
+        !text.to_ascii_lowercase().contains("access-control-allow-origin"),
+        "health must not be readable cross-origin: {text}"
+    );
+}
+
+#[tokio::test]
+async fn localhost_host_is_accepted() {
+    let h = start();
+    let raw = request("POST", BRIDGE_PATH, &lumina_headers(Some(TOKEN)), &slide_body(1))
+        .replace(HOST_SLOT, &format!("localhost:{}", h.port));
+    let (status, text) = send(h.port, raw).await;
+    assert_eq!(status, 202, "{text}");
+}
+
+#[tokio::test]
+async fn foreign_host_is_rejected_before_anything_else() {
+    let h = start();
+    let wrong_port = format!("127.0.0.1:{}", h.port.wrapping_add(1));
+    let hosts = ["evil.example", "evil.example:4460", "127.0.0.1", wrong_port.as_str()];
+    for host in hosts {
+        let bridge = request("POST", BRIDGE_PATH, &lumina_headers(Some(TOKEN)), &slide_body(1))
+            .replace(HOST_SLOT, host);
+        let (status, text) = send(h.port, bridge).await;
+        assert_eq!(status, 403, "bridge with Host {host}: {text}");
+        assert!(!text.to_ascii_lowercase().contains("access-control-allow-origin"));
+
+        let preflight_headers = [
+            ("Origin", "http://evil.example"),
+            ("Access-Control-Request-Method", "POST"),
+        ];
+        let preflight =
+            request("OPTIONS", BRIDGE_PATH, &preflight_headers, "").replace(HOST_SLOT, host);
+        let (status, _) = send(h.port, preflight).await;
+        assert_eq!(status, 403, "preflight with Host {host}");
+
+        let health = request("GET", "/api/health", &[], "").replace(HOST_SLOT, host);
+        let (status, _) = send(h.port, health).await;
+        assert_eq!(status, 403, "health with Host {host}");
+    }
+    assert!(h.backend.events.lock().unwrap().is_empty());
 }
 
 #[tokio::test]

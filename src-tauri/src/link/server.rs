@@ -4,7 +4,10 @@
 //! Routes:
 //! - `POST /api/lumina/bridge`: Lumina's `lumina-aether` v1 webhook (token).
 //! - `GET /api/status`: app, version, engine state, current scene (token).
-//! - `GET /api/health`: liveness, no token.
+//! - `GET /api/health`: liveness, no token, no CORS headers.
+//!
+//! Every request must carry `Host: 127.0.0.1:<port>` or `localhost:<port>`
+//! (403 otherwise), which blocks DNS-rebinding pages.
 //!
 //! Lumina sends from a browser context, so the bridge and status routes also
 //! answer CORS preflights. That is safe because every request still needs
@@ -16,7 +19,8 @@ use crate::link::config::constant_time_eq;
 use crate::link::protocol::{self, BridgeHeaders, LuminaEvent, SequenceGuard, SequenceVerdict};
 use crate::link::lock;
 use axum::body::Bytes;
-use axum::extract::{DefaultBodyLimit, State};
+use axum::extract::{DefaultBodyLimit, Request, State};
+use axum::middleware::Next;
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -73,19 +77,59 @@ impl ServerCtx {
     }
 }
 
-pub fn router(backend: Arc<dyn LinkBackend>) -> Router {
+/// `port` is the bound port: only `127.0.0.1:<port>` and `localhost:<port>`
+/// are accepted as `Host` (DNS-rebinding defence in depth). Only the bridge
+/// and status routes carry CORS headers; `/api/health` does not, so other
+/// web pages cannot read it.
+pub fn router(backend: Arc<dyn LinkBackend>, port: u16) -> Router {
     let ctx = Arc::new(ServerCtx {
         backend,
         sequences: Mutex::new(SequenceGuard::new()),
         started: Instant::now(),
     });
-    Router::new()
-        .route("/api/health", get(health))
+    let hosts = Arc::new(allowed_hosts(port));
+    let api = Router::new()
         .route("/api/status", get(status).options(preflight))
         .route(BRIDGE_PATH, post(bridge).options(preflight))
+        .layer(axum::middleware::map_response(add_cors));
+    Router::new()
+        .route("/api/health", get(health))
+        .merge(api)
         .layer(DefaultBodyLimit::max(BODY_LIMIT_BYTES))
-        .layer(axum::middleware::map_response(add_cors))
+        .layer(axum::middleware::from_fn_with_state(hosts, check_host))
         .with_state(ctx)
+}
+
+/// The `Host` values a loopback client on `port` sends.
+pub fn allowed_hosts(port: u16) -> Vec<String> {
+    vec![format!("127.0.0.1:{port}"), format!("localhost:{port}")]
+}
+
+/// True when `host` (a raw `Host` header value) is one of `allowed`.
+pub fn is_allowed_host(host: Option<&str>, allowed: &[String]) -> bool {
+    match host {
+        Some(host) => {
+            let host = host.trim();
+            allowed.iter().any(|a| a.eq_ignore_ascii_case(host))
+        }
+        None => false,
+    }
+}
+
+/// Runs before routing (so before preflight, token or body handling).
+async fn check_host(
+    State(allowed): State<Arc<Vec<String>>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let host = request
+        .headers()
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok());
+    if !is_allowed_host(host, &allowed) {
+        return message(StatusCode::FORBIDDEN, false, "Host not allowed.");
+    }
+    next.run(request).await
 }
 
 fn message(status: StatusCode, ok: bool, text: &str) -> Response {
@@ -265,7 +309,7 @@ pub fn start(backend: Arc<dyn LinkBackend>) -> io::Result<RunningServer> {
     let listener = bind_loopback(FIRST_PORT, LAST_PORT)?;
     let port = listener.local_addr()?.port();
     let (tx, rx) = oneshot::channel();
-    let app = router(backend);
+    let app = router(backend, port);
     tauri::async_runtime::spawn(serve(listener, app, rx));
     log::info!("link: listening on 127.0.0.1:{port}");
     Ok(RunningServer {
