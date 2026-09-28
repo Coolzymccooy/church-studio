@@ -14,7 +14,8 @@
 //! ring ever holds more than `HIGH_WATER_MS`, the excess is skipped (and
 //! counted as dropped) so latency cannot build up.
 use super::audio_frame::{FltpFramer, NDI_CHANNELS, NDI_FRAME_SAMPLES};
-use super::runtime::{AudioFrameV3, NdiRuntime, SendInstance};
+use super::ffi::{AudioFrameV3, SendInstance};
+use super::runtime::NdiRuntime;
 use ringbuf::traits::{Consumer, Observer};
 use std::ffi::CString;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
