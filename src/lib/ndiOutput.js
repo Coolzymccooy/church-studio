@@ -4,7 +4,7 @@
  * Tauri commands (see src-tauri/src/ndi_commands.rs):
  *   ndi_status()               → { available, version, path, error }
  *   ndi_get_outputs()          → { stream, main, monitor, base_name }
- *   ndi_set_outputs({outputs}) → { outputs, running, restart_required, message }
+ *   ndi_set_outputs({outputs}) → { outputs, running, restart_required, message, save_error }
  *   engine_status().ndi        → { available, sending: [names], dropped_samples }
  *
  * `sanitizeNdiBaseName` mirrors `sanitize_base_name` in src-tauri/src/ndi/mod.rs.
@@ -102,6 +102,7 @@ export function createNdiClient(invoke) {
         running: Boolean(result?.running),
         restartRequired: Boolean(result?.restart_required),
         message: typeof result?.message === 'string' ? result.message : null,
+        saveError: typeof result?.save_error === 'string' ? result.save_error : null,
       };
     },
     getSending: async () => sendingFromEngineStatus(await invoke('engine_status')),

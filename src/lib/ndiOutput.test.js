@@ -78,7 +78,7 @@ test('createNdiClient calls the Tauri commands with the right arguments', async 
   const invoke = async (command, args) => {
     calls.push([command, args]);
     if (command === 'ndi_set_outputs') {
-      return { outputs: args.outputs, running: true, restart_required: true, message: 'Restart' };
+      return { outputs: args.outputs, running: true, restart_required: true, message: 'Restart', save_error: null };
     }
     if (command === 'engine_status') return { ndi: { sending: ['X (Main)'] } };
     if (command === 'ndi_get_outputs') return { main: true, base_name: 'X' };
@@ -94,6 +94,7 @@ test('createNdiClient calls the Tauri commands with the right arguments', async 
   assert.equal(result.restartRequired, true);
   assert.equal(result.outputs.main, true);
   assert.equal(result.message, 'Restart');
+  assert.equal(result.saveError, null);
 
   assert.deepEqual(await client.getSending(), ['X (Main)']);
   assert.equal((await client.getOutputs()).baseName, 'X');

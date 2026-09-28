@@ -340,6 +340,9 @@ pub fn run() {
             ndi_commands::ndi_set_outputs,
         ])
         .setup(|app| {
+            let saved_ndi = ndi_commands::load_saved_outputs(app.handle());
+            app.state::<NdiSettings>().replace(saved_ndi);
+
             #[cfg(desktop)]
             app.handle()
                 .plugin(tauri_plugin_updater::Builder::new().build())?;

@@ -86,9 +86,13 @@ function NdiOutputCard({ isLive }) {
       const result = await client.setOutputs(next);
       setOutputs(result.outputs);
       setNameDraft(result.outputs.baseName);
-      setNotice(result.restartRequired
-        ? { error: false, text: result.message || 'Restart the engine to apply the NDI outputs.' }
-        : null);
+      if (result.saveError) {
+        setNotice({ error: true, text: `Applied, but not saved: ${result.saveError}` });
+      } else {
+        setNotice(result.restartRequired
+          ? { error: false, text: result.message || 'Restart the engine to apply the NDI outputs.' }
+          : null);
+      }
     } catch (err) {
       setNotice({ error: true, text: describeError(err) });
     } finally {

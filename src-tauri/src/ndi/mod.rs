@@ -5,10 +5,13 @@
 //! - `audio_frame`: interleaved stereo → 480-sample planar float frames.
 //! - `sender`: one sender thread per enabled bus, fed by a lock-free ring.
 //!
+//! - `persist`: the settings file (`app_data_dir()/ndi.json`).
+//!
 //! This file holds the operator's settings (`NdiOutputs`), the source names
 //! and `start_senders`, which the engine calls when it starts. Settings are
 //! applied at the next engine start.
 pub mod audio_frame;
+pub mod persist;
 pub mod runtime;
 pub mod sender;
 
