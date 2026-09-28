@@ -115,13 +115,48 @@ pub fn strip_label(source: &str, slot: usize) -> String {
     }
 }
 
-/// `source` is one of this app's own NDI outputs (`own_outputs` are our
-/// source names, e.g. "TIWATON Studio (Stream)"). Receiving it would feed
-/// the mix back into itself.
-pub fn is_own_source(source: &str, own_outputs: &[String]) -> bool {
-    own_outputs
-        .iter()
-        .any(|own| source.trim().ends_with(&format!("({own})")))
+/// Names this machine may appear under as the MACHINE part of an NDI
+/// source name: the Windows computer name and the host name.
+pub fn local_machine_names() -> Vec<String> {
+    let mut names = Vec::with_capacity(2);
+    if let Ok(name) = std::env::var("COMPUTERNAME") {
+        names.push(name);
+    }
+    names.push(gethostname::gethostname().to_string_lossy().into_owned());
+    names.retain(|name| !name.trim().is_empty());
+    names
+}
+
+/// "MACHINE (Source)" → ("MACHINE", "Source"). The machine name runs to the
+/// first " (" (host names have no spaces); the source is everything inside
+/// the outer parentheses, so it may contain parentheses itself.
+pub fn split_source_name(full: &str) -> Option<(&str, &str)> {
+    let trimmed = full.trim();
+    let open = trimmed.find(" (")?;
+    let source = trimmed[open + 2..].strip_suffix(')')?;
+    Some((trimmed[..open].trim(), source))
+}
+
+/// `machine` is `host`, without case; a host name's first DNS label counts
+/// too ("studio-pc.local" is "STUDIO-PC").
+fn same_machine(machine: &str, host: &str) -> bool {
+    let host = host.trim();
+    let short = host.split('.').next().unwrap_or(host);
+    let machine = machine.to_lowercase();
+    machine == host.to_lowercase() || machine == short.to_lowercase()
+}
+
+/// `source` is one of this app's own NDI outputs: its machine part is one of
+/// `local_machines` (`local_machine_names`) and its source part is one of
+/// `own_outputs` (our enabled output names, e.g. "TIWATON Studio (Stream)").
+/// Receiving it would feed the mix back into itself. The same name from
+/// another machine is someone else's output and is allowed.
+pub fn is_own_source(source: &str, local_machines: &[String], own_outputs: &[String]) -> bool {
+    let Some((machine, name)) = split_source_name(source) else {
+        return false;
+    };
+    local_machines.iter().any(|host| same_machine(machine, host))
+        && own_outputs.iter().any(|own| own == name)
 }
 
 /// What `start_receivers` hands the engine: the feeds for the audio
@@ -209,11 +244,32 @@ mod tests {
     }
 
     #[test]
-    fn own_outputs_are_recognised() {
+    fn source_names_split_into_machine_and_source() {
+        assert_eq!(split_source_name("PC (Keys)"), Some(("PC", "Keys")));
+        assert_eq!(
+            split_source_name(" PC (TIWATON Studio (Stream)) "),
+            Some(("PC", "TIWATON Studio (Stream)"))
+        );
+        assert_eq!(split_source_name("Plain name"), None);
+        assert_eq!(split_source_name("PC (unclosed"), None);
+    }
+
+    #[test]
+    fn own_outputs_are_recognised_on_this_machine_only() {
         let own = vec!["TIWATON Studio (Stream)".to_string()];
-        assert!(is_own_source("CHURCH-PC (TIWATON Studio (Stream))", &own));
-        assert!(!is_own_source("CHURCH-PC (TIWATON Studio (Main))", &own));
-        assert!(!is_own_source("CHURCH-PC (Keys)", &[]));
+        let here = vec!["CHURCH-PC".to_string()];
+        // Same host, any case, source name with parentheses.
+        assert!(is_own_source("CHURCH-PC (TIWATON Studio (Stream))", &here, &own));
+        assert!(is_own_source("church-pc (TIWATON Studio (Stream))", &here, &own));
+        let fqdn = vec!["church-pc.local".to_string()];
+        assert!(is_own_source("CHURCH-PC (TIWATON Studio (Stream))", &fqdn, &own));
+        // Another machine's default output is someone else's.
+        assert!(!is_own_source("OTHER-PC (TIWATON Studio (Stream))", &here, &own));
+        // Our machine, but not one of our enabled outputs.
+        assert!(!is_own_source("CHURCH-PC (TIWATON Studio (Main))", &here, &own));
+        assert!(!is_own_source("CHURCH-PC (Keys)", &here, &[]));
+        // No local name known: nothing is ours.
+        assert!(!is_own_source("CHURCH-PC (TIWATON Studio (Stream))", &[], &own));
     }
 
     #[test]

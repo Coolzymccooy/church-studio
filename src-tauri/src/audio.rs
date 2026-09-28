@@ -377,12 +377,15 @@ impl AudioEngine {
             .into_iter()
             .map(|(_, name)| name)
             .collect();
+        let local_machines = crate::ndi::receive::local_machine_names();
         let receivable = NdiInputs {
             sources: ndi
                 .inputs
                 .sources
                 .iter()
-                .filter(|source| !crate::ndi::receive::is_own_source(source, &own_outputs))
+                .filter(|source| {
+                    !crate::ndi::receive::is_own_source(source, &local_machines, &own_outputs)
+                })
                 .cloned()
                 .collect(),
         };

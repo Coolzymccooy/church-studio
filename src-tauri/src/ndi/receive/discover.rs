@@ -27,14 +27,18 @@ pub struct NdiSourceInfo {
 
 /// Dedupe by name (first wins), drop blank names, sort case-insensitively
 /// and flag our own outputs.
-pub fn tidy_sources(found: Vec<(String, Option<String>)>, own_outputs: &[String]) -> Vec<NdiSourceInfo> {
+pub fn tidy_sources(
+    found: Vec<(String, Option<String>)>,
+    local_machines: &[String],
+    own_outputs: &[String],
+) -> Vec<NdiSourceInfo> {
     let mut sources: Vec<NdiSourceInfo> = Vec::with_capacity(found.len());
     for (name, url) in found {
         let name = name.trim().to_string();
         if name.is_empty() || sources.iter().any(|s| s.name == name) {
             continue;
         }
-        let own = super::is_own_source(&name, own_outputs);
+        let own = super::is_own_source(&name, local_machines, own_outputs);
         sources.push(NdiSourceInfo { name, url, own });
     }
     sources.sort_by_key(|s| s.name.to_lowercase());
@@ -71,7 +75,7 @@ pub fn list_sources(runtime: &NdiRuntime, own_outputs: &[String]) -> Result<Vec<
     }
     // SAFETY: as above; the list is copied before the finder is destroyed.
     let found = unsafe { runtime.find_sources(finder.instance) };
-    Ok(tidy_sources(found, own_outputs))
+    Ok(tidy_sources(found, &super::local_machine_names(), own_outputs))
 }
 
 #[cfg(test)]
@@ -86,13 +90,24 @@ mod tests {
             ("pc (alpha)".to_string(), Some("10.0.0.2:5961".to_string())),
             ("PC (Zed)".to_string(), None),
             ("PC (TIWATON Studio (Stream))".to_string(), None),
+            ("OTHER (TIWATON Studio (Stream))".to_string(), None),
         ];
         let own = vec!["TIWATON Studio (Stream)".to_string()];
-        let sources = tidy_sources(found, &own);
+        let sources = tidy_sources(found, &["pc".to_string()], &own);
         let names: Vec<&str> = sources.iter().map(|s| s.name.as_str()).collect();
-        assert_eq!(names, vec!["pc (alpha)", "PC (TIWATON Studio (Stream))", "PC (Zed)"]);
-        assert_eq!(sources[0].url.as_deref(), Some("10.0.0.2:5961"));
-        assert!(sources[1].own);
-        assert!(!sources[2].own);
+        assert_eq!(
+            names,
+            vec![
+                "OTHER (TIWATON Studio (Stream))",
+                "pc (alpha)",
+                "PC (TIWATON Studio (Stream))",
+                "PC (Zed)",
+            ]
+        );
+        // The same output name on another machine is not ours.
+        assert!(!sources[0].own);
+        assert_eq!(sources[1].url.as_deref(), Some("10.0.0.2:5961"));
+        assert!(sources[2].own);
+        assert!(!sources[3].own);
     }
 }
