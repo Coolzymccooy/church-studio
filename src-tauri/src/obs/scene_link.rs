@@ -81,7 +81,11 @@ pub fn same_scene(a: &str, b: &str) -> bool {
     normalize(a) == normalize(b)
 }
 
+/// Which side a change was made on. Studio-side loads made by the link go
+/// through `load_scene_state`, which never notifies the hook, so today only
+/// `Obs` is recorded; `Studio` keeps the guard symmetric.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(not(test), allow(dead_code))]
 pub enum LinkSide {
     Obs,
     Studio,
