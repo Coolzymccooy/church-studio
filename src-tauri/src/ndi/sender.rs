@@ -10,9 +10,12 @@
 //! The NDI send instance is created, used and destroyed on the sender
 //! thread, so the raw instance pointer never crosses threads.
 //!
-//! Clock drift: the sound card and NDI's clock differ by a few ppm. If the
-//! ring ever holds more than `HIGH_WATER_MS`, the excess is skipped (and
-//! counted as dropped) so latency cannot build up.
+//! Clock drift: the sound card and NDI's clock differ by a few ppm. Above
+//! `DRIFT_HIGH_MS` the pump skips one stereo sample per pass, a correction
+//! too small to hear that absorbs far more drift than real clocks have, so
+//! latency stays near `DRIFT_HIGH_MS`. Above `HARD_HIGH_MS` (a stall, not
+//! drift) the ring is trimmed straight back to `TARGET_FILL_FRAMES`. Both are
+//! counted as dropped.
 use super::audio_frame::{FltpFramer, NDI_CHANNELS, NDI_FRAME_SAMPLES};
 use super::ffi::{AudioFrameV3, SendInstance};
 use super::runtime::NdiRuntime;
@@ -25,8 +28,10 @@ use std::time::Duration;
 
 /// Ring capacity: one second of stereo audio.
 pub const RING_SECONDS: usize = 1;
+/// Above this fill one stereo sample is skipped per pump pass (drift).
+const DRIFT_HIGH_MS: usize = 60;
 /// Above this fill the ring is trimmed back to `TARGET_FILL_FRAMES` frames.
-const HIGH_WATER_MS: usize = 500;
+const HARD_HIGH_MS: usize = 500;
 const TARGET_FILL_FRAMES: usize = 2;
 /// How long the sender sleeps when the ring is empty.
 const IDLE_SLEEP: Duration = Duration::from_millis(2);
@@ -44,20 +49,22 @@ pub(crate) struct Pump<C> {
     framer: FltpFramer,
     scratch: Vec<f32>,
     dropped: Arc<AtomicU64>,
-    high_water: usize,
+    drift_high: usize,
+    hard_high: usize,
     target_fill: usize,
 }
 
 impl<C: Consumer<Item = f32>> Pump<C> {
     pub(crate) fn new(sample_rate: u32, consumer: C, dropped: Arc<AtomicU64>) -> Self {
         let frame = NDI_FRAME_SAMPLES * NDI_CHANNELS;
-        let high_water = (sample_rate as usize * HIGH_WATER_MS / 1000) * NDI_CHANNELS;
+        let ms = |ms: usize| (sample_rate as usize * ms / 1000) * NDI_CHANNELS;
         Pump {
             consumer,
             framer: FltpFramer::new(NDI_CHANNELS, NDI_FRAME_SAMPLES),
             scratch: vec![0.0; frame * 4],
             dropped,
-            high_water: high_water.max(frame * 4),
+            drift_high: ms(DRIFT_HIGH_MS).max(frame * 4),
+            hard_high: ms(HARD_HIGH_MS).max(frame * 8),
             target_fill: frame * TARGET_FILL_FRAMES,
         }
     }
@@ -66,11 +73,17 @@ impl<C: Consumer<Item = f32>> Pump<C> {
     /// that completes. Returns the number of samples popped.
     pub(crate) fn pump_once(&mut self, mut emit: impl FnMut(&[f32])) -> usize {
         let occupied = self.consumer.occupied_len();
-        if occupied > self.high_water {
+        // Skip whole sample frames so L stays L.
+        let to_skip = if occupied > self.hard_high {
             let excess = occupied - self.target_fill;
-            // Skip whole sample frames so L stays L.
-            let excess = excess - excess % NDI_CHANNELS;
-            let skipped = self.consumer.skip(excess);
+            excess - excess % NDI_CHANNELS
+        } else if occupied > self.drift_high {
+            NDI_CHANNELS
+        } else {
+            0
+        };
+        if to_skip > 0 {
+            let skipped = self.consumer.skip(to_skip);
             self.dropped.fetch_add(skipped as u64, Ordering::Relaxed);
         }
         let popped = self.consumer.pop_slice(&mut self.scratch[..]);
@@ -237,6 +250,25 @@ mod tests {
         // Channels stay aligned after the skip.
         assert_eq!(first_left, Some(1.0));
         assert!(frames >= 1);
+    }
+
+    #[test]
+    fn drift_above_soft_mark_skips_one_stereo_sample() {
+        let (mut producer, consumer) = HeapRb::<f32>::new(ring_capacity(48_000)).split();
+        let dropped = Arc::new(AtomicU64::new(0));
+        let mut pump = Pump::new(48_000, consumer, dropped.clone());
+        // 0.1 s of stereo: above the 60 ms drift mark, below the hard mark.
+        for n in 0..4_800 * NDI_CHANNELS {
+            producer.try_push(if n % 2 == 0 { 1.0 } else { -1.0 }).unwrap();
+        }
+        let mut first_left = None;
+        pump.pump_once(|p| {
+            if first_left.is_none() {
+                first_left = Some(p[0]);
+            }
+        });
+        assert_eq!(dropped.load(Ordering::Relaxed) as usize, NDI_CHANNELS);
+        assert_eq!(first_left, Some(1.0));
     }
 
     #[test]

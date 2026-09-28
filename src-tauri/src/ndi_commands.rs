@@ -44,9 +44,10 @@ pub fn ndi_get_outputs(settings: State<'_, NdiSettings>) -> NdiOutputs {
 /// Store and save the outputs. Enabling any output without the runtime
 /// installed is an error with install guidance (the settings are left
 /// unchanged). A failed save keeps the new settings for this session and is
-/// reported in `save_error`.
+/// reported in `save_error`. Async so a runtime load still in progress
+/// blocks a worker thread, not the UI thread.
 #[tauri::command]
-pub fn ndi_set_outputs(
+pub async fn ndi_set_outputs(
     app: AppHandle,
     settings: State<'_, NdiSettings>,
     engine: State<'_, EngineState>,
