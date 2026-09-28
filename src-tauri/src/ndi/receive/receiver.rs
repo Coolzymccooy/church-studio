@@ -96,9 +96,14 @@ impl NdiReceiver {
         }
     }
 
+    /// Ask the thread to stop without waiting for it.
+    pub fn request_stop(&self) {
+        self.stop.store(true, Ordering::Release);
+    }
+
     /// Stop the thread and wait for it; the NDI receiver is destroyed on it.
     pub fn stop(&mut self) {
-        self.stop.store(true, Ordering::Release);
+        self.request_stop();
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
@@ -108,6 +113,22 @@ impl NdiReceiver {
 impl Drop for NdiReceiver {
     fn drop(&mut self) {
         self.stop();
+    }
+}
+
+/// All of an engine's receivers. Dropping signals every thread before
+/// joining any, so shutdown waits for about one capture timeout in total
+/// rather than one per receiver.
+pub struct NdiReceivers(pub Vec<NdiReceiver>);
+
+impl Drop for NdiReceivers {
+    fn drop(&mut self) {
+        for receiver in self.0.iter() {
+            receiver.request_stop();
+        }
+        for receiver in self.0.iter_mut() {
+            receiver.stop();
+        }
     }
 }
 
@@ -175,5 +196,56 @@ impl<P: Producer<Item = f32>> Pump<P> {
         if dropped > 0 {
             self.stats.dropped_samples.fetch_add(dropped, Ordering::Relaxed);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicUsize;
+
+    /// A receiver whose thread, once stopped, waits (up to 5 s) for every
+    /// sibling to be stopped too, and records whether they all were.
+    fn waiting_receiver(
+        stopped: Arc<AtomicUsize>,
+        total: usize,
+        ok: Arc<AtomicUsize>,
+    ) -> NdiReceiver {
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread_stop = stop.clone();
+        let thread = std::thread::spawn(move || {
+            while !thread_stop.load(Ordering::Acquire) {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            stopped.fetch_add(1, Ordering::AcqRel);
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while stopped.load(Ordering::Acquire) < total && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            if stopped.load(Ordering::Acquire) >= total {
+                ok.fetch_add(1, Ordering::AcqRel);
+            }
+        });
+        NdiReceiver {
+            stop,
+            thread: Some(thread),
+        }
+    }
+
+    #[test]
+    fn dropping_receivers_signals_all_before_joining() {
+        let total = 4;
+        let stopped = Arc::new(AtomicUsize::new(0));
+        let ok = Arc::new(AtomicUsize::new(0));
+        let receivers = NdiReceivers(
+            (0..total)
+                .map(|_| waiting_receiver(stopped.clone(), total, ok.clone()))
+                .collect(),
+        );
+        drop(receivers);
+        // Joined: every thread has finished, and each saw all four stopped
+        // (a join-one-at-a-time shutdown would time out on the first).
+        assert_eq!(stopped.load(Ordering::Acquire), total);
+        assert_eq!(ok.load(Ordering::Acquire), total);
     }
 }

@@ -27,7 +27,7 @@ use crate::history::HistoryRing;
 use crate::mixer_control::MixerLink;
 use crate::mixer_layout::StripLayout;
 use crate::mixer_meters::MixerMeterSlots;
-use crate::ndi::receive::receiver::NdiReceiver;
+use crate::ndi::receive::receiver::NdiReceivers;
 use crate::ndi::receive::{NdiInputHandle, NdiInputs};
 use crate::ndi::sender::NdiBusSender;
 use crate::ndi::{NdiEngineConfig, NdiOutputs};
@@ -67,8 +67,9 @@ pub struct AudioEngine {
     /// callback (the ring producers' owner) is gone.
     ndi_senders: Vec<NdiBusSender>,
     ndi_applied: NdiOutputs,
-    /// NDI receivers; they stop after the input callback too.
-    _ndi_receivers: Vec<NdiReceiver>,
+    /// NDI receivers; they stop after the input callback too, all signalled
+    /// before any is joined.
+    _ndi_receivers: NdiReceivers,
     ndi_inputs: Vec<NdiInputHandle>,
     ndi_inputs_applied: NdiInputs,
     pub sample_rate: u32,
@@ -510,7 +511,7 @@ impl AudioEngine {
             _out_streams: out_streams,
             ndi_senders,
             ndi_applied: ndi.outputs,
-            _ndi_receivers: ndi_in.receivers,
+            _ndi_receivers: NdiReceivers(ndi_in.receivers),
             ndi_inputs: ndi_in.handles,
             ndi_inputs_applied: ndi.inputs,
             sample_rate: sr,
