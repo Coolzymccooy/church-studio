@@ -4,6 +4,7 @@
 //! live is costly.
 use super::config::{self, ObsConfigView};
 use super::manager::ObsManager;
+use super::scene_link::SceneLinkConfig;
 use super::status::{self, ObsStatus};
 use tauri::State;
 
@@ -30,6 +31,8 @@ pub fn obs_get_config(obs: State<'_, ObsManager>) -> Result<ObsConfigView, Strin
 }
 
 /// `password`: `None` keeps the stored password, `Some("")` clears it.
+/// `scene_link`: `None` keeps the stored scene link. Changing only the scene
+/// link doesn't reconnect.
 #[tauri::command]
 pub fn obs_set_config(
     obs: State<'_, ObsManager>,
@@ -37,6 +40,7 @@ pub fn obs_set_config(
     port: u16,
     password: Option<String>,
     enabled: bool,
+    scene_link: Option<SceneLinkConfig>,
 ) -> Result<ObsConfigView, String> {
     let mut next = obs.config();
     next.host = config::validate_host(&host)?;
@@ -45,6 +49,9 @@ pub fn obs_set_config(
         next.password = pw;
     }
     next.enabled = enabled;
+    if let Some(link) = scene_link {
+        next.scene_link = link.cleaned();
+    }
     obs.update_config(next)
 }
 

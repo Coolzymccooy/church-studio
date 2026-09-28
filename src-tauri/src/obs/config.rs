@@ -3,6 +3,7 @@
 //! The password is stored in the app config (design decision 6) but is never
 //! logged: `ObsConfig` has a hand-written `Debug` that redacts it, and the UI
 //! only ever receives `ObsConfigView`, which says whether one is set.
+use super::scene_link::SceneLinkConfig;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fs;
@@ -20,6 +21,7 @@ pub struct ObsConfig {
     pub port: u16,
     pub password: String,
     pub enabled: bool,
+    pub scene_link: SceneLinkConfig,
 }
 
 impl Default for ObsConfig {
@@ -29,6 +31,7 @@ impl Default for ObsConfig {
             port: DEFAULT_PORT,
             password: String::new(),
             enabled: false,
+            scene_link: SceneLinkConfig::default(),
         }
     }
 }
@@ -40,6 +43,7 @@ impl fmt::Debug for ObsConfig {
             .field("port", &self.port)
             .field("password", &"<redacted>")
             .field("enabled", &self.enabled)
+            .field("scene_link", &self.scene_link)
             .finish()
     }
 }
@@ -52,6 +56,7 @@ pub struct ObsConfigView {
     pub port: u16,
     pub has_password: bool,
     pub enabled: bool,
+    pub scene_link: SceneLinkConfig,
 }
 
 impl ObsConfig {
@@ -61,6 +66,7 @@ impl ObsConfig {
             port: self.port,
             has_password: !self.password.is_empty(),
             enabled: self.enabled,
+            scene_link: self.scene_link.clone(),
         }
     }
 
@@ -103,6 +109,7 @@ pub fn parse_config(text: &str) -> ObsConfig {
     let mut cfg: ObsConfig = serde_json::from_str(text).unwrap_or_default();
     cfg.host = validate_host(&cfg.host).unwrap_or_else(|_| DEFAULT_HOST.to_string());
     cfg.port = validate_port(cfg.port).unwrap_or(DEFAULT_PORT);
+    cfg.scene_link = cfg.scene_link.cleaned();
     cfg
 }
 
@@ -181,6 +188,7 @@ mod tests {
             port: 4456,
             password: "pw".to_string(),
             enabled: true,
+            scene_link: SceneLinkConfig::default(),
         };
         let text = serde_json::to_string(&cfg).unwrap();
         assert_eq!(parse_config(&text), cfg);
@@ -206,6 +214,8 @@ mod tests {
         let a = ObsConfig::default();
         let mut b = a.clone();
         assert!(!a.connection_differs(&b));
+        b.scene_link.enabled = true;
+        assert!(!a.connection_differs(&b), "scene link edits must not reconnect");
         b.enabled = true;
         assert!(a.connection_differs(&b));
     }

@@ -3,6 +3,8 @@
 pub mod commands;
 mod config;
 mod manager;
+mod scene_link;
+mod session;
 mod status;
 
 pub use manager::ObsManager;

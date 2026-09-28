@@ -344,6 +344,10 @@ pub fn run() {
 
             let obs_manager = obs::ObsManager::new(app.handle().clone());
             app.manage(obs_manager.clone());
+            let scene_link_obs = obs_manager.clone();
+            app.manage(mixer_commands::SceneLoadedHook::new(move |name| {
+                scene_link_obs.on_studio_scene_loaded(name)
+            }));
             obs_manager.start();
 
             #[cfg(all(desktop, not(debug_assertions)))]
