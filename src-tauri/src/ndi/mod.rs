@@ -1,18 +1,22 @@
-//! NDI® audio output (design decisions 1–4 in
+//! NDI® audio output and input (design decisions 1–5 in
 //! `docs/specs/2026-09-28-integrations-design.md`).
 //!
 //! - `ffi`: the hand-declared SDK structs, constants and signatures.
+//! - `ffi_recv`: the same for discovery and receiving.
 //! - `runtime`: loads the installed NDI Runtime at run time.
 //! - `audio_frame`: interleaved stereo → 480-sample planar float frames.
 //! - `sender`: one sender thread per enabled bus, fed by a lock-free ring.
 //! - `persist`: the settings file (`app_data_dir()/ndi.json`).
+//! - `receive`: NDI inputs as mixer strips (`ndi_inputs.json`).
 //!
 //! This file holds the operator's settings (`NdiOutputs`), the source names
 //! and `start_senders`, which the engine calls when it starts. Settings are
 //! applied at the next engine start.
 pub mod audio_frame;
 pub mod ffi;
+pub mod ffi_recv;
 pub mod persist;
+pub mod receive;
 pub mod runtime;
 #[cfg(test)]
 mod runtime_tests;
@@ -115,6 +119,13 @@ pub fn sanitize_base_name(raw: &str) -> String {
     } else {
         capped.to_string()
     }
+}
+
+/// Everything NDI the engine applies when it starts.
+#[derive(Debug, Clone, Default)]
+pub struct NdiEngineConfig {
+    pub outputs: NdiOutputs,
+    pub inputs: receive::NdiInputs,
 }
 
 /// Managed Tauri state: the settings used at the next engine start.
