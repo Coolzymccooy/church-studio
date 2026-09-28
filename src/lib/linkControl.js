@@ -27,6 +27,17 @@ export const CONTENT_KIND_OPTIONS = [
   '', 'lyrics', 'scripture', 'designed', 'media', 'announcement', 'blackout', 'idle',
 ];
 
+/** Lumina's `ItemType` values (matched case-insensitively); '' means any. */
+export const ITEM_TYPE_OPTIONS = [
+  '', 'SONG', 'HYMN', 'SCRIPTURE', 'BIBLE', 'MEDIA', 'ANNOUNCEMENT',
+];
+
+/** Item-type choices for a rule, keeping a saved value Lumina may add later. */
+export function itemTypeOptions(current) {
+  const known = ITEM_TYPE_OPTIONS.some((v) => v.toLowerCase() === String(current ?? '').toLowerCase());
+  return known || !current ? ITEM_TYPE_OPTIONS : [...ITEM_TYPE_OPTIONS, current];
+}
+
 const SCENE_NAME_RE = /^[A-Za-z0-9 _-]{1,40}$/;
 const EVENT_NAME_RE = /^[A-Za-z0-9._-]{1,128}$/;
 export const MAX_RULES = 50;

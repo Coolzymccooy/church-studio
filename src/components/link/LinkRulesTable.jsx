@@ -4,6 +4,7 @@ import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react';
 import {
   CONTENT_KIND_OPTIONS,
   RULE_EVENT_OPTIONS,
+  itemTypeOptions,
   moveRule,
   newRule,
   updateRule,
@@ -62,6 +63,18 @@ function RuleRow({ rule, index, count, scenes, onChange, onMove, onRemove }) {
       <td className="py-1.5 pr-1">
         <select
           className={selectClass}
+          value={rule.when.itemType ?? ''}
+          onChange={(e) => onChange({ when: { itemType: e.target.value || null } })}
+          title="Lumina item type (e.g. song or sermon scripture)"
+        >
+          {itemTypeOptions(rule.when.itemType).map((type) => (
+            <option key={type || 'any'} value={type}>{type ? type.toLowerCase() : 'any'}</option>
+          ))}
+        </select>
+      </td>
+      <td className="py-1.5 pr-1">
+        <select
+          className={selectClass}
           value={rule.then.loadScene}
           onChange={(e) => onChange({ then: { loadScene: e.target.value } })}
         >
@@ -107,6 +120,7 @@ export default function LinkRulesTable({ rules, scenes, onSave }) {
             <th className="w-6" />
             <th className="pb-1">When Lumina…</th>
             <th className="pb-1">Content</th>
+            <th className="pb-1">Item</th>
             <th className="pb-1">Then load scene</th>
             <th className="w-20" />
           </tr>

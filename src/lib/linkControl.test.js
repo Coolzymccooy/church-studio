@@ -6,6 +6,8 @@ import {
   bridgeUrl,
   createLinkController,
   formatTimeAgo,
+  ITEM_TYPE_OPTIONS,
+  itemTypeOptions,
   moveRule,
   newRule,
   updateRule,
@@ -146,4 +148,14 @@ test('appendActivity prepends, de-duplicates and caps', () => {
   assert.deepEqual(list, [{ id: 3 }, { id: 1 }]);
   assert.deepEqual(appendActivity(list, { id: 3 }), [{ id: 3 }, { id: 1 }]);
   assert.deepEqual(appendActivity(null, { id: 9 }), [{ id: 9 }]);
+});
+
+test('itemTypeOptions offers Lumina item types and keeps an unknown saved value', () => {
+  assert.deepEqual(itemTypeOptions(null), ITEM_TYPE_OPTIONS);
+  assert.ok(ITEM_TYPE_OPTIONS.includes('SONG') && ITEM_TYPE_OPTIONS.includes(''));
+  assert.deepEqual(itemTypeOptions('song'), ITEM_TYPE_OPTIONS);
+  assert.deepEqual(itemTypeOptions('PODCAST'), [...ITEM_TYPE_OPTIONS, 'PODCAST']);
+  const [rule] = updateRule([{ id: 'r1', when: { event: 'lumina.item.started', contentKind: null, itemType: null }, then: { loadScene: 'Worship' } }], 0, { when: { itemType: 'SONG' } });
+  assert.equal(rule.when.itemType, 'SONG');
+  assert.equal(rule.when.event, 'lumina.item.started');
 });
