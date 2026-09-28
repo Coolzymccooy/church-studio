@@ -34,7 +34,7 @@ pub fn obs_get_config(obs: State<'_, ObsManager>) -> Result<ObsConfigView, Strin
 /// `scene_link`: `None` keeps the stored scene link. Changing only the scene
 /// link doesn't reconnect.
 #[tauri::command]
-pub fn obs_set_config(
+pub async fn obs_set_config(
     obs: State<'_, ObsManager>,
     host: String,
     port: u16,
@@ -52,7 +52,11 @@ pub fn obs_set_config(
     if let Some(link) = scene_link {
         next.scene_link = link.cleaned();
     }
-    obs.update_config(next)
+    // Saving writes a file; keep it off the async workers.
+    let mgr = obs.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || mgr.update_config(next))
+        .await
+        .map_err(|e| format!("cannot save OBS settings: {e}"))?
 }
 
 #[tauri::command]

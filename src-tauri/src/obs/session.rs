@@ -62,13 +62,13 @@ async fn run_session(mgr: &ObsManager, gen: u64, client: Arc<Client>) {
     let events = match client.events() {
         Ok(events) => events,
         Err(e) => {
-            mgr.set_status(gen, |s| s.last_error = Some(status::friendly_error(&e)));
+            mark_failed(mgr, gen, status::friendly_error(&e));
             return;
         }
     };
     let mut events = Box::pin(events);
     if let Err(e) = refresh_all(mgr, gen, &client).await {
-        mgr.set_status(gen, |s| s.last_error = Some(status::friendly_error(&e)));
+        mark_failed(mgr, gen, status::friendly_error(&e));
         return;
     }
     mgr.set_client(gen, Some(Arc::clone(&client)));
@@ -80,7 +80,7 @@ async fn run_session(mgr: &ObsManager, gen: u64, client: Arc<Client>) {
         }
         match tokio::time::timeout(TICK, events.next()).await {
             Ok(Some(event)) => {
-                if !handle_event(mgr, gen, event) {
+                if !handle_event(mgr, gen, event).await {
                     break;
                 }
             }
@@ -95,6 +95,16 @@ async fn run_session(mgr: &ObsManager, gen: u64, client: Arc<Client>) {
         s.last_error = Some(status::MSG_LOST.to_string());
     });
     log::info!("obs: disconnected");
+}
+
+/// The session failed during setup: show the error, not "connecting". The
+/// run loop sets `connecting` again when it retries after the backoff.
+fn mark_failed(mgr: &ObsManager, gen: u64, message: String) {
+    mgr.set_status(gen, move |s| {
+        s.reset_connection();
+        s.connecting = false;
+        s.last_error = Some(message);
+    });
 }
 
 async fn refresh_all(mgr: &ObsManager, gen: u64, client: &Client) -> Result<(), obws::error::Error> {
@@ -156,14 +166,22 @@ async fn poll_timecodes(mgr: &ObsManager, gen: u64, client: &Client) {
 }
 
 /// Apply one OBS event. Returns false when OBS is shutting down.
-fn handle_event(mgr: &ObsManager, gen: u64, event: Event) -> bool {
+async fn handle_event(mgr: &ObsManager, gen: u64, event: Event) -> bool {
     match event {
         Event::CurrentProgramSceneChanged { id } => {
             let name = id.name;
             let for_status = name.clone();
             mgr.set_status(gen, move |s| s.current_scene = Some(for_status));
             if mgr.is_current(gen) {
-                mgr.follow_obs_scene(&name);
+                // Scene loads read files and touch the mixer, so run them on
+                // the blocking pool; awaiting here keeps scene changes in order.
+                let follower = mgr.clone();
+                let joined =
+                    tauri::async_runtime::spawn_blocking(move || follower.follow_obs_scene(&name))
+                        .await;
+                if let Err(e) = joined {
+                    log::warn!("obs: scene link task failed: {e}");
+                }
             }
         }
         Event::SceneListChanged { scenes } => {
