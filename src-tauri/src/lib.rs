@@ -176,13 +176,19 @@ async fn start_audio_engine(
             inputs: ndi_inputs.snapshot(),
         },
     )?;
-    // NDI strips are named after their sources (the operator can rename).
-    let ndi_labels: Vec<(usize, String)> = engine
+    // Record what feeds each strip: a strip whose feed changed since the last
+    // start is reset to the new-strip defaults (fader off). NDI strips are
+    // named after their sources unless the operator renamed them.
+    let ndi_strips: Vec<(usize, String, String)> = engine
         .ndi_inputs
         .iter()
-        .map(|input| (input.strip, input.label.clone()))
+        .map(|input| (input.strip, input.source.clone(), input.label.clone()))
         .collect();
-    mixer.label_strips(&ndi_labels);
+    let feeds = mixer_control::engine_strip_feeds(engine.strip_layout().hardware, &ndi_strips);
+    let reset = mixer.assign_strip_feeds(&feeds);
+    if !reset.is_empty() {
+        log::info!("mixer strips {reset:?} have a new source; reset to defaults");
+    }
     let info = serde_json::json!({
         "sample_rate": engine.sample_rate,
         "buffer_frames": engine.buffer_frames,

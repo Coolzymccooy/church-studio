@@ -252,6 +252,66 @@ fn is_reserved_file_name(slug: &str) -> bool {
         && (b'1'..=b'9').contains(&bytes[3])
 }
 
+/// Identity of a strip fed by an input-device channel.
+pub const HARDWARE_STRIP: &str = "hw";
+
+/// Identity of a strip fed by the NDI® source `source`.
+pub fn ndi_strip_identity(source: &str) -> String {
+    format!("ndi:{source}")
+}
+
+/// What feeds one strip at engine start, and the automatic name to give it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StripFeed {
+    pub index: usize,
+    /// `HARDWARE_STRIP` or `ndi_strip_identity(source)`.
+    pub identity: String,
+    /// Automatic name (an NDI source's label); `None` keeps the name.
+    pub label: Option<String>,
+}
+
+/// The feeds of a started engine: `hardware` input-channel strips, then each
+/// NDI input as `(strip, source, label)`.
+pub fn engine_strip_feeds(hardware: usize, ndi: &[(usize, String, String)]) -> Vec<StripFeed> {
+    let mut feeds: Vec<StripFeed> = (0..hardware)
+        .map(|index| StripFeed {
+            index,
+            identity: HARDWARE_STRIP.to_string(),
+            label: None,
+        })
+        .collect();
+    feeds.extend(ndi.iter().map(|(index, source, label)| StripFeed {
+        index: *index,
+        identity: ndi_strip_identity(source),
+        label: Some(label.clone()),
+    }));
+    feeds
+}
+
+/// `name` on strip `index` may be replaced by an automatic label: it is empty,
+/// the default name, or the automatic label it was given last time (the
+/// operator has not renamed it).
+pub fn name_is_automatic(index: usize, name: &str, previous_auto: Option<&str>) -> bool {
+    name.trim().is_empty() || name == default_strip_name(index) || previous_auto == Some(name)
+}
+
+/// What fed a strip at the last engine start, and the automatic name it got.
+/// Control side only; not stored in scene files, which stay unchanged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StripOrigin {
+    identity: String,
+    auto_label: Option<String>,
+}
+
+impl StripOrigin {
+    fn hardware() -> Self {
+        StripOrigin {
+            identity: HARDWARE_STRIP.to_string(),
+            auto_label: None,
+        }
+    }
+}
+
 /// What the audio engine needs from the mixer control state.
 #[derive(Clone)]
 pub struct MixerLink {
@@ -263,6 +323,8 @@ pub struct MixerControl {
     pub params: Arc<MixerParams>,
     pub voice_strip: Arc<AtomicUsize>,
     names: Mutex<Vec<String>>,
+    /// What fed each strip at the last engine start. Locked after `names`.
+    origins: Mutex<Vec<StripOrigin>>,
 }
 
 impl Default for MixerControl {
@@ -286,6 +348,7 @@ impl MixerControl {
             params: Arc::new(params),
             voice_strip: Arc::new(AtomicUsize::new(0)),
             names: Mutex::new((0..MAX_STRIPS).map(default_strip_name).collect()),
+            origins: Mutex::new((0..MAX_STRIPS).map(|_| StripOrigin::hardware()).collect()),
         }
     }
 
@@ -337,16 +400,52 @@ impl MixerControl {
         Ok(())
     }
 
-    /// Name strips after what feeds them (the NDI inputs at engine start).
-    /// Invalid names fall back to the default; the operator can rename.
-    pub fn label_strips(&self, labels: &[(usize, String)]) {
+    /// Record what feeds each strip at engine start (`engine_strip_feeds`).
+    ///
+    /// Strip params are kept by index, so a strip whose feed changed since
+    /// the last start (hardware ↔ NDI, or another NDI source) goes back to
+    /// the new-strip defaults (fader off above strip 0) and its default name,
+    /// and drops the voice chain rather than moving it to another signal.
+    /// An automatic label only replaces a default name or the previous
+    /// automatic label, never the operator's rename; an invalid label is
+    /// ignored. Strips not in `feeds` keep their record. Returns the indices
+    /// that were reset.
+    pub fn assign_strip_feeds(&self, feeds: &[StripFeed]) -> Vec<usize> {
         let mut names = self.names.lock();
-        for (index, label) in labels {
-            if let Some(slot) = names.get_mut(*index) {
-                *slot = clean_strip_name(*index, label)
-                    .unwrap_or_else(|_| default_strip_name(*index));
+        let mut origins = self.origins.lock();
+        let mut reset = Vec::new();
+        for feed in feeds {
+            let index = feed.index;
+            let (Some(strip), Some(name), Some(origin)) = (
+                self.params.strips.get(index),
+                names.get_mut(index),
+                origins.get_mut(index),
+            ) else {
+                continue;
+            };
+            if origin.identity != feed.identity {
+                reset_strip(index, strip);
+                *name = default_strip_name(index);
+                if self.voice_strip.load(Relaxed) == index {
+                    self.voice_strip.store(NO_VOICE_STRIP, Relaxed);
+                }
+                reset.push(index);
             }
+            let label = feed
+                .label
+                .as_deref()
+                .and_then(|label| clean_strip_name(index, label).ok());
+            if let Some(label) = label.as_ref() {
+                if name_is_automatic(index, name.as_str(), origin.auto_label.as_deref()) {
+                    *name = label.clone();
+                }
+            }
+            *origin = StripOrigin {
+                identity: feed.identity.clone(),
+                auto_label: label,
+            };
         }
+        reset
     }
 
     pub fn rename_strip(&self, index: u32, name: &str) -> Result<(), String> {
