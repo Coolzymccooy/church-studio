@@ -123,6 +123,7 @@ function DesktopPanel({ onClose, mixerController }) {
         busy={busy || !config}
         onConnect={(fields) => saveConfig({ ...fields, enabled: true })}
         onDisconnect={() => saveConfig({ enabled: false })}
+        onClearPassword={() => saveConfig({ password: '' })}
       />
       <div className="border-t border-slate-800" />
       <ObsOutputSection

@@ -15,7 +15,9 @@ const inputCls = 'w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 
  * Fields are seeded from `config`; the parent remounts this (via `key`) when
  * the saved address changes.
  */
-export default function ObsConnectionSection({ config, status, busy, onConnect, onDisconnect }) {
+export default function ObsConnectionSection({
+  config, status, busy, onConnect, onDisconnect, onClearPassword,
+}) {
   const [host, setHost] = useState(() => config?.host || OBS_DEFAULT_HOST);
   const [portText, setPortText] = useState(() => String(config?.port || OBS_DEFAULT_PORT));
   const [password, setPassword] = useState('');
@@ -84,7 +86,19 @@ export default function ObsConnectionSection({ config, status, busy, onConnect, 
         </label>
       </div>
       <label className="block text-[10px] uppercase font-bold text-slate-500">
-        Password
+        <span className="flex items-center justify-between">
+          Password
+          {config?.hasPassword && !enabled && onClearPassword && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => { setPassword(''); onClearPassword(); }}
+              className="normal-case font-semibold text-slate-400 hover:text-white disabled:opacity-50"
+            >
+              Clear saved password
+            </button>
+          )}
+        </span>
         <input
           className={inputCls}
           type="password"
