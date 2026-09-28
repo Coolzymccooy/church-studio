@@ -312,19 +312,79 @@ impl StripOrigin {
     }
 }
 
+/// Record what feeds each strip at engine start (`engine_strip_feeds`).
+///
+/// Strip params are kept by index, so a strip whose feed changed since
+/// the last start (hardware ↔ NDI, or another NDI source) goes back to
+/// the new-strip defaults (fader off above strip 0) and its default name,
+/// and drops the voice chain rather than moving it to another signal.
+/// An automatic label only replaces a default name or the previous
+/// automatic label, never the operator's rename; an invalid label is
+/// ignored. Strips not in `feeds` keep their record. Returns the indices
+/// that were reset.
+fn assign_feeds(link: &MixerLink, feeds: &[StripFeed]) -> Vec<usize> {
+    let mut names = link.names.lock();
+    let mut origins = link.origins.lock();
+    let mut reset = Vec::new();
+    for feed in feeds {
+        let index = feed.index;
+        let (Some(strip), Some(name), Some(origin)) = (
+            link.params.strips.get(index),
+            names.get_mut(index),
+            origins.get_mut(index),
+        ) else {
+            continue;
+        };
+        if origin.identity != feed.identity {
+            reset_strip(index, strip);
+            *name = default_strip_name(index);
+            if link.voice_strip.load(Relaxed) == index {
+                link.voice_strip.store(NO_VOICE_STRIP, Relaxed);
+            }
+            reset.push(index);
+        }
+        let label = feed
+            .label
+            .as_deref()
+            .and_then(|label| clean_strip_name(index, label).ok());
+        if let Some(label) = label.as_ref() {
+            if name_is_automatic(index, name.as_str(), origin.auto_label.as_deref()) {
+                *name = label.clone();
+            }
+        }
+        *origin = StripOrigin {
+            identity: feed.identity.clone(),
+            auto_label: label,
+        };
+    }
+    reset
+}
+
 /// What the audio engine needs from the mixer control state.
 #[derive(Clone)]
 pub struct MixerLink {
     pub params: Arc<MixerParams>,
     pub voice_strip: Arc<AtomicUsize>,
+    /// Shared with `MixerControl`, for `assign_strip_feeds`.
+    names: Arc<Mutex<Vec<String>>>,
+    origins: Arc<Mutex<Vec<StripOrigin>>>,
+}
+
+impl MixerLink {
+    /// Record what feeds each strip. The engine calls this before its input
+    /// stream plays, so a strip whose feed changed is reset (fader off)
+    /// before any audio passes through it. See `assign_feeds`.
+    pub fn assign_strip_feeds(&self, feeds: &[StripFeed]) -> Vec<usize> {
+        assign_feeds(self, feeds)
+    }
 }
 
 pub struct MixerControl {
     pub params: Arc<MixerParams>,
     pub voice_strip: Arc<AtomicUsize>,
-    names: Mutex<Vec<String>>,
+    names: Arc<Mutex<Vec<String>>>,
     /// What fed each strip at the last engine start. Locked after `names`.
-    origins: Mutex<Vec<StripOrigin>>,
+    origins: Arc<Mutex<Vec<StripOrigin>>>,
 }
 
 impl Default for MixerControl {
@@ -347,8 +407,10 @@ impl MixerControl {
         MixerControl {
             params: Arc::new(params),
             voice_strip: Arc::new(AtomicUsize::new(0)),
-            names: Mutex::new((0..MAX_STRIPS).map(default_strip_name).collect()),
-            origins: Mutex::new((0..MAX_STRIPS).map(|_| StripOrigin::hardware()).collect()),
+            names: Arc::new(Mutex::new((0..MAX_STRIPS).map(default_strip_name).collect())),
+            origins: Arc::new(Mutex::new(
+                (0..MAX_STRIPS).map(|_| StripOrigin::hardware()).collect(),
+            )),
         }
     }
 
@@ -356,6 +418,8 @@ impl MixerControl {
         MixerLink {
             params: self.params.clone(),
             voice_strip: self.voice_strip.clone(),
+            names: self.names.clone(),
+            origins: self.origins.clone(),
         }
     }
 
@@ -398,54 +462,6 @@ impl MixerControl {
             self.voice_strip.store(NO_VOICE_STRIP, Relaxed);
         }
         Ok(())
-    }
-
-    /// Record what feeds each strip at engine start (`engine_strip_feeds`).
-    ///
-    /// Strip params are kept by index, so a strip whose feed changed since
-    /// the last start (hardware ↔ NDI, or another NDI source) goes back to
-    /// the new-strip defaults (fader off above strip 0) and its default name,
-    /// and drops the voice chain rather than moving it to another signal.
-    /// An automatic label only replaces a default name or the previous
-    /// automatic label, never the operator's rename; an invalid label is
-    /// ignored. Strips not in `feeds` keep their record. Returns the indices
-    /// that were reset.
-    pub fn assign_strip_feeds(&self, feeds: &[StripFeed]) -> Vec<usize> {
-        let mut names = self.names.lock();
-        let mut origins = self.origins.lock();
-        let mut reset = Vec::new();
-        for feed in feeds {
-            let index = feed.index;
-            let (Some(strip), Some(name), Some(origin)) = (
-                self.params.strips.get(index),
-                names.get_mut(index),
-                origins.get_mut(index),
-            ) else {
-                continue;
-            };
-            if origin.identity != feed.identity {
-                reset_strip(index, strip);
-                *name = default_strip_name(index);
-                if self.voice_strip.load(Relaxed) == index {
-                    self.voice_strip.store(NO_VOICE_STRIP, Relaxed);
-                }
-                reset.push(index);
-            }
-            let label = feed
-                .label
-                .as_deref()
-                .and_then(|label| clean_strip_name(index, label).ok());
-            if let Some(label) = label.as_ref() {
-                if name_is_automatic(index, name.as_str(), origin.auto_label.as_deref()) {
-                    *name = label.clone();
-                }
-            }
-            *origin = StripOrigin {
-                identity: feed.identity.clone(),
-                auto_label: label,
-            };
-        }
-        reset
     }
 
     pub fn rename_strip(&self, index: u32, name: &str) -> Result<(), String> {

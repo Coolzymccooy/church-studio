@@ -397,6 +397,20 @@ impl AudioEngine {
             StripLayout::ndi_room(in_channels),
         );
         let layout = StripLayout::new(in_channels, ndi_in.feeds.len());
+        // Record what feeds each strip before the stream plays: a strip whose
+        // feed changed since the last start is reset to the new-strip
+        // defaults (fader off) before any audio passes through it. NDI strips
+        // are named after their sources unless the operator renamed them.
+        let ndi_strips: Vec<(usize, String, String)> = ndi_in
+            .handles
+            .iter()
+            .map(|input| (input.strip, input.source.clone(), input.label.clone()))
+            .collect();
+        let feeds = crate::mixer_control::engine_strip_feeds(layout.hardware, &ndi_strips);
+        let reset = mixer.assign_strip_feeds(&feeds);
+        if !reset.is_empty() {
+            log::info!("mixer strips {reset:?} have a new source; reset to defaults");
+        }
 
         let (meters_tx, meters_rx) = mpsc::sync_channel::<MetersPayload>(32);
         let mut dsp = DspChain::new(sr as f64);

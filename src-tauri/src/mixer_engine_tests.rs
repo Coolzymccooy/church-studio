@@ -459,7 +459,7 @@ fn ndi_inputs_add_strips_after_the_hardware_channels() {
         (2, "PC (Keys)".to_string(), "Keys".to_string()),
         (3, "PC (Bell)".to_string(), "\u{7}".to_string()),
     ];
-    m.assign_strip_feeds(&engine_strip_feeds(2, &ndi));
+    m.link().assign_strip_feeds(&engine_strip_feeds(2, &ndi));
     let state = m.snapshot_with_ndi(2, 2, true, Vec::new());
     assert_eq!(state.input_channels, 2);
     assert_eq!(state.ndi_strips, 2);
@@ -512,16 +512,16 @@ fn only_default_or_previous_automatic_names_are_replaced() {
 fn a_strip_whose_feed_changes_is_reset_and_loses_the_voice_chain() {
     let m = MixerControl::new();
     // 4 hardware channels; strip 2 raised, renamed and carrying the voice chain.
-    m.assign_strip_feeds(&engine_strip_feeds(4, &[]));
+    m.link().assign_strip_feeds(&engine_strip_feeds(4, &[]));
     m.set_strip_param(2, "fader_db", 0.0).unwrap();
     m.set_strip_bool(2, "voice_chain", true).unwrap();
     m.rename_strip(2, "Pastor").unwrap();
     // Same layout again: nothing changes.
-    assert!(m.assign_strip_feeds(&engine_strip_feeds(4, &[])).is_empty());
+    assert!(m.link().assign_strip_feeds(&engine_strip_feeds(4, &[])).is_empty());
     assert_eq!(m.voice_strip.load(Relaxed), 2);
     // A 2-channel device: strip 2 becomes an NDI source.
     let keys = [ndi_feed(2, "PC (Keys)", "Keys")];
-    assert_eq!(m.assign_strip_feeds(&engine_strip_feeds(2, &keys)), vec![2]);
+    assert_eq!(m.link().assign_strip_feeds(&engine_strip_feeds(2, &keys)), vec![2]);
     let state = m.snapshot_with_ndi(2, 1, true, Vec::new());
     assert_eq!(state.strips[2].fader_db, OTHER_STRIPS_FADER_DB);
     assert_eq!(state.strips[2].name, "Keys");
@@ -529,13 +529,13 @@ fn a_strip_whose_feed_changes_is_reset_and_loses_the_voice_chain() {
     // Another source on the same strip is reset too.
     m.set_strip_param(2, "fader_db", 0.0).unwrap();
     let bell = [ndi_feed(2, "PC (Bell)", "Bell")];
-    assert_eq!(m.assign_strip_feeds(&engine_strip_feeds(2, &bell)), vec![2]);
+    assert_eq!(m.link().assign_strip_feeds(&engine_strip_feeds(2, &bell)), vec![2]);
     let state = m.snapshot_with_ndi(2, 1, true, Vec::new());
     assert_eq!(state.strips[2].fader_db, OTHER_STRIPS_FADER_DB);
     assert_eq!(state.strips[2].name, "Bell");
     // And back to hardware: reset, with the default name.
     m.set_strip_param(2, "fader_db", 0.0).unwrap();
-    assert_eq!(m.assign_strip_feeds(&engine_strip_feeds(4, &[])), vec![2]);
+    assert_eq!(m.link().assign_strip_feeds(&engine_strip_feeds(4, &[])), vec![2]);
     let state = m.snapshot(4, true, Vec::new());
     assert_eq!(state.strips[2].fader_db, OTHER_STRIPS_FADER_DB);
     assert_eq!(state.strips[2].name, "Ch 3");
@@ -545,15 +545,15 @@ fn a_strip_whose_feed_changes_is_reset_and_loses_the_voice_chain() {
 fn same_source_keeps_its_mix_and_the_operators_name() {
     let m = MixerControl::new();
     let keys = [ndi_feed(2, "PC (Keys)", "Keys")];
-    m.assign_strip_feeds(&engine_strip_feeds(2, &keys));
+    m.link().assign_strip_feeds(&engine_strip_feeds(2, &keys));
     m.set_strip_param(2, "fader_db", -6.0).unwrap();
     m.set_strip_bool(2, "voice_chain", true).unwrap();
     m.rename_strip(2, "Piano").unwrap();
     // A start without the input leaves strip 2's record alone…
-    assert!(m.assign_strip_feeds(&engine_strip_feeds(2, &[])).is_empty());
+    assert!(m.link().assign_strip_feeds(&engine_strip_feeds(2, &[])).is_empty());
     // …so the same source on the next start keeps its fader, voice chain
     // and the operator's name.
-    assert!(m.assign_strip_feeds(&engine_strip_feeds(2, &keys)).is_empty());
+    assert!(m.link().assign_strip_feeds(&engine_strip_feeds(2, &keys)).is_empty());
     let state = m.snapshot_with_ndi(2, 1, true, Vec::new());
     assert_eq!(state.strips[2].fader_db, -6.0);
     assert_eq!(state.strips[2].name, "Piano");
@@ -561,7 +561,7 @@ fn same_source_keeps_its_mix_and_the_operators_name() {
     // An unrenamed strip follows a new automatic label for the same source.
     m.rename_strip(2, "").unwrap();
     let keys2 = [ndi_feed(2, "PC (Keys)", "Keys 2")];
-    assert!(m.assign_strip_feeds(&engine_strip_feeds(2, &keys2)).is_empty());
+    assert!(m.link().assign_strip_feeds(&engine_strip_feeds(2, &keys2)).is_empty());
     let state = m.snapshot_with_ndi(2, 1, true, Vec::new());
     assert_eq!(state.strips[2].name, "Keys 2");
 }
