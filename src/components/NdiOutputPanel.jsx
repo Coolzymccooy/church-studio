@@ -13,6 +13,7 @@ import {
 } from '../lib/ndiOutput';
 
 const SENDING_POLL_MS = 2000;
+const STATUS_RETRY_MS = 500;
 
 const tauriInvoke = (command, args) => (
   import('@tauri-apps/api/core').then(({ invoke }) => invoke(command, args))
@@ -56,15 +57,26 @@ function NdiOutputCard({ isLive }) {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([client.getStatus(), client.getOutputs()])
-      .then(([nextStatus, nextOutputs]) => {
+    let retry = null;
+    // The runtime loads in the background; ask again until it is done.
+    const pollStatus = () => {
+      client.getStatus()
+        .then((nextStatus) => {
+          if (cancelled) return;
+          setStatus(nextStatus);
+          if (nextStatus?.loading) retry = setTimeout(pollStatus, STATUS_RETRY_MS);
+        })
+        .catch(() => { if (!cancelled) setStatus({ available: false }); });
+    };
+    pollStatus();
+    client.getOutputs()
+      .then((nextOutputs) => {
         if (cancelled) return;
-        setStatus(nextStatus);
         setOutputs(nextOutputs);
         setNameDraft(nextOutputs.baseName);
       })
       .catch((err) => { if (!cancelled) setNotice({ error: true, text: describeError(err) }); });
-    return () => { cancelled = true; };
+    return () => { cancelled = true; clearTimeout(retry); };
   }, [client]);
 
   useEffect(() => {
@@ -124,7 +136,7 @@ function NdiOutputCard({ isLive }) {
       </div>
       <div className="p-2.5 space-y-2 text-[9px]">
         <p className={statusInfo.available ? 'text-slate-400' : 'text-amber-400'}>
-          {statusInfo.available || !status
+          {statusInfo.available || !status || status.loading
             ? statusInfo.label
             : <ExternalLink href={NDI_TOOLS_URL}>{statusInfo.label}</ExternalLink>}
         </p>

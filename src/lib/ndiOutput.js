@@ -2,7 +2,8 @@
  * ndiOutput.js — UI-side helpers for NDI® audio output (desktop app only).
  *
  * Tauri commands (see src-tauri/src/ndi_commands.rs):
- *   ndi_status()               → { available, version, path, error }
+ *   ndi_status()               → { available, loading, version, path, error }
+ *                                 (loading: the runtime is still loading in the background)
  *   ndi_get_outputs()          → { stream, main, monitor, base_name }
  *   ndi_set_outputs({outputs}) → { outputs, running, restart_required, message, save_error }
  *   engine_status().ndi        → { available, sending: [names], dropped_samples }
@@ -74,7 +75,7 @@ export function normalizeNdiOutputs(raw) {
 
 /** One-line runtime status for the panel header. */
 export function describeNdiStatus(status) {
-  if (!status) return { available: false, label: 'Checking NDI® runtime…' };
+  if (!status || status.loading) return { available: false, label: 'Checking NDI® runtime…' };
   if (status.available) {
     return {
       available: true,

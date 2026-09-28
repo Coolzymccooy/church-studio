@@ -2,7 +2,8 @@
 //!
 //! Nothing from NDI is linked at build time (design decision 2 in
 //! `docs/specs/2026-09-28-integrations-design.md`). The installed NDI Runtime
-//! library is opened with `libloading` the first time it is needed, and each
+//! library is opened with `libloading` once, on a background thread started
+//! at app setup (`preload`) or on first use, and each
 //! function is resolved by its exported name. The `NDIlib_v5_load` function
 //! table is deliberately NOT used: a struct whose field order we got wrong
 //! would call the wrong function and crash.
@@ -287,7 +288,21 @@ impl Drop for NdiRuntime {
 /// Loaded lazily, once, and kept for the life of the process.
 static RUNTIME: OnceLock<Result<NdiRuntime, String>> = OnceLock::new();
 
-/// The shared runtime, loading it on first use.
+/// Start loading the runtime on a background thread (called at app setup),
+/// so `ndi_status` never waits for the library to load.
+pub fn preload() {
+    let spawned = std::thread::Builder::new()
+        .name("ndi-runtime-load".to_string())
+        .spawn(|| {
+            let _ = runtime();
+        });
+    if let Err(err) = spawned {
+        log::warn!("cannot start the NDI runtime loader thread: {err}");
+    }
+}
+
+/// The shared runtime, loading it on first use. Blocks while another thread
+/// is loading it.
 pub fn runtime() -> Result<&'static NdiRuntime, String> {
     match RUNTIME.get_or_init(NdiRuntime::load) {
         Ok(runtime) => Ok(runtime),
@@ -299,24 +314,41 @@ pub fn runtime() -> Result<&'static NdiRuntime, String> {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct NdiStatus {
     pub available: bool,
+    /// The background load (`preload`) has not finished yet.
+    pub loading: bool,
     pub version: Option<String>,
     pub path: Option<String>,
     pub error: Option<String>,
 }
 
+/// Never blocks: reports `loading` until the background load is done.
 pub fn ndi_status() -> NdiStatus {
-    match runtime() {
-        Ok(runtime) => NdiStatus {
+    status_from(RUNTIME.get())
+}
+
+/// `None` = still loading.
+pub(crate) fn status_from(slot: Option<&Result<NdiRuntime, String>>) -> NdiStatus {
+    match slot {
+        None => NdiStatus {
+            available: false,
+            loading: true,
+            version: None,
+            path: None,
+            error: None,
+        },
+        Some(Ok(runtime)) => NdiStatus {
             available: true,
+            loading: false,
             version: runtime.version().map(str::to_string),
             path: Some(runtime.path().display().to_string()),
             error: None,
         },
-        Err(err) => NdiStatus {
+        Some(Err(err)) => NdiStatus {
             available: false,
+            loading: false,
             version: None,
             path: None,
-            error: Some(err),
+            error: Some(err.clone()),
         },
     }
 }

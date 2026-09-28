@@ -340,6 +340,9 @@ pub fn run() {
             ndi_commands::ndi_set_outputs,
         ])
         .setup(|app| {
+            // Load the NDI runtime off the main thread; ndi_status reports
+            // `loading` until it is done.
+            ndi::runtime::preload();
             let saved_ndi = ndi_commands::load_saved_outputs(app.handle());
             app.state::<NdiSettings>().replace(saved_ndi);
 

@@ -60,6 +60,7 @@ test('normalizeNdiOutputs maps the backend shape', () => {
 
 test('describeNdiStatus covers checking, installed and missing', () => {
   assert.equal(describeNdiStatus(null).available, false);
+  assert.equal(describeNdiStatus({ available: false, loading: true }).label, 'Checking NDI® runtime…');
   assert.deepEqual(describeNdiStatus({ available: true, version: '6.1.0' }), {
     available: true,
     label: 'NDI® runtime 6.1.0',

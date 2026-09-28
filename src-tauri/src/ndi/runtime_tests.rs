@@ -1,6 +1,6 @@
 //! Unit tests for the runtime search order (`runtime::candidate_paths`).
 //! They need no NDI runtime.
-use super::runtime::{candidate_paths, library_file_name, TargetOs};
+use super::runtime::{candidate_paths, library_file_name, status_from, TargetOs, NOT_INSTALLED};
 use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 
@@ -80,4 +80,21 @@ fn exe_dir_is_last_and_duplicates_are_removed() {
     );
     assert_eq!(paths.first(), Some(&Path::new("/same").join("libndi.dylib")));
     assert_eq!(paths.len(), 3);
+}
+
+#[test]
+fn status_reports_loading_until_the_load_finishes() {
+    let status = status_from(None);
+    assert!(status.loading);
+    assert!(!status.available);
+    assert!(status.error.is_none());
+}
+
+#[test]
+fn status_reports_a_failed_load() {
+    let failed: Result<super::runtime::NdiRuntime, String> = Err(NOT_INSTALLED.to_string());
+    let status = status_from(Some(&failed));
+    assert!(!status.loading);
+    assert!(!status.available);
+    assert_eq!(status.error.as_deref(), Some(NOT_INSTALLED));
 }
