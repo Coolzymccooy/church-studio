@@ -135,10 +135,16 @@ impl ObsManager {
 
     /// Drop any connection and, when enabled, start a fresh connect loop.
     fn restart(&self) {
-        let gen = self.inner.generation.fetch_add(1, Ordering::SeqCst) + 1;
-        if let Ok(mut client) = self.inner.client.lock() {
+        // Bump the generation while holding the client slot, so a stale
+        // session can't store its client after we clear it (see `set_client`).
+        let gen = {
+            let mut client = match self.inner.client.lock() {
+                Ok(c) => c,
+                Err(poisoned) => poisoned.into_inner(),
+            };
             *client = None; // dropping the Client disconnects it
-        }
+            self.inner.generation.fetch_add(1, Ordering::SeqCst) + 1
+        };
         let enabled = self.config().enabled;
         self.apply_status(|s| {
             s.enabled = enabled;
@@ -155,11 +161,21 @@ impl ObsManager {
 
     /// Change the status and emit `obs-status` if anything changed.
     fn apply_status<F: FnOnce(&mut ObsStatus)>(&self, change: F) {
+        self.apply_status_if(None, change);
+    }
+
+    /// Shared body of `apply_status` / `set_status`. The generation is
+    /// checked under the status lock so a stale write can't land after
+    /// `restart` has reset the status.
+    fn apply_status_if<F: FnOnce(&mut ObsStatus)>(&self, gen: Option<u64>, change: F) {
         let snapshot = {
             let mut s = match self.inner.status.lock() {
                 Ok(s) => s,
                 Err(poisoned) => poisoned.into_inner(),
             };
+            if gen.is_some_and(|g| !self.is_current(g)) {
+                return;
+            }
             let before = s.clone();
             change(&mut *s);
             if *s == before {
@@ -172,9 +188,7 @@ impl ObsManager {
 
     /// Like `apply_status`, but ignored when `gen` is no longer current.
     pub(super) fn set_status<F: FnOnce(&mut ObsStatus)>(&self, gen: u64, change: F) {
-        if self.is_current(gen) {
-            self.apply_status(change);
-        }
+        self.apply_status_if(Some(gen), change);
     }
 
     pub fn report_error(&self, message: String) {
@@ -265,11 +279,12 @@ impl ObsManager {
     }
 
     pub(super) fn set_client(&self, gen: u64, client: Option<Arc<Client>>) {
-        if !self.is_current(gen) {
-            return;
-        }
+        // Check the generation under the lock: `restart` bumps it while
+        // holding this lock, so a stale session can never overwrite the slot.
         if let Ok(mut slot) = self.inner.client.lock() {
-            *slot = client;
+            if self.is_current(gen) {
+                *slot = client;
+            }
         }
     }
 }
