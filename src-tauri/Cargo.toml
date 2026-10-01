@@ -41,6 +41,10 @@ nnnoiseless = { version = "0.5", default-features = false }
 obws = { version = "0.14", features = ["events"] }
 futures-util = "0.3"   # StreamExt for the obws event stream
 tokio = { version = "1", features = ["time"] }   # already in the tree via tauri
+# ── NDI (runtime-loaded; nothing linked at build time) ───────────────────────
+libloading = "0.8"
+# This machine's name, to recognise our own NDI sources (already in the lock file).
+gethostname = "1.1"
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-updater = "2"

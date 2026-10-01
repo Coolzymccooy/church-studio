@@ -25,14 +25,19 @@ impl SceneLoadedHook {
     }
 }
 
-/// (input channel count, running). 1 channel when stopped.
-fn engine_info(engine: &EngineState) -> (u32, bool) {
+/// (input channel count, NDI input count, running). 1 channel and no NDI
+/// inputs when stopped.
+fn engine_info(engine: &EngineState) -> (u32, u32, bool) {
     match engine.lock() {
         Ok(guard) => match guard.as_ref() {
-            Some(running) => (running.input_channels.max(1), true),
-            None => (1, false),
+            Some(running) => (
+                running.input_channels.max(1),
+                running.strip_layout().ndi as u32,
+                true,
+            ),
+            None => (1, 0, false),
         },
-        Err(_) => (1, false),
+        Err(_) => (1, 0, false),
     }
 }
 
@@ -99,8 +104,8 @@ fn scenes_or_empty(app: &AppHandle) -> Vec<String> {
 }
 
 fn build_state(app: &AppHandle, mixer: &MixerControl, engine: &EngineState) -> MixerState {
-    let (channels, running) = engine_info(engine);
-    mixer.snapshot(channels, running, scenes_or_empty(app))
+    let (channels, ndi_inputs, running) = engine_info(engine);
+    mixer.snapshot_with_ndi(channels, ndi_inputs, running, scenes_or_empty(app))
 }
 
 #[tauri::command]

@@ -4969,6 +4969,8 @@ dependencies = [
  "atomic_float",
  "cpal",
  "futures-util",
+ "gethostname",
+ "libloading 0.8.9",
  "log",
  "nnnoiseless",
  "obws",

@@ -17,6 +17,8 @@ import StudioStatusBar from './components/StudioStatusBar';
 import DeviceSettingsModal from './components/DeviceSettingsModal';
 import ObsPanel from './components/obs/ObsPanel.jsx';
 import MainOutputSelect from './components/MainOutputSelect';
+import NdiOutputPanel from './components/NdiOutputPanel';
+import NdiInputPanel from './components/NdiInputPanel';
 import InputRackAiTab from './components/InputRackAiTab';
 import MixerConsole from './components/mixer/MixerConsole';
 import { createMixerController, createMockMixerController } from './lib/mixerEngine';
@@ -4165,6 +4167,12 @@ const AudioProcessor = ({ goHome }) => {
                 </button>
               </div>
             </div>
+
+            {/* NDI® output (desktop only) */}
+            <NdiOutputPanel isLive={isLive} />
+
+            {/* NDI® inputs (desktop only) */}
+            <NdiInputPanel isLive={isLive} />
 
             {/* Stream Guard */}
             <div className="rounded-lg border border-slate-800 overflow-hidden" style={{background:'#080E1F'}}>
