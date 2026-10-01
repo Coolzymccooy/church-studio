@@ -4,14 +4,16 @@
 //! `TrackWriter`. Headers are patched every `patch_interval`; progress is
 //! reported every `status_interval`.
 //!
-//! `start` runs on the control thread: it creates the folder and every file
-//! and clears stale ring data, all before the caller sets the recording
-//! flag, so a file error is reported before any audio is captured.
+//! `prepare` creates the folder and every file (no engine lock needed);
+//! `launch` clears stale ring data and spawns the thread; `start` does
+//! both. All of it happens before the caller sets the recording flag, so a
+//! file error is reported before any audio is captured.
 //! Stopping: the caller clears the flag, then sets `stop`; the thread
 //! drains what is left, finalizes every file and writes `session.json`.
 //! A disk error clears the flag itself, keeps what was written and ends the
 //! recording with the error.
 use super::frames::{extract_channels, frames_to_seconds, RecordLayout};
+use super::names::part_file_name;
 use super::session::{session_to_json, SessionFile, SessionTrack, TrackKind, SESSION_FILE};
 use super::session::{SESSION_FORMAT, SESSION_FORMAT_VERSION};
 use super::wav::TrackWriter;
@@ -105,9 +107,36 @@ pub struct StartError<C> {
     pub message: String,
 }
 
-/// Create the files, clear stale ring data and spawn the thread.
+/// The opened files of a recording, made by `prepare` (file I/O, run
+/// without the engine lock) and handed to `launch`.
+pub struct PreparedTracks(Vec<OpenTrack>);
+
+/// Create the recording folder (it must not exist yet, so two starts can
+/// never share or truncate one folder) and every track file.
+pub fn prepare(plan: &WriterPlan) -> Result<PreparedTracks, String> {
+    open_tracks(plan).map(PreparedTracks)
+}
+
+/// Remove what `prepare` created for a recording that never started:
+/// the first part of every track and the (then empty) folder. Only call
+/// it after `prepare` succeeded, so the folder is this recording's own.
+pub fn abandon(plan: &WriterPlan, prepared: PreparedTracks) {
+    drop(prepared);
+    for track in plan.tracks.iter() {
+        let path = plan.dir.join(part_file_name(&track.base, 1));
+        if let Err(e) = std::fs::remove_file(&path) {
+            log::warn!("recorder: cannot remove unused {}: {e}", path.display());
+        }
+    }
+    if let Err(e) = std::fs::remove_dir(&plan.dir) {
+        log::warn!("recorder: cannot remove unused {}: {e}", plan.dir.display());
+    }
+}
+
+/// Create the files, clear stale ring data and spawn the thread (tests).
+#[cfg(test)]
 pub fn start<C>(
-    mut consumer: C,
+    consumer: C,
     shared: Arc<RecordShared>,
     control: Arc<SessionControl>,
     plan: WriterPlan,
@@ -116,17 +145,31 @@ pub fn start<C>(
 where
     C: Consumer<Item = f32> + Send + 'static,
 {
-    let tracks = match open_tracks(&plan) {
-        Ok(tracks) => tracks,
-        Err(message) => {
-            return Err(StartError {
-                consumer: Some(consumer),
-                message,
-            })
-        }
-    };
+    match prepare(&plan) {
+        Ok(prepared) => launch(consumer, shared, control, plan, prepared, on_status),
+        Err(message) => Err(StartError {
+            consumer: Some(consumer),
+            message,
+        }),
+    }
+}
+
+/// Clear stale ring data and spawn the writer over already-created files.
+/// Runs on the control thread before the caller sets the recording flag.
+pub fn launch<C>(
+    mut consumer: C,
+    shared: Arc<RecordShared>,
+    control: Arc<SessionControl>,
+    plan: WriterPlan,
+    prepared: PreparedTracks,
+    on_status: StatusFn,
+) -> Result<JoinHandle<WriterExit<C>>, StartError<C>>
+where
+    C: Consumer<Item = f32> + Send + 'static,
+{
     let stale = consumer.occupied_len();
     let _ = consumer.skip(stale);
+    let tracks = prepared.0;
     std::thread::Builder::new()
         .name("recorder-writer".to_string())
         .spawn(move || run(consumer, shared, control, plan, tracks, on_status))
@@ -137,7 +180,11 @@ where
 }
 
 fn open_tracks(plan: &WriterPlan) -> Result<Vec<OpenTrack>, String> {
-    std::fs::create_dir_all(&plan.dir)
+    if let Some(parent) = plan.dir.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+    }
+    std::fs::create_dir(&plan.dir)
         .map_err(|e| format!("cannot create {}: {e}", plan.dir.display()))?;
     let mut tracks = Vec::with_capacity(plan.tracks.len());
     for track in plan.tracks.iter() {

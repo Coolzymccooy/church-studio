@@ -20,13 +20,13 @@ pub struct RecorderConfig {
 }
 
 impl RecorderConfig {
-    /// A blank folder means the default; armed strips are sorted and
-    /// de-duplicated.
+    /// A blank or network folder means the default (a hand-edited or old
+    /// settings file); armed strips are sorted and de-duplicated.
     pub fn sanitized(mut self) -> Self {
         self.folder = self
             .folder
             .map(|f| f.trim().to_string())
-            .filter(|f| !f.is_empty());
+            .filter(|f| !f.is_empty() && !is_network_path(f));
         if let Some(strips) = self.armed_strips.as_mut() {
             strips.sort_unstable();
             strips.dedup();
@@ -41,6 +41,15 @@ impl RecorderConfig {
             Some(strips) => strips.iter().any(|&s| s as usize == index),
         }
     }
+}
+
+/// True for a UNC, device or network path (`//server/share` with either
+/// separator, including the `?/UNC/` and `./` device forms): two leading
+/// separators. Recordings must go to a local folder.
+pub fn is_network_path(path: &str) -> bool {
+    let mut chars = path.trim_start().chars();
+    let is_sep = |c: Option<char>| matches!(c, Some('\u{5c}') | Some('/'));
+    is_sep(chars.next()) && is_sep(chars.next())
 }
 
 /// Parse the settings file; a corrupt file is an error.
@@ -75,6 +84,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn network_paths_are_recognised() {
+        // Built with `/` and swapped, to keep backslash escapes out of the source.
+        let win = |p: &str| p.replace('/', "\u{5c}");
+        assert!(is_network_path(&win("//server/share/Recordings")));
+        assert!(is_network_path("//server/share"));
+        assert!(is_network_path(&win("//?/UNC/server/share")));
+        assert!(is_network_path(&format!("{}/server", win("/"))));
+        assert!(!is_network_path(&win("C:/Users/me/Recordings")));
+        assert!(!is_network_path("/home/me/Recordings"));
+        assert!(!is_network_path(&win("/Recordings")));
+        assert!(!is_network_path(""));
+    }
+
+    #[test]
     fn defaults_record_every_strip_without_main() {
         let config = RecorderConfig::default();
         assert!(config.is_armed(0) && config.is_armed(31));
@@ -100,6 +123,8 @@ mod tests {
         assert_eq!(config.folder, None);
         assert_eq!(config.armed_strips, Some(vec![1, 3]));
         assert!(config.is_armed(1) && !config.is_armed(2));
+        let network = config_from_json(r#"{"folder":"//nas/rec"}"#).unwrap();
+        assert_eq!(network.folder, None, "a saved network folder falls back to the default");
     }
 
     #[test]

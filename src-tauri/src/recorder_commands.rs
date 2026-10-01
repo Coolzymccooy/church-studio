@@ -9,7 +9,7 @@ use crate::recorder::names::unique_name;
 use crate::recorder::plan::{build_tracks, clamp_offset, stamp_for};
 use crate::recorder::session::Marker;
 use crate::recorder::status::{RecorderStatus, RecordingSummary};
-use crate::recorder::writer::{StatusFn, WriterEvent, WriterPlan};
+use crate::recorder::writer::{self, StatusFn, WriterEvent, WriterPlan};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -138,6 +138,9 @@ pub fn recorder_set_config(
     include_main: bool,
     armed_strips: Option<Vec<u32>>,
 ) -> Result<RecorderConfigPayload, String> {
+    if folder.as_deref().is_some_and(config::is_network_path) {
+        return Err("Choose a folder on this computer; network folders are not supported".to_string());
+    }
     let next = RecorderConfig {
         folder,
         include_main,
@@ -193,6 +196,10 @@ fn strip_names(mixer: &MixerControl, input_channels: u32, ndi_inputs: u32) -> Ve
 
 /// Start recording. `utcOffsetMinutes` is the UI's local offset, for the
 /// folder name and `startedLocal` (UTC when absent).
+///
+/// Three phases so no disk I/O happens under the engine lock: plan (lock),
+/// create the folder and files (`spawn_blocking`, no lock), then arm the
+/// tap (lock), checking that the same engine is still running.
 #[tauri::command]
 pub async fn recorder_start(
     app: AppHandle,
@@ -207,44 +214,70 @@ pub async fn recorder_start(
         Some(folder) => PathBuf::from(folder),
         None => default_root(&app)?,
     };
-    {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let (folder, stamp) = stamp_for(
+        now,
+        clamp_offset(utc_offset_minutes),
+        title.as_deref(),
+        env!("CARGO_PKG_VERSION"),
+    );
+
+    // 1. Plan under the lock (no I/O).
+    let (tracks, layout, sample_rate, shared) = {
         let mut guard = lock(engine.inner());
         let running = guard
             .as_mut()
             .ok_or_else(|| "Start the engine before recording".to_string())?;
+        if running.recorder.is_recording() {
+            return Err("A recording is already running".to_string());
+        }
         let ndi_strips: Vec<usize> = running.ndi_inputs.iter().map(|input| input.strip).collect();
         let names = strip_names(mixer.inner(), running.input_channels, ndi_strips.len() as u32);
         let layout = running.recorder.layout();
         let tracks = build_tracks(layout, &names, &ndi_strips, &config);
+        (tracks, layout, running.recorder.sample_rate(), running.recorder.shared())
+    };
 
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or(0);
-        let (folder, stamp) = stamp_for(
-            now,
-            clamp_offset(utc_offset_minutes),
-            title.as_deref(),
-            env!("CARGO_PKG_VERSION"),
-        );
+    // 2. Claim the folder and create every file without the lock.
+    let (plan, prepared) = tauri::async_runtime::spawn_blocking(move || {
         let folder = unique_name(&folder, |name| root.join(name).exists());
-        let dir = root.join(folder);
-        let on_status = status_emitter(
-            app.clone(),
-            control.last.clone(),
-            dir.display().to_string(),
-            tracks.iter().map(|t| t.name.clone()).collect(),
-        );
         let plan = WriterPlan {
-            dir,
-            sample_rate: running.recorder.sample_rate(),
+            dir: root.join(folder),
+            sample_rate,
             layout,
             tracks,
             stamp,
             patch_interval: PATCH_INTERVAL,
             status_interval: STATUS_INTERVAL,
         };
-        running.recorder.start(plan, on_status)?;
+        writer::prepare(&plan).map(|prepared| (plan, prepared))
+    })
+    .await
+    .map_err(|e| format!("the recorder could not create its files: {e}"))??;
+
+    // 3. Arm the tap, unless the engine stopped or restarted meanwhile.
+    let on_status = status_emitter(
+        app.clone(),
+        control.last.clone(),
+        plan.dir.display().to_string(),
+        plan.tracks.iter().map(|t| t.name.clone()).collect(),
+    );
+    let leftover = {
+        let mut guard = lock(engine.inner());
+        match guard.as_mut().filter(|running| running.recorder.owns(&shared)) {
+            Some(running) => {
+                running.recorder.start_prepared(plan, prepared, on_status)?;
+                None
+            }
+            None => Some((plan, prepared)),
+        }
+    };
+    if let Some((plan, prepared)) = leftover {
+        writer::abandon(&plan, prepared);
+        return Err("The engine stopped while the recording was starting".to_string());
     }
     Ok(current_status(engine.inner(), control.inner()))
 }

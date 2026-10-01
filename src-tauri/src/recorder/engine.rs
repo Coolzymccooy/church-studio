@@ -2,9 +2,9 @@
 //! 5). It owns the ring consumer between recordings and the writer thread
 //! during one. `RunningEngine` stops it before the audio streams, so a
 //! recording is always finalized before its engine goes away.
-use super::frames::{frames_to_seconds, RecordLayout};
+use super::frames::{frames_to_seconds, recorded_frames, RecordLayout};
 use super::session::Marker;
-use super::writer::{self, StatusFn, WriterExit, WriterOutcome, WriterPlan};
+use super::writer::{self, PreparedTracks, StatusFn, WriterExit, WriterOutcome, WriterPlan};
 use super::{RecordPort, RecordShared, SessionControl};
 use parking_lot::Mutex;
 use ringbuf::HeapCons;
@@ -100,6 +100,14 @@ impl EngineRecorder {
         frames_to_seconds(self.shared.frames_captured.load(Ordering::Relaxed), self.sample_rate)
     }
 
+    /// Position in the files: frames that reached the ring (seen minus
+    /// dropped), so a marker lands where its audio is in every track.
+    pub fn recorded_seconds(&self) -> f64 {
+        let captured = self.shared.frames_captured.load(Ordering::Relaxed);
+        let dropped = self.shared.dropped_frames.load(Ordering::Relaxed);
+        frames_to_seconds(recorded_frames(captured, dropped), self.sample_rate)
+    }
+
     pub fn dropped_frames(&self) -> u64 {
         self.shared.dropped_frames.load(Ordering::Relaxed)
     }
@@ -108,22 +116,54 @@ impl EngineRecorder {
         self.active.as_ref().map_or(0, |a| a.control.marker_count())
     }
 
-    /// Open the files and start capturing. The writer clears stale ring
-    /// data before the flag is set.
+    /// True when this recorder belongs to the engine that owns `shared`
+    /// (an engine restarted in between has a new ring and layout).
+    pub fn owns(&self, shared: &Arc<RecordShared>) -> bool {
+        Arc::ptr_eq(&self.shared, shared)
+    }
+
+    /// This engine's ring state, to check `owns` after the lock was released.
+    pub fn shared(&self) -> Arc<RecordShared> {
+        self.shared.clone()
+    }
+
+    /// Open the files and start capturing in one call (tests; the app's
+    /// `recorder_start` uses `writer::prepare` + `start_prepared` instead).
+    #[cfg(test)]
     pub fn start(&mut self, plan: WriterPlan, on_status: StatusFn) -> Result<(), String> {
         if self.is_recording() {
             return Err("A recording is already running".to_string());
         }
-        let consumer = self.idle.lock().take().ok_or_else(|| {
-            "The recorder is not ready (the last recording is still finishing, or the engine needs a restart)"
-                .to_string()
-        })?;
+        let prepared = writer::prepare(&plan)?;
+        self.start_prepared(plan, prepared, on_status)
+    }
+
+    /// Start capturing into files `writer::prepare` already created. On
+    /// failure the files are removed again. The writer clears stale ring
+    /// data before the flag is set.
+    pub fn start_prepared(
+        &mut self,
+        plan: WriterPlan,
+        prepared: PreparedTracks,
+        on_status: StatusFn,
+    ) -> Result<(), String> {
+        if self.is_recording() {
+            writer::abandon(&plan, prepared);
+            return Err("A recording is already running".to_string());
+        }
+        let Some(consumer) = self.idle.lock().take() else {
+            writer::abandon(&plan, prepared);
+            return Err(
+                "The recorder is not ready (the last recording is still finishing, or the engine needs a restart)"
+                    .to_string(),
+            );
+        };
         let info = RecordingInfo {
             folder: plan.dir.clone(),
             track_names: plan.tracks.iter().map(|t| t.name.clone()).collect(),
         };
         let control = Arc::new(SessionControl::new());
-        match writer::start(consumer, self.shared.clone(), control.clone(), plan, on_status) {
+        match writer::launch(consumer, self.shared.clone(), control.clone(), plan, prepared, on_status) {
             Ok(handle) => {
                 self.shared.reset_counters();
                 self.shared.active.store(true, Ordering::Release);
@@ -166,7 +206,7 @@ impl EngineRecorder {
         if !self.is_recording() {
             return Err("Not recording".to_string());
         }
-        let marker = Marker::new(self.elapsed_seconds(), label, source);
+        let marker = Marker::new(self.recorded_seconds(), label, source);
         if let Some(active) = self.active.as_ref() {
             active.control.add_marker(marker.clone());
         }

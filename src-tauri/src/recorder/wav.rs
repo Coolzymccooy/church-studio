@@ -67,6 +67,16 @@ pub fn frames_that_fit(data_bytes: u64, max_data_bytes: u64, channels: usize) ->
     (max_data_bytes.saturating_sub(data_bytes) / block) as usize
 }
 
+/// Encode `samples` as little-endian f32 bytes into `out` (cleared first;
+/// its capacity is reused across calls).
+pub fn encode_le(samples: &[f32], out: &mut Vec<u8>) {
+    out.clear();
+    out.reserve(samples.len() * BYTES_PER_SAMPLE as usize);
+    for sample in samples {
+        out.extend_from_slice(&sample.to_le_bytes());
+    }
+}
+
 /// One track (mono strip or stereo bus), possibly split over several parts.
 pub struct TrackWriter {
     dir: PathBuf,
@@ -79,6 +89,8 @@ pub struct TrackWriter {
     data_bytes: u64,
     /// File names of every part, in order.
     files: Vec<String>,
+    /// Reused byte buffer for one `write_all` per chunk.
+    bytes: Vec<u8>,
 }
 
 impl TrackWriter {
@@ -107,6 +119,7 @@ impl TrackWriter {
             file,
             data_bytes: 0,
             files: vec![name],
+            bytes: Vec::new(),
         })
     }
 
@@ -130,9 +143,8 @@ impl TrackWriter {
                 fit = frames_that_fit(self.data_bytes, self.max_data_bytes, self.channels).max(1);
             }
             let take = (fit * self.channels).min(rest.len());
-            for sample in &rest[..take] {
-                self.file.write_all(&sample.to_le_bytes())?;
-            }
+            encode_le(&rest[..take], &mut self.bytes);
+            self.file.write_all(&self.bytes)?;
             self.data_bytes += (take * BYTES_PER_SAMPLE as usize) as u64;
             rest = &rest[take..];
         }
@@ -183,6 +195,17 @@ fn open_part(path: &Path, channels: usize, sample_rate: u32) -> io::Result<BufWr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn encode_le_writes_little_endian_floats_and_reuses_the_buffer() {
+        let mut out = vec![0xAA; 3];
+        encode_le(&[1.0, -0.5], &mut out);
+        assert_eq!(out.len(), 8);
+        assert_eq!(&out[0..4], &1.0f32.to_le_bytes());
+        assert_eq!(&out[4..8], &(-0.5f32).to_le_bytes());
+        encode_le(&[], &mut out);
+        assert!(out.is_empty());
+    }
 
     fn u16_at(bytes: &[u8], at: usize) -> u16 {
         u16::from_le_bytes([bytes[at], bytes[at + 1]])

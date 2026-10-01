@@ -193,3 +193,49 @@ fn engine_recorder_starts_marks_and_stops() {
     assert!(recorder.stop().is_none());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn markers_use_the_file_position_not_dropped_frames() {
+    let dir = temp_dir("marker-drops");
+    let (_tap, port) = record_ring(1, 48_000, 64);
+    let mut recorder = EngineRecorder::new(port);
+    let layout = recorder.layout();
+    let tracks = vec![track("01 A", TrackKind::Strip, "hardware", 0, 1)];
+    recorder.start(plan(&dir, layout, tracks), Box::new(|_: WriterEvent| {})).unwrap();
+    // One second seen by the callback, half of it dropped: the files hold
+    // 0.5 s, so a marker now belongs at 0.5 s.
+    let shared = recorder.shared();
+    shared.frames_captured.store(48_000, Ordering::Relaxed);
+    shared.dropped_frames.store(24_000, Ordering::Relaxed);
+    let marker = recorder.add_marker("Sermon", "operator").unwrap();
+    assert!((marker.time_seconds - 0.5).abs() < 1e-9, "{}", marker.time_seconds);
+    assert!(recorder.stop().is_some());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn prepare_claims_a_new_folder_and_abandon_removes_it() {
+    let dir = temp_dir("prepare");
+    let layout = RecordLayout { strips: 1 };
+    let tracks = vec![
+        track("01 A", TrackKind::Strip, "hardware", 0, 1),
+        track("Stream Mix", TrackKind::Bus, "stream", layout.stream_channel(), 2),
+    ];
+    let first = plan(&dir, layout, tracks.clone());
+    let prepared = writer::prepare(&first).unwrap();
+    assert!(dir.join("01 A.wav").exists());
+    // A second start into the same folder is refused, never truncating.
+    assert!(writer::prepare(&plan(&dir, layout, tracks)).is_err());
+    writer::abandon(&first, prepared);
+    assert!(!dir.exists());
+}
+
+#[test]
+fn a_recorder_knows_its_own_engine() {
+    let (_tap, port) = record_ring(1, 48_000, 64);
+    let recorder = EngineRecorder::new(port);
+    let (_other_tap, other_port) = record_ring(1, 48_000, 64);
+    let other = EngineRecorder::new(other_port);
+    assert!(recorder.owns(&recorder.shared()));
+    assert!(!recorder.owns(&other.shared()));
+}

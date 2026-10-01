@@ -88,6 +88,13 @@ pub fn extract_channels(data: &[f32], stride: usize, first: usize, count: usize,
     }
 }
 
+/// Frames that reached the files: `captured` (seen by the callback,
+/// pushed or dropped) minus `dropped`. The two counters are read one after
+/// the other, so this saturates instead of underflowing.
+pub fn recorded_frames(captured: u64, dropped: u64) -> u64 {
+    captured.saturating_sub(dropped)
+}
+
 /// Recording time of `frames` at `sample_rate`, in seconds.
 pub fn frames_to_seconds(frames: u64, sample_rate: u32) -> f64 {
     if sample_rate == 0 {
@@ -163,6 +170,13 @@ mod tests {
         assert_eq!(frames_that_fit(7, 3, 10), 2);
         assert_eq!(frames_that_fit(100, 3, 10), 10);
         assert_eq!(frames_that_fit(2, 3, 10), 0);
+    }
+
+    #[test]
+    fn recorded_frames_leave_out_drops() {
+        assert_eq!(recorded_frames(48_000, 0), 48_000);
+        assert_eq!(recorded_frames(48_000, 480), 47_520);
+        assert_eq!(recorded_frames(10, 20), 0, "a torn read never underflows");
     }
 
     #[test]
