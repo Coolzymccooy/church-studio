@@ -73,17 +73,21 @@ export function useMixer(controller) {
       }
     });
 
-    // The OBS scene link can load a scene from the backend; show it.
-    const sceneSub = controller.subscribeSceneLoaded?.(() => {
+    // The backend loaded a scene on its own (Tiwaton Link or the OBS scene
+    // link): refetch so the console shows it.
+    const refetch = () => {
       if (cancelled) return;
       controller.getState()
         .then((next) => { if (!cancelled) setState(next); })
         .catch(() => {});
-    });
+    };
+    const stateSub = controller.subscribeStateChanges?.(refetch);
+    const sceneSub = controller.subscribeSceneLoaded?.(refetch);
 
     return () => {
       cancelled = true;
       sub.dispose();
+      stateSub?.dispose();
       sceneSub?.dispose();
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     };

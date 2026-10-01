@@ -15,6 +15,7 @@ import HelpCorner from './components/HelpCorner';
 import LandingPage from './components/LandingPage';
 import StudioStatusBar from './components/StudioStatusBar';
 import DeviceSettingsModal from './components/DeviceSettingsModal';
+import LinkPanel from './components/link/LinkPanel.jsx';
 import ObsPanel from './components/obs/ObsPanel.jsx';
 import MainOutputSelect from './components/MainOutputSelect';
 import NdiOutputPanel from './components/NdiOutputPanel';
@@ -123,6 +124,7 @@ const AudioProcessor = ({ goHome }) => {
   const [outputTarget, setOutputTarget] = useState('OBS Studio');
 
   const [showSettings, setShowSettings] = useState(false);
+  const [showLink, setShowLink] = useState(false);
   const [showObs, setShowObs] = useState(false);
   const [showAI, setShowAI] = useState(false);
   const [isMonitoring, setIsMonitoring] = useState(false);
@@ -3336,6 +3338,7 @@ const AudioProcessor = ({ goHome }) => {
         videoExportLabel={videoFormat.label}
         onShareRecording={shareRecording}
         onDownloadWaveform={downloadWaveform}
+        onOpenLink={() => setShowLink(true)}
         isLive={isLive}
         mode={mode}
         mainTab={mainTab}
@@ -3356,6 +3359,7 @@ const AudioProcessor = ({ goHome }) => {
         visualizerGateStatus={visualizerGateStatus}
       />
 
+      <LinkPanel open={showLink} onClose={() => setShowLink(false)} />
       <ObsPanel open={showObs} onClose={() => setShowObs(false)} mixerController={mixerController} />
 
       <DeviceSettingsModal

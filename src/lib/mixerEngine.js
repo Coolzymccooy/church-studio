@@ -155,6 +155,11 @@ export function createMixerController({ invoke, listen }) {
     subscribeMeters(cb) {
       return subscribeEvent(listen, 'mixer-meters', cb);
     },
+    // Fired by the engine when something other than this view changed the
+    // mix (e.g. Tiwaton Link loading a scene); the payload is a MixerState.
+    subscribeStateChanges(cb) {
+      return subscribeEvent(listen, 'mixer-state-changed', cb);
+    },
     // Fired when the backend loads a scene on its own (the OBS scene link),
     // so the console can refetch its state.
     subscribeSceneLoaded(cb) {

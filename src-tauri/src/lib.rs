@@ -1,6 +1,7 @@
 mod audio;
 mod dsp;
 mod history;
+mod link;
 mod mixer_commands;
 mod mixer_control;
 mod mixer_layout;
@@ -324,6 +325,7 @@ pub fn run() {
         .manage(Mutex::new(None::<RunningEngine>) as EngineState)
         .manage(SharedParams(Arc::new(DspParams::defaults())))
         .manage(MixerControl::new())
+        .manage(mixer_commands::CurrentScene::default())
         .manage(NdiSettings::new())
         .manage(NdiInputSettings::new())
         .invoke_handler(tauri::generate_handler![
@@ -345,6 +347,13 @@ pub fn run() {
             mixer_commands::mixer_save_scene,
             mixer_commands::mixer_load_scene,
             mixer_commands::mixer_delete_scene,
+            link::commands::link_get_config,
+            link::commands::link_set_enabled,
+            link::commands::link_set_rules,
+            link::commands::link_regenerate_token,
+            link::commands::link_activity,
+            link::commands::link_undo,
+            link::commands::link_set_automation_paused,
             obs::commands::obs_get_config,
             obs::commands::obs_set_config,
             obs::commands::obs_status,
@@ -373,6 +382,9 @@ pub fn run() {
             app.handle()
                 .plugin(tauri_plugin_updater::Builder::new().build())?;
 
+            // Tiwaton Link: loopback server for Lumina's bridge events.
+            let link_runtime = link::handle::LinkRuntime::init(app.handle());
+            app.manage(link_runtime);
             let obs_manager = obs::ObsManager::new(app.handle().clone());
             app.manage(obs_manager.clone());
             let scene_link_obs = obs_manager.clone();

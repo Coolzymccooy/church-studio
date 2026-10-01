@@ -9,9 +9,31 @@ use crate::audio::EngineState;
 use crate::mixer_control::{scene_slug, MixerControl, MixerState, StoredScene};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use tauri::{AppHandle, Manager, State};
 
 const SCENES_DIR: &str = "scenes";
+
+/// The scene most recently loaded, by the operator or by Tiwaton Link.
+/// Tauri-managed; `None` until a scene is loaded.
+#[derive(Default)]
+pub struct CurrentScene(Mutex<Option<String>>);
+
+impl CurrentScene {
+    pub fn get(&self) -> Option<String> {
+        match self.0.lock() {
+            Ok(guard) => guard.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        }
+    }
+
+    pub fn set(&self, scene: Option<String>) {
+        match self.0.lock() {
+            Ok(mut guard) => *guard = scene,
+            Err(poisoned) => *poisoned.into_inner() = scene,
+        }
+    }
+}
 
 /// Optional listener told when the operator loads a scene through
 /// `mixer_load_scene` (the OBS scene link registers one). Loads made by the
@@ -191,17 +213,57 @@ pub fn mixer_save_scene(
     })
 }
 
-/// Load a saved scene into the mixer without notifying `SceneLoadedHook`.
+/// The one scene-recall path, shared by `mixer_load_scene` and Tiwaton Link.
+pub fn load_scene_into_mixer(
+    app: &AppHandle,
+    mixer: &MixerControl,
+    engine: &EngineState,
+    current: &CurrentScene,
+    name: &str,
+) -> Result<MixerState, String> {
+    let path = scene_path(app, name)?;
+    let scene = read_scene_file(&path)?;
+    mixer.apply_scene(&scene);
+    let loaded = if scene.name.trim().is_empty() {
+        name.trim().to_string()
+    } else {
+        scene.name.clone()
+    };
+    current.set(Some(loaded));
+    Ok(build_state(app, mixer, engine))
+}
+
+/// `load_scene_into_mixer` using the app's managed state (Tiwaton Link loads
+/// and undo). Notifies the OBS scene link like an operator load.
+pub fn load_scene_from_app(app: &AppHandle, name: &str) -> Result<MixerState, String> {
+    let not_ready = || "the mixer is not ready".to_string();
+    let mixer = app.try_state::<MixerControl>().ok_or_else(not_ready)?;
+    let engine = app.try_state::<EngineState>().ok_or_else(not_ready)?;
+    let current = app.try_state::<CurrentScene>().ok_or_else(not_ready)?;
+    let state = load_scene_into_mixer(app, mixer.inner(), engine.inner(), current.inner(), name)?;
+    notify_scene_loaded(app, name);
+    Ok(state)
+}
+
+/// Load a saved scene without notifying `SceneLoadedHook`, so an OBS-driven
+/// load can't bounce back to OBS. Still records the current scene.
 pub(crate) fn load_scene_state(
     app: &AppHandle,
     mixer: &MixerControl,
     engine: &EngineState,
     name: &str,
 ) -> Result<MixerState, String> {
-    let path = scene_path(app, name)?;
-    let scene = read_scene_file(&path)?;
-    mixer.apply_scene(&scene);
-    Ok(build_state(app, mixer, engine))
+    let fallback = CurrentScene::default();
+    let managed = app.try_state::<CurrentScene>();
+    let current = managed.as_ref().map(|c| c.inner()).unwrap_or(&fallback);
+    load_scene_into_mixer(app, mixer, engine, current, name)
+}
+
+/// Tell the OBS scene link (when registered) that a Studio scene was loaded.
+fn notify_scene_loaded(app: &AppHandle, name: &str) {
+    if let Some(hook) = app.try_state::<SceneLoadedHook>() {
+        (hook.0)(name);
+    }
 }
 
 #[tauri::command]
@@ -209,17 +271,20 @@ pub fn mixer_load_scene(
     app: AppHandle,
     mixer: State<'_, MixerControl>,
     engine: State<'_, EngineState>,
+    current: State<'_, CurrentScene>,
     name: String,
 ) -> Result<MixerState, String> {
-    let state = load_scene_state(&app, mixer.inner(), engine.inner(), &name)?;
-    if let Some(hook) = app.try_state::<SceneLoadedHook>() {
-        (hook.0)(name.as_str());
-    }
+    let state = load_scene_into_mixer(&app, mixer.inner(), engine.inner(), current.inner(), &name)?;
+    notify_scene_loaded(&app, &name);
     Ok(state)
 }
 
 #[tauri::command]
-pub fn mixer_delete_scene(app: AppHandle, name: String) -> Result<(), String> {
+pub fn mixer_delete_scene(
+    app: AppHandle,
+    current: State<'_, CurrentScene>,
+    name: String,
+) -> Result<(), String> {
     let path = scene_path(&app, &name)?;
     fs::remove_file(&path).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
@@ -227,5 +292,12 @@ pub fn mixer_delete_scene(app: AppHandle, name: String) -> Result<(), String> {
         } else {
             format!("cannot delete scene: {e}")
         }
-    })
+    })?;
+    let deleted_current = current
+        .get()
+        .map_or(false, |c| c.trim().eq_ignore_ascii_case(name.trim()));
+    if deleted_current {
+        current.set(None);
+    }
+    Ok(())
 }

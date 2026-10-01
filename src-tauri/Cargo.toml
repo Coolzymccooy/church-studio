@@ -36,15 +36,27 @@ parking_lot = "0.12"   # Fast mutex for noise profile transfers
 # RNNoise neural denoiser (pure Rust). Default features pull in CLI-only deps.
 nnnoiseless = { version = "0.5", default-features = false }
 
+# ── Tiwaton Link (loopback HTTP server for Lumina) ───────────────────────────
+# axum 0.7 (MSRV 1.66) on the tokio runtime Tauri already ships; only the
+# features the server uses. getrandom 0.2 (MSRV 1.36) for the per-install token.
+axum = { version = "0.7", default-features = false, features = ["http1", "json", "tokio"] }
+getrandom = "0.2"
+
 # ── OBS Studio control (obs-websocket v5) ────────────────────────────────────
 # obws 0.14 declares MSRV 1.70 (0.15 needs 1.89). Runs on Tauri's tokio runtime.
 obws = { version = "0.14", features = ["events"] }
 futures-util = "0.3"   # StreamExt for the obws event stream
-tokio = { version = "1", features = ["time"] }   # already in the tree via tauri
+
+# tokio is already in the tree via tauri: net/sync for Link, time for OBS.
+tokio = { version = "1", features = ["net", "sync", "time"] }
+
 # ── NDI (runtime-loaded; nothing linked at build time) ───────────────────────
 libloading = "0.8"
 # This machine's name, to recognise our own NDI sources (already in the lock file).
 gethostname = "1.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "sync", "time"] }
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-updater = "2"
