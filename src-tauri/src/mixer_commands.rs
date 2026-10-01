@@ -35,14 +35,31 @@ impl CurrentScene {
     }
 }
 
-/// (input channel count, running). 1 channel when stopped.
-fn engine_info(engine: &EngineState) -> (u32, bool) {
+/// Optional listener told when the operator loads a scene through
+/// `mixer_load_scene` (the OBS scene link registers one). Loads made by the
+/// backend itself via `load_scene_state` don't call it, so a linked change
+/// can't bounce back.
+pub struct SceneLoadedHook(Box<dyn Fn(&str) + Send + Sync>);
+
+impl SceneLoadedHook {
+    pub fn new<F: Fn(&str) + Send + Sync + 'static>(f: F) -> Self {
+        Self(Box::new(f))
+    }
+}
+
+/// (input channel count, NDI input count, running). 1 channel and no NDI
+/// inputs when stopped.
+fn engine_info(engine: &EngineState) -> (u32, u32, bool) {
     match engine.lock() {
         Ok(guard) => match guard.as_ref() {
-            Some(running) => (running.input_channels.max(1), true),
-            None => (1, false),
+            Some(running) => (
+                running.input_channels.max(1),
+                running.strip_layout().ndi as u32,
+                true,
+            ),
+            None => (1, 0, false),
         },
-        Err(_) => (1, false),
+        Err(_) => (1, 0, false),
     }
 }
 
@@ -109,8 +126,8 @@ fn scenes_or_empty(app: &AppHandle) -> Vec<String> {
 }
 
 fn build_state(app: &AppHandle, mixer: &MixerControl, engine: &EngineState) -> MixerState {
-    let (channels, running) = engine_info(engine);
-    mixer.snapshot(channels, running, scenes_or_empty(app))
+    let (channels, ndi_inputs, running) = engine_info(engine);
+    mixer.snapshot_with_ndi(channels, ndi_inputs, running, scenes_or_empty(app))
 }
 
 #[tauri::command]
@@ -216,13 +233,37 @@ pub fn load_scene_into_mixer(
     Ok(build_state(app, mixer, engine))
 }
 
-/// `load_scene_into_mixer` using the app's managed state.
+/// `load_scene_into_mixer` using the app's managed state (Tiwaton Link loads
+/// and undo). Notifies the OBS scene link like an operator load.
 pub fn load_scene_from_app(app: &AppHandle, name: &str) -> Result<MixerState, String> {
     let not_ready = || "the mixer is not ready".to_string();
     let mixer = app.try_state::<MixerControl>().ok_or_else(not_ready)?;
     let engine = app.try_state::<EngineState>().ok_or_else(not_ready)?;
     let current = app.try_state::<CurrentScene>().ok_or_else(not_ready)?;
-    load_scene_into_mixer(app, mixer.inner(), engine.inner(), current.inner(), name)
+    let state = load_scene_into_mixer(app, mixer.inner(), engine.inner(), current.inner(), name)?;
+    notify_scene_loaded(app, name);
+    Ok(state)
+}
+
+/// Load a saved scene without notifying `SceneLoadedHook`, so an OBS-driven
+/// load can't bounce back to OBS. Still records the current scene.
+pub(crate) fn load_scene_state(
+    app: &AppHandle,
+    mixer: &MixerControl,
+    engine: &EngineState,
+    name: &str,
+) -> Result<MixerState, String> {
+    let fallback = CurrentScene::default();
+    let managed = app.try_state::<CurrentScene>();
+    let current = managed.as_ref().map(|c| c.inner()).unwrap_or(&fallback);
+    load_scene_into_mixer(app, mixer, engine, current, name)
+}
+
+/// Tell the OBS scene link (when registered) that a Studio scene was loaded.
+fn notify_scene_loaded(app: &AppHandle, name: &str) {
+    if let Some(hook) = app.try_state::<SceneLoadedHook>() {
+        (hook.0)(name);
+    }
 }
 
 #[tauri::command]
@@ -233,7 +274,9 @@ pub fn mixer_load_scene(
     current: State<'_, CurrentScene>,
     name: String,
 ) -> Result<MixerState, String> {
-    load_scene_into_mixer(&app, mixer.inner(), engine.inner(), current.inner(), &name)
+    let state = load_scene_into_mixer(&app, mixer.inner(), engine.inner(), current.inner(), &name)?;
+    notify_scene_loaded(&app, &name);
+    Ok(state)
 }
 
 #[tauri::command]

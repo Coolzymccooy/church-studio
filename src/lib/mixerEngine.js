@@ -120,35 +120,6 @@ export function applyStripChange(state, index, key, value) {
 }
 
 // ── Real controller — thin wrapper over the Tauri commands ─────────────────
-/**
- * listen(event) wrapper that can be disposed before `listen` resolves.
- * Returns { ready, dispose }.
- */
-export function subscribeTauriEvent(listen, eventName, cb) {
-  let disposed = false;
-  let unlisten = null;
-  const ready = listen(eventName, (event) => {
-    if (!disposed) cb(event.payload);
-  }).then((fn) => {
-    if (disposed) {
-      fn();
-      return null;
-    }
-    unlisten = fn;
-    return fn;
-  });
-  return {
-    ready,
-    dispose() {
-      disposed = true;
-      if (unlisten) {
-        unlisten();
-        unlisten = null;
-      }
-    },
-  };
-}
-
 export function createMixerController({ invoke, listen }) {
   return {
     getState() {
@@ -182,12 +153,46 @@ export function createMixerController({ invoke, listen }) {
       return invoke('mixer_delete_scene', { name });
     },
     subscribeMeters(cb) {
-      return subscribeTauriEvent(listen, 'mixer-meters', cb);
+      return subscribeEvent(listen, 'mixer-meters', cb);
     },
     // Fired by the engine when something other than this view changed the
     // mix (e.g. Tiwaton Link loading a scene); the payload is a MixerState.
     subscribeStateChanges(cb) {
-      return subscribeTauriEvent(listen, 'mixer-state-changed', cb);
+      return subscribeEvent(listen, 'mixer-state-changed', cb);
+    },
+    // Fired when the backend loads a scene on its own (the OBS scene link),
+    // so the console can refetch its state.
+    subscribeSceneLoaded(cb) {
+      return subscribeEvent(listen, 'mixer-scene-loaded', cb);
+    },
+  };
+}
+
+/**
+ * Listen to a Tauri event and return { ready, dispose }. Disposing before
+ * `listen` resolves still unlistens once it does.
+ */
+export function subscribeEvent(listen, eventName, cb) {
+  let disposed = false;
+  let unlisten = null;
+  const ready = listen(eventName, (event) => {
+    if (!disposed) cb(event.payload);
+  }).then((fn) => {
+    if (disposed) {
+      fn();
+      return null;
+    }
+    unlisten = fn;
+    return fn;
+  });
+  return {
+    ready,
+    dispose() {
+      disposed = true;
+      if (unlisten) {
+        unlisten();
+        unlisten = null;
+      }
     },
   };
 }

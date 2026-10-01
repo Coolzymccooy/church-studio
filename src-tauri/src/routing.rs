@@ -56,11 +56,17 @@ pub fn push_stereo<P: Producer<Item = f32>>(
     let channels = channels.max(1);
     let mut dropped = 0u64;
     for (&l, &r) in left.iter().zip(right.iter()) {
+        // Push or drop each sample frame whole. The consumer frees space
+        // concurrently, so pushing channel by channel could keep part of a
+        // frame and shift the channel order for the rest of the run. Space
+        // only grows while we push, so a frame that fits here fits whole.
+        if producer.vacant_len() < channels {
+            dropped += channels as u64;
+            continue;
+        }
         for channel in 0..channels {
             let sample = device_sample(l, r, channels, channel) * gain;
-            if producer.try_push(sample).is_err() {
-                dropped += 1;
-            }
+            let _ = producer.try_push(sample);
         }
     }
     dropped

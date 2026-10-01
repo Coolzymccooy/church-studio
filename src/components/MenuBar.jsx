@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Waves } from 'lucide-react';
-import { dragRegionProps } from '../lib/platform';
+import { dragRegionProps, isTauri } from '../lib/platform';
 
 /**
  * MenuBar — Native-style menu bar for TIWATON AI STUDIO.
@@ -77,6 +77,7 @@ export default function MenuBar({
   // Callbacks from parent
   onGoHome,
   onShowSettings,
+  onShowObs,
   themeSelector,
   onToggleLive,
   onHardReset,
@@ -176,6 +177,8 @@ export default function MenuBar({
         { label: 'Capture Room Noise Profile', action: onCaptureNoise, disabled: !isLive },
         { separator: true },
         { label: 'Lumina Link…', action: onOpenLink, disabled: !onOpenLink },
+        // In the browser the panel explains that OBS control needs the desktop app.
+        { label: isTauri ? 'OBS Studio…' : 'OBS Studio… (desktop app)', action: onShowObs, disabled: !onShowObs },
         { label: 'Audio Device Settings', shortcut: 'Ctrl+,', action: onShowSettings },
       ],
     },

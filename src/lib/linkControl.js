@@ -5,7 +5,7 @@
  * (see src-tauri/src/link/commands.rs) plus the `link-activity` and
  * `link-status` events. The rest are pure helpers for the Link panel.
  */
-import { subscribeTauriEvent } from './mixerEngine.js';
+import { subscribeEvent } from './mixerEngine.js';
 
 export const LINK_EVENTS = {
   activity: 'link-activity',
@@ -69,10 +69,10 @@ export function createLinkController({ invoke, listen }) {
       return invoke('mixer_list_scenes');
     },
     subscribeActivity(cb) {
-      return subscribeTauriEvent(listen, LINK_EVENTS.activity, cb);
+      return subscribeEvent(listen, LINK_EVENTS.activity, cb);
     },
     subscribeStatus(cb) {
-      return subscribeTauriEvent(listen, LINK_EVENTS.status, cb);
+      return subscribeEvent(listen, LINK_EVENTS.status, cb);
     },
   };
 }

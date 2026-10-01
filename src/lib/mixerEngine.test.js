@@ -237,6 +237,25 @@ test('createMixerController.subscribeMeters disposed before ready still unlisten
   assert.equal(unlistenCalled, true);
 });
 
+test('createMixerController.subscribeSceneLoaded listens on mixer-scene-loaded', async () => {
+  const listenCalls = [];
+  const listen = async (event, cb) => {
+    listenCalls.push(event);
+    listen.cb = cb;
+    return () => {};
+  };
+  const controller = createMixerController({ invoke: async () => null, listen });
+
+  const received = [];
+  const sub = controller.subscribeSceneLoaded((payload) => received.push(payload));
+  await sub.ready;
+  listen.cb({ payload: { name: 'Sermon', source: 'obs' } });
+
+  assert.deepEqual(listenCalls, ['mixer-scene-loaded']);
+  assert.deepEqual(received, [{ name: 'Sermon', source: 'obs' }]);
+  sub.dispose();
+});
+
 // ── createMockMixerController ────────────────────────────────────────────────
 
 test('mock controller starts with 8 strips, strip 0 has voice_chain on', async () => {

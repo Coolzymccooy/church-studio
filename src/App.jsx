@@ -16,7 +16,10 @@ import LandingPage from './components/LandingPage';
 import StudioStatusBar from './components/StudioStatusBar';
 import DeviceSettingsModal from './components/DeviceSettingsModal';
 import LinkPanel from './components/link/LinkPanel.jsx';
+import ObsPanel from './components/obs/ObsPanel.jsx';
 import MainOutputSelect from './components/MainOutputSelect';
+import NdiOutputPanel from './components/NdiOutputPanel';
+import NdiInputPanel from './components/NdiInputPanel';
 import InputRackAiTab from './components/InputRackAiTab';
 import MixerConsole from './components/mixer/MixerConsole';
 import { createMixerController, createMockMixerController } from './lib/mixerEngine';
@@ -122,6 +125,7 @@ const AudioProcessor = ({ goHome }) => {
 
   const [showSettings, setShowSettings] = useState(false);
   const [showLink, setShowLink] = useState(false);
+  const [showObs, setShowObs] = useState(false);
   const [showAI, setShowAI] = useState(false);
   const [isMonitoring, setIsMonitoring] = useState(false);
   const [isBypassed, setIsBypassed] = useState(false);
@@ -3320,6 +3324,7 @@ const AudioProcessor = ({ goHome }) => {
       <MenuBar
         onGoHome={goHome}
         onShowSettings={() => setShowSettings(true)}
+        onShowObs={() => setShowObs(true)}
         themeSelector={<ThemeSelector />}
         onToggleLive={toggleLive}
         onHardReset={hardReset}
@@ -3355,6 +3360,7 @@ const AudioProcessor = ({ goHome }) => {
       />
 
       <LinkPanel open={showLink} onClose={() => setShowLink(false)} />
+      <ObsPanel open={showObs} onClose={() => setShowObs(false)} mixerController={mixerController} />
 
       <DeviceSettingsModal
         open={showSettings}
@@ -4165,6 +4171,12 @@ const AudioProcessor = ({ goHome }) => {
                 </button>
               </div>
             </div>
+
+            {/* NDI® output (desktop only) */}
+            <NdiOutputPanel isLive={isLive} />
+
+            {/* NDI® inputs (desktop only) */}
+            <NdiInputPanel isLive={isLive} />
 
             {/* Stream Guard */}
             <div className="rounded-lg border border-slate-800 overflow-hidden" style={{background:'#080E1F'}}>

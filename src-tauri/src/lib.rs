@@ -4,14 +4,21 @@ mod history;
 mod link;
 mod mixer_commands;
 mod mixer_control;
+mod mixer_layout;
 #[cfg(test)]
 mod mixer_engine_tests;
 mod mixer_meters;
 mod mixer_model;
+mod obs;
+mod ndi;
+mod ndi_commands;
+mod ndi_input_commands;
 mod routing;
 
 use audio::{DeviceSelection, EngineState, RunningEngine};
 use mixer_control::MixerControl;
+use ndi::receive::NdiInputSettings;
+use ndi::{NdiEngineConfig, NdiSettings};
 use dsp::{AudioDeviceInfo, DspParams};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
@@ -144,6 +151,8 @@ async fn start_audio_engine(
     state: State<'_, EngineState>,
     params: State<'_, SharedParams>,
     mixer: State<'_, MixerControl>,
+    ndi: State<'_, NdiSettings>,
+    ndi_inputs: State<'_, NdiInputSettings>,
     input_device: Option<String>,
     monitor_output_device: Option<String>,
     broadcast_output_device: Option<String>,
@@ -164,6 +173,10 @@ async fn start_audio_engine(
             broadcast_output_id: broadcast_output_device,
             main_output_id,
         },
+        NdiEngineConfig {
+            outputs: ndi.snapshot(),
+            inputs: ndi_inputs.snapshot(),
+        },
     )?;
     let info = serde_json::json!({
         "sample_rate": engine.sample_rate,
@@ -180,6 +193,7 @@ async fn start_audio_engine(
         "broadcast_output_name": engine.broadcast_output_name,
         "main_output_name": engine.main_output_name,
         "inputChannels": engine.input_channels,
+        "ndiStrips": engine.ndi_inputs.len(),
     });
 
     *guard = Some(engine);
@@ -265,6 +279,7 @@ fn serialize_engine_status(engine: &RunningEngine) -> serde_json::Value {
         "neural_available": engine.neural_available,
         "dsp_latency_samples": engine.dsp_latency_samples(),
         "dropped_output_samples": engine.dropped_output_samples(),
+        "ndi": ndi_commands::engine_ndi_status(Some(engine)),
     })
 }
 
@@ -289,6 +304,7 @@ fn engine_status(state: State<'_, EngineState>) -> serde_json::Value {
             "noise_profile_ready": false,
             "neural_available": false,
             "dropped_output_samples": 0,
+            "ndi": ndi_commands::engine_ndi_status(None),
         })
     }
 }
@@ -310,6 +326,8 @@ pub fn run() {
         .manage(SharedParams(Arc::new(DspParams::defaults())))
         .manage(MixerControl::new())
         .manage(mixer_commands::CurrentScene::default())
+        .manage(NdiSettings::new())
+        .manage(NdiInputSettings::new())
         .invoke_handler(tauri::generate_handler![
             start_audio_engine,
             stop_audio_engine,
@@ -336,8 +354,30 @@ pub fn run() {
             link::commands::link_activity,
             link::commands::link_undo,
             link::commands::link_set_automation_paused,
+            obs::commands::obs_get_config,
+            obs::commands::obs_set_config,
+            obs::commands::obs_status,
+            obs::commands::obs_set_scene,
+            obs::commands::obs_start_stream,
+            obs::commands::obs_stop_stream,
+            obs::commands::obs_start_record,
+            obs::commands::obs_stop_record,
+            ndi_commands::ndi_status,
+            ndi_commands::ndi_get_outputs,
+            ndi_commands::ndi_set_outputs,
+            ndi_input_commands::ndi_list_sources,
+            ndi_input_commands::ndi_get_inputs,
+            ndi_input_commands::ndi_set_inputs,
         ])
         .setup(|app| {
+            // Load the NDI runtime off the main thread; ndi_status reports
+            // `loading` until it is done.
+            ndi::runtime::preload();
+            let saved_ndi = ndi_commands::load_saved_outputs(app.handle());
+            app.state::<NdiSettings>().replace(saved_ndi);
+            let saved_inputs = ndi_input_commands::load_saved_inputs(app.handle());
+            app.state::<NdiInputSettings>().replace(saved_inputs);
+
             #[cfg(desktop)]
             app.handle()
                 .plugin(tauri_plugin_updater::Builder::new().build())?;
@@ -345,6 +385,13 @@ pub fn run() {
             // Tiwaton Link: loopback server for Lumina's bridge events.
             let link_runtime = link::handle::LinkRuntime::init(app.handle());
             app.manage(link_runtime);
+            let obs_manager = obs::ObsManager::new(app.handle().clone());
+            app.manage(obs_manager.clone());
+            let scene_link_obs = obs_manager.clone();
+            app.manage(mixer_commands::SceneLoadedHook::new(move |name| {
+                scene_link_obs.on_studio_scene_loaded(name)
+            }));
+            obs_manager.start();
 
             #[cfg(all(desktop, not(debug_assertions)))]
             {
