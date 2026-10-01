@@ -118,18 +118,32 @@ pub fn prepare(plan: &WriterPlan) -> Result<PreparedTracks, String> {
 }
 
 /// Remove what `prepare` created for a recording that never started:
-/// the first part of every track and the (then empty) folder. Only call
-/// it after `prepare` succeeded, so the folder is this recording's own.
+/// every track file and the folder. Only call it after `prepare`
+/// succeeded, so the folder is this recording's own.
 pub fn abandon(plan: &WriterPlan, prepared: PreparedTracks) {
-    drop(prepared);
-    for track in plan.tracks.iter() {
-        let path = plan.dir.join(part_file_name(&track.base, 1));
-        if let Err(e) = std::fs::remove_file(&path) {
-            log::warn!("recorder: cannot remove unused {}: {e}", path.display());
+    discard_created(&plan.dir, prepared.0, None);
+}
+
+/// Close `tracks`, delete their files (and `failed`, a file whose create
+/// failed part-way), then the folder. `remove_dir` only removes an empty
+/// folder, so anything else found in it is kept, folder included.
+fn discard_created(dir: &Path, tracks: Vec<OpenTrack>, failed: Option<String>) {
+    let mut names: Vec<String> = tracks
+        .iter()
+        .flat_map(|track| track.writer.files().iter().cloned())
+        .collect();
+    drop(tracks);
+    names.extend(failed);
+    for name in names.iter() {
+        let path = dir.join(name);
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => log::warn!("recorder: cannot remove unused {}: {e}", path.display()),
         }
     }
-    if let Err(e) = std::fs::remove_dir(&plan.dir) {
-        log::warn!("recorder: cannot remove unused {}: {e}", plan.dir.display());
+    if let Err(e) = std::fs::remove_dir(dir) {
+        log::warn!("recorder: cannot remove unused {}: {e}", dir.display());
     }
 }
 
@@ -188,8 +202,15 @@ fn open_tracks(plan: &WriterPlan) -> Result<Vec<OpenTrack>, String> {
         .map_err(|e| format!("cannot create {}: {e}", plan.dir.display()))?;
     let mut tracks = Vec::with_capacity(plan.tracks.len());
     for track in plan.tracks.iter() {
-        let writer = TrackWriter::create(&plan.dir, &track.base, track.channels, plan.sample_rate)
-            .map_err(|e| format!("cannot create {}.wav: {e}", track.base))?;
+        // The folder was just created by this attempt (`create_dir` above),
+        // so on failure everything in it so far is ours to remove.
+        let writer = match TrackWriter::create(&plan.dir, &track.base, track.channels, plan.sample_rate) {
+            Ok(writer) => writer,
+            Err(e) => {
+                discard_created(&plan.dir, tracks, Some(part_file_name(&track.base, 1)));
+                return Err(format!("cannot create {}.wav: {e}", track.base));
+            }
+        };
         tracks.push(OpenTrack {
             plan: track.clone(),
             writer,

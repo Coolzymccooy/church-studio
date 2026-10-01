@@ -239,3 +239,17 @@ fn a_recorder_knows_its_own_engine() {
     assert!(recorder.owns(&recorder.shared()));
     assert!(!recorder.owns(&other.shared()));
 }
+
+#[test]
+fn a_failed_track_create_removes_the_files_and_folder_it_made() {
+    let dir = temp_dir("partial");
+    let layout = RecordLayout { strips: 2 };
+    let tracks = vec![
+        track("01 A", TrackKind::Strip, "hardware", 0, 1),
+        // A missing subfolder makes this create fail on every platform.
+        track("missing/02 B", TrackKind::Strip, "hardware", 1, 1),
+    ];
+    assert!(writer::prepare(&plan(&dir, layout, tracks)).is_err());
+    assert!(!dir.join("01 A.wav").exists());
+    assert!(!dir.exists(), "the folder this attempt made is removed");
+}
