@@ -249,17 +249,27 @@ pub async fn recorder_start(
     Ok(current_status(engine.inner(), control.inner()))
 }
 
-/// Stop, finalize and return the idle status with the summary.
+/// Stop, finalize and return the idle status with the summary. Only the
+/// flag flip happens under the engine lock; the grace period, drain,
+/// finalize and join run on a blocking thread with the lock released, so
+/// meters, scene loads and other commands are never stalled by a stop.
 #[tauri::command]
 pub async fn recorder_stop(
     engine: State<'_, EngineState>,
     control: State<'_, RecorderControl>,
 ) -> Result<RecorderStatus, String> {
-    {
+    let pending = {
         let mut guard = lock(engine.inner());
-        if let Some(running) = guard.as_mut() {
-            let _ = running.recorder.stop();
-        }
+        let pending = guard.as_mut().and_then(|running| running.recorder.begin_stop());
+        drop(guard);
+        pending
+    };
+    if let Some(pending) = pending {
+        // The outcome reaches the UI through the writer's `Finished` event
+        // and `control.last`; here we only wait for the files to be final.
+        let _outcome = tauri::async_runtime::spawn_blocking(move || pending.finish())
+            .await
+            .map_err(|e| format!("the recorder stop did not complete: {e}"))?;
     }
     Ok(current_status(engine.inner(), control.inner()))
 }

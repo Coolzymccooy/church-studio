@@ -6,6 +6,7 @@ use super::frames::{frames_to_seconds, RecordLayout};
 use super::session::Marker;
 use super::writer::{self, StatusFn, WriterExit, WriterOutcome, WriterPlan};
 use super::{RecordPort, RecordShared, SessionControl};
+use parking_lot::Mutex;
 use ringbuf::HeapCons;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
@@ -25,19 +26,43 @@ pub struct RecordingInfo {
     pub track_names: Vec<String>,
 }
 
+type WriterHandle = JoinHandle<WriterExit<HeapCons<f32>>>;
+/// Where the ring consumer waits between recordings. Shared with a
+/// `PendingStop` so the consumer comes back without the engine lock.
+type IdleSlot = Arc<Mutex<Option<HeapCons<f32>>>>;
+
 struct ActiveRecording {
     control: Arc<SessionControl>,
-    handle: JoinHandle<WriterExit<HeapCons<f32>>>,
+    handle: WriterHandle,
     info: RecordingInfo,
+}
+
+/// A recording whose flag is cleared but whose writer is still draining.
+/// `finish` blocks (grace period, drain, finalize, join), so callers run
+/// it without holding the engine lock (`recorder_stop`).
+pub struct PendingStop {
+    control: Arc<SessionControl>,
+    handle: WriterHandle,
+    idle: IdleSlot,
+}
+
+impl PendingStop {
+    /// Let in-flight callbacks finish, tell the writer to drain and
+    /// finalize, join it and put the consumer back for the next recording.
+    pub fn finish(self) -> Option<WriterOutcome> {
+        std::thread::sleep(STOP_GRACE);
+        self.control.stop.store(true, Ordering::Release);
+        collect(&self.idle, self.handle)
+    }
 }
 
 pub struct EngineRecorder {
     shared: Arc<RecordShared>,
     layout: RecordLayout,
     sample_rate: u32,
-    /// The ring consumer while idle; `None` while recording (the writer
-    /// has it) or after a writer was lost.
-    idle: Option<HeapCons<f32>>,
+    /// The ring consumer while idle; `None` while recording or finishing
+    /// a stop (the writer has it) or after a writer was lost.
+    idle: IdleSlot,
     active: Option<ActiveRecording>,
 }
 
@@ -47,7 +72,7 @@ impl EngineRecorder {
             shared: port.shared,
             layout: port.layout,
             sample_rate: port.sample_rate,
-            idle: Some(port.consumer),
+            idle: Arc::new(Mutex::new(Some(port.consumer))),
             active: None,
         }
     }
@@ -89,8 +114,9 @@ impl EngineRecorder {
         if self.is_recording() {
             return Err("A recording is already running".to_string());
         }
-        let consumer = self.idle.take().ok_or_else(|| {
-            "The recorder is unavailable until the engine restarts".to_string()
+        let consumer = self.idle.lock().take().ok_or_else(|| {
+            "The recorder is not ready (the last recording is still finishing, or the engine needs a restart)"
+                .to_string()
         })?;
         let info = RecordingInfo {
             folder: plan.dir.clone(),
@@ -109,20 +135,30 @@ impl EngineRecorder {
                 Ok(())
             }
             Err(err) => {
-                self.idle = err.consumer;
+                *self.idle.lock() = err.consumer;
                 Err(err.message)
             }
         }
     }
 
-    /// Stop capturing, let the writer drain and finalize, and take the
-    /// consumer back. `None` when nothing was recording.
-    pub fn stop(&mut self) -> Option<WriterOutcome> {
+    /// Stop capturing and hand back the blocking rest of the stop. Cheap:
+    /// call it under the engine lock, then `finish` it after the lock is
+    /// released. `None` when nothing was recording, so a second call (or
+    /// an engine stop after a command stop) is a no-op.
+    pub fn begin_stop(&mut self) -> Option<PendingStop> {
         let active = self.active.take()?;
         self.shared.active.store(false, Ordering::Release);
-        std::thread::sleep(STOP_GRACE);
-        active.control.stop.store(true, Ordering::Release);
-        self.collect(active.handle)
+        Some(PendingStop {
+            control: active.control,
+            handle: active.handle,
+            idle: self.idle.clone(),
+        })
+    }
+
+    /// Stop, drain and finalize synchronously (engine stop and Drop, so
+    /// the files are finished before the streams go away).
+    pub fn stop(&mut self) -> Option<WriterOutcome> {
+        self.begin_stop()?.finish()
     }
 
     /// Add a marker at the current recording time.
@@ -145,19 +181,20 @@ impl EngineRecorder {
             return None;
         }
         let active = self.active.take()?;
-        self.collect(active.handle)
+        collect(&self.idle, active.handle)
     }
+}
 
-    fn collect(&mut self, handle: JoinHandle<WriterExit<HeapCons<f32>>>) -> Option<WriterOutcome> {
-        match handle.join() {
-            Ok(exit) => {
-                self.idle = Some(exit.consumer);
-                Some(exit.outcome)
-            }
-            Err(_) => {
-                log::error!("recorder: the writer thread panicked; recording unavailable until the engine restarts");
-                None
-            }
+/// Join the writer and return the consumer to the idle slot.
+fn collect(idle: &Mutex<Option<HeapCons<f32>>>, handle: WriterHandle) -> Option<WriterOutcome> {
+    match handle.join() {
+        Ok(exit) => {
+            *idle.lock() = Some(exit.consumer);
+            Some(exit.outcome)
+        }
+        Err(_) => {
+            log::error!("recorder: the writer thread panicked; recording unavailable until the engine restarts");
+            None
         }
     }
 }
