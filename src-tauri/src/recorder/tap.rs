@@ -107,7 +107,7 @@ impl<P: Producer<Item = f32>> RecordTap<P> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ringbuf::traits::{Consumer, Split};
+    use ringbuf::traits::{Consumer, Observer, Split};
     use ringbuf::HeapRb;
 
     fn make_tap(capacity: usize, strips: usize) -> (RecordTap<ringbuf::HeapProd<f32>>, ringbuf::HeapCons<f32>, Arc<RecordShared>) {
