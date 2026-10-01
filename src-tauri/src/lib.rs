@@ -1,5 +1,6 @@
 mod audio;
 mod dsp;
+mod engine_stopping;
 mod history;
 mod link;
 mod mixer_commands;
@@ -151,6 +152,7 @@ async fn check_for_app_update(app: AppHandle) {
 async fn start_audio_engine(
     app: AppHandle,
     state: State<'_, EngineState>,
+    stopping: State<'_, engine_stopping::EngineStopping>,
     params: State<'_, SharedParams>,
     mixer: State<'_, MixerControl>,
     ndi: State<'_, NdiSettings>,
@@ -163,6 +165,10 @@ async fn start_audio_engine(
     let mut guard = state.inner().lock().unwrap();
     if guard.is_some() {
         return Err("Engine already running".to_string());
+    }
+    // Checked under the engine lock, where a stop sets the flag.
+    if stopping.is_stopping() {
+        return Err("The engine is still stopping; try again in a moment".to_string());
     }
 
     let engine = RunningEngine::spawn(
@@ -203,15 +209,25 @@ async fn start_audio_engine(
 }
 
 #[tauri::command]
-async fn stop_audio_engine(state: State<'_, EngineState>) -> Result<(), String> {
+async fn stop_audio_engine(
+    state: State<'_, EngineState>,
+    stopping: State<'_, engine_stopping::EngineStopping>,
+) -> Result<(), String> {
     // Take the engine out and release the lock before stopping it: the stop
     // finalizes any recording and joins the audio thread, which must not
-    // stall every other command waiting on the engine lock.
-    let engine = state
-        .inner()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .take();
+    // stall every other command waiting on the engine lock. The stopping
+    // flag is set under the lock (only when an engine was taken) and
+    // cleared by the guard on every path, so start_audio_engine refuses
+    // to open a second engine until this one is gone.
+    let (engine, _stopping_guard) = {
+        let mut guard = state
+            .inner()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let engine = guard.take();
+        let stopping_guard = engine.as_ref().map(|_| stopping.begin());
+        (engine, stopping_guard)
+    };
     if let Some(engine) = engine {
         engine.stop();
     }
@@ -333,6 +349,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_os::init())
         .manage(Mutex::new(None::<RunningEngine>) as EngineState)
+        .manage(engine_stopping::EngineStopping::default())
         .manage(SharedParams(Arc::new(DspParams::defaults())))
         .manage(MixerControl::new())
         .manage(mixer_commands::CurrentScene::default())
