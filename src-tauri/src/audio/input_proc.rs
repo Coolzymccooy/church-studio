@@ -13,6 +13,8 @@
 //!    strip and bus meters are published to lock-free slots.
 //! 4. Each output device gets its bus as stereo (see `routing`); the
 //!    Monitor bus is still scaled by `monitor_gain_db`.
+//! 5. Each NDI output gets its bus as interleaved stereo at unity gain, in
+//!    its own ring; the NDI sender thread does the rest (`crate::ndi`).
 use super::{db_to_lin, EngineShared, MAX_CALLBACK_FRAMES};
 use crate::dsp::mixer::{Mixer, BUS_MONITOR};
 use crate::dsp::{DspChain, DspParams, MetersPayload};
@@ -110,6 +112,8 @@ pub(super) struct InputProcessor<P> {
     /// Mixer meters for the meters thread (`mixer-meters`).
     meter_slots: Arc<MixerMeterSlots>,
     outputs: Vec<OutputRoute<P>>,
+    /// NDI rings (2 channels each), read by the NDI sender threads.
+    ndi_outputs: Vec<OutputRoute<P>>,
     spectrum: Spectrum,
     meters_tx: mpsc::SyncSender<MetersPayload>,
     meter_interval_samples: usize,
@@ -127,6 +131,7 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
         mixer: MixerLink,
         meter_slots: Arc<MixerMeterSlots>,
         outputs: Vec<OutputRoute<P>>,
+        ndi_outputs: Vec<OutputRoute<P>>,
         meters_tx: mpsc::SyncSender<MetersPayload>,
     ) -> Self {
         let stride = stride.max(1);
@@ -150,6 +155,7 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
             mixer: engine_mixer,
             meter_slots,
             outputs,
+            ndi_outputs,
             spectrum: Spectrum::new(),
             meters_tx,
             // Meters are sent ~50 times per second, as before.
@@ -205,8 +211,24 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
                 .dropped_output_samples
                 .fetch_add(dropped, Ordering::Relaxed);
         }
+        self.push_ndi();
 
         self.send_voice_meters(n);
+    }
+
+    /// Copy each NDI bus into its ring at unity gain. Drops what does not
+    /// fit and only counts it: no logging, locking or allocation here.
+    fn push_ndi(&mut self) {
+        let mut dropped = 0u64;
+        for route in self.ndi_outputs.iter_mut() {
+            let (left, right) = self.mixer.output(route.bus);
+            dropped += push_stereo(&mut route.producer, left, right, route.channels, 1.0);
+        }
+        if dropped > 0 {
+            self.shared
+                .ndi_dropped_samples
+                .fetch_add(dropped, Ordering::Relaxed);
+        }
     }
 
     /// Publish the latency of what is active now (see

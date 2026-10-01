@@ -101,7 +101,20 @@ fn push_stereo_interleaves_per_device_layout() {
 fn push_stereo_counts_dropped_samples() {
     let (mut prod, _cons) = ringbuf::HeapRb::<f32>::new(4).split();
     let dropped = push_stereo(&mut prod, &[0.1, 0.2], &[0.1, 0.2], 6, 1.0);
-    assert_eq!(dropped, 12 - 4);
+    // A 6-channel frame never fits in 4 slots, so both frames drop whole.
+    assert_eq!(dropped, 12);
+}
+
+#[test]
+fn push_stereo_never_splits_a_frame() {
+    let (mut prod, mut cons) = ringbuf::HeapRb::<f32>::new(5).split();
+    let dropped = push_stereo(&mut prod, &[1.0, 2.0, 3.0], &[-1.0, -2.0, -3.0], 2, 1.0);
+    assert_eq!(dropped, 2);
+    let mut out = Vec::new();
+    while let Some(v) = cons.try_pop() {
+        out.push(v);
+    }
+    assert_close(&out, &[1.0, -1.0, 2.0, -2.0]);
 }
 
 // ── Key dispatch, clamping, errors ──────────────────────────────────────────
