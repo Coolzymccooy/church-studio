@@ -152,8 +152,10 @@ pub fn recorder_set_config(
             return Err("Choose a full folder path for recordings".to_string());
         }
     }
-    control.replace_config(next.clone());
+    // Saved first: a failed save leaves the in-memory settings unchanged,
+    // so what the UI shows is what the next app start will load.
     settings_path(&app).and_then(|path| config::save_to_path(&path, &next))?;
+    control.replace_config(next.clone());
     Ok(config_payload(&app, &next))
 }
 
