@@ -11,6 +11,8 @@ mod mixer_meters;
 mod mixer_model;
 mod obs;
 mod ndi;
+mod recorder;
+mod recorder_commands;
 mod ndi_commands;
 mod ndi_input_commands;
 mod routing;
@@ -328,6 +330,7 @@ pub fn run() {
         .manage(mixer_commands::CurrentScene::default())
         .manage(NdiSettings::new())
         .manage(NdiInputSettings::new())
+        .manage(recorder_commands::RecorderControl::default())
         .invoke_handler(tauri::generate_handler![
             start_audio_engine,
             stop_audio_engine,
@@ -368,6 +371,13 @@ pub fn run() {
             ndi_input_commands::ndi_list_sources,
             ndi_input_commands::ndi_get_inputs,
             ndi_input_commands::ndi_set_inputs,
+            recorder_commands::recorder_status,
+            recorder_commands::recorder_get_config,
+            recorder_commands::recorder_set_config,
+            recorder_commands::recorder_start,
+            recorder_commands::recorder_stop,
+            recorder_commands::recorder_add_marker,
+            recorder_commands::recorder_open_folder,
         ])
         .setup(|app| {
             // Load the NDI runtime off the main thread; ndi_status reports
@@ -377,6 +387,9 @@ pub fn run() {
             app.state::<NdiSettings>().replace(saved_ndi);
             let saved_inputs = ndi_input_commands::load_saved_inputs(app.handle());
             app.state::<NdiInputSettings>().replace(saved_inputs);
+            let saved_recorder = recorder_commands::load_saved_config(app.handle());
+            app.state::<recorder_commands::RecorderControl>()
+                .replace_config(saved_recorder);
 
             #[cfg(desktop)]
             app.handle()
