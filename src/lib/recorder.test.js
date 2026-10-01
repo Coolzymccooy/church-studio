@@ -11,6 +11,7 @@ import {
   formatElapsed,
   normalizeRecorderConfig,
   normalizeRecorderStatus,
+  quickRecordView,
   recorderHealth,
   recorderPillText,
   toggleArmedStrip,
@@ -180,4 +181,37 @@ test('describeRecorderError handles strings and errors', () => {
   assert.equal(describeRecorderError('nope'), 'nope');
   assert.equal(describeRecorderError(new Error('bad')), 'bad');
   assert.equal(describeRecorderError(null), 'The recorder did not respond.');
+});
+
+test('quickRecordView: idle with the engine stopped asks to start it', () => {
+  const view = quickRecordView({ ...EMPTY_RECORDER_STATUS, state: 'idle' }, null, false);
+  assert.equal(view.mode, 'idle');
+  assert.equal(view.disabled, true);
+  assert.match(view.title, /Start the engine/);
+});
+
+test('quickRecordView: idle with the engine running records', () => {
+  const view = quickRecordView({ ...EMPTY_RECORDER_STATUS, state: 'idle', engineRunning: true }, null, false);
+  assert.equal(view.disabled, false);
+  assert.equal(view.label, 'Record');
+  assert.equal(view.canOpenFolder, false);
+});
+
+test('quickRecordView: recording shows the timer, then asks to confirm stop', () => {
+  const status = normalizeRecorderStatus({ state: 'recording', engineRunning: true, elapsedSeconds: 75, tracks: ['a', 'b', 'c'] });
+  const view = quickRecordView(status, null, false);
+  assert.equal(view.mode, 'recording');
+  assert.equal(view.label, 'Stop 0:01:15');
+  assert.match(view.message, /3 tracks/);
+  assert.equal(quickRecordView(status, null, true).label, 'Click again to stop');
+});
+
+test('quickRecordView: after a recording offers the folder; errors win', () => {
+  const done = normalizeRecorderStatus({ state: 'idle', engineRunning: true, lastSummary: { folder: 'C:/r/1', durationSeconds: 61, files: ['x.wav', 'y.wav'] } });
+  const view = quickRecordView(done, null, false);
+  assert.equal(view.canOpenFolder, true);
+  assert.match(view.message, /Saved 2 files/);
+  const failed = quickRecordView(done, 'disk full', false);
+  assert.equal(failed.messageLevel, 'error');
+  assert.equal(failed.message, 'disk full');
 });

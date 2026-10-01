@@ -207,3 +207,40 @@ export function describeRecorderError(err) {
   if (err && typeof err.message === 'string') return err.message;
   return 'The recorder did not respond.';
 }
+
+/**
+ * What the centre-bar record button shows. `error` is the last command
+ * error; `confirmStop` is true after a first click on Stop.
+ */
+export function quickRecordView(status, error, confirmStop) {
+  const s = status ?? EMPTY_RECORDER_STATUS;
+  if (s.recording) {
+    const count = s.tracks.length;
+    return {
+      mode: 'recording',
+      label: confirmStop ? 'Click again to stop' : `Stop ${formatElapsed(s.elapsedSeconds)}`,
+      title: 'Stop the multitrack recording',
+      disabled: false,
+      canOpenFolder: false,
+      message: error ?? `Recording ${count} track${count === 1 ? '' : 's'}`,
+      messageLevel: error ? 'error' : 'info',
+    };
+  }
+  const summary = s.lastSummary;
+  const files = Array.isArray(summary?.files) ? summary.files.length : 0;
+  const failure = error ?? s.lastError;
+  let message = null;
+  if (failure) message = failure;
+  else if (summary) message = `Saved ${files} file${files === 1 ? '' : 's'} (${formatElapsed(summary.durationSeconds)})`;
+  return {
+    mode: 'idle',
+    label: 'Record',
+    title: s.engineRunning
+      ? 'Record every armed strip plus the Stream mix to WAV files'
+      : 'Start the engine to record',
+    disabled: !s.engineRunning,
+    canOpenFolder: Boolean(summary?.folder),
+    message,
+    messageLevel: failure ? 'error' : 'info',
+  };
+}
