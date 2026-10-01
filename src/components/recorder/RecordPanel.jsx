@@ -80,7 +80,7 @@ function RecordSection({ strips, engineRunning }) {
         {!recording && (
           <button
             type="button"
-            onClick={() => rec.start(title)}
+            onClick={() => { setConfirmStop(false); rec.start(title); }}
             disabled={!canStart}
             title={engineOn ? 'Start a multitrack recording' : 'Start the engine to record'}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-full font-bold text-[10px] text-white bg-red-600 hover:bg-red-500 disabled:opacity-40"
