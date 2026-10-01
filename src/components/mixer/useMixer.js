@@ -73,9 +73,18 @@ export function useMixer(controller) {
       }
     });
 
+    // The OBS scene link can load a scene from the backend; show it.
+    const sceneSub = controller.subscribeSceneLoaded?.(() => {
+      if (cancelled) return;
+      controller.getState()
+        .then((next) => { if (!cancelled) setState(next); })
+        .catch(() => {});
+    });
+
     return () => {
       cancelled = true;
       sub.dispose();
+      sceneSub?.dispose();
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     };
   }, [controller, showToast]);

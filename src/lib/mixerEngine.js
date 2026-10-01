@@ -153,28 +153,41 @@ export function createMixerController({ invoke, listen }) {
       return invoke('mixer_delete_scene', { name });
     },
     subscribeMeters(cb) {
-      let disposed = false;
-      let unlisten = null;
-      const ready = listen('mixer-meters', (event) => {
-        if (!disposed) cb(event.payload);
-      }).then((fn) => {
-        if (disposed) {
-          fn();
-          return null;
-        }
-        unlisten = fn;
-        return fn;
-      });
-      return {
-        ready,
-        dispose() {
-          disposed = true;
-          if (unlisten) {
-            unlisten();
-            unlisten = null;
-          }
-        },
-      };
+      return subscribeEvent(listen, 'mixer-meters', cb);
+    },
+    // Fired when the backend loads a scene on its own (the OBS scene link),
+    // so the console can refetch its state.
+    subscribeSceneLoaded(cb) {
+      return subscribeEvent(listen, 'mixer-scene-loaded', cb);
+    },
+  };
+}
+
+/**
+ * Listen to a Tauri event and return { ready, dispose }. Disposing before
+ * `listen` resolves still unlistens once it does.
+ */
+export function subscribeEvent(listen, eventName, cb) {
+  let disposed = false;
+  let unlisten = null;
+  const ready = listen(eventName, (event) => {
+    if (!disposed) cb(event.payload);
+  }).then((fn) => {
+    if (disposed) {
+      fn();
+      return null;
+    }
+    unlisten = fn;
+    return fn;
+  });
+  return {
+    ready,
+    dispose() {
+      disposed = true;
+      if (unlisten) {
+        unlisten();
+        unlisten = null;
+      }
     },
   };
 }

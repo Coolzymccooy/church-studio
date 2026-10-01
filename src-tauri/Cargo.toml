@@ -36,6 +36,11 @@ parking_lot = "0.12"   # Fast mutex for noise profile transfers
 # RNNoise neural denoiser (pure Rust). Default features pull in CLI-only deps.
 nnnoiseless = { version = "0.5", default-features = false }
 
+# ── OBS Studio control (obs-websocket v5) ────────────────────────────────────
+# obws 0.14 declares MSRV 1.70 (0.15 needs 1.89). Runs on Tauri's tokio runtime.
+obws = { version = "0.14", features = ["events"] }
+futures-util = "0.3"   # StreamExt for the obws event stream
+tokio = { version = "1", features = ["time"] }   # already in the tree via tauri
 # ── NDI (runtime-loaded; nothing linked at build time) ───────────────────────
 libloading = "0.8"
 # This machine's name, to recognise our own NDI sources (already in the lock file).

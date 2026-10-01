@@ -8,6 +8,7 @@ mod mixer_layout;
 mod mixer_engine_tests;
 mod mixer_meters;
 mod mixer_model;
+mod obs;
 mod ndi;
 mod ndi_commands;
 mod ndi_input_commands;
@@ -344,6 +345,14 @@ pub fn run() {
             mixer_commands::mixer_save_scene,
             mixer_commands::mixer_load_scene,
             mixer_commands::mixer_delete_scene,
+            obs::commands::obs_get_config,
+            obs::commands::obs_set_config,
+            obs::commands::obs_status,
+            obs::commands::obs_set_scene,
+            obs::commands::obs_start_stream,
+            obs::commands::obs_stop_stream,
+            obs::commands::obs_start_record,
+            obs::commands::obs_stop_record,
             ndi_commands::ndi_status,
             ndi_commands::ndi_get_outputs,
             ndi_commands::ndi_set_outputs,
@@ -363,6 +372,14 @@ pub fn run() {
             #[cfg(desktop)]
             app.handle()
                 .plugin(tauri_plugin_updater::Builder::new().build())?;
+
+            let obs_manager = obs::ObsManager::new(app.handle().clone());
+            app.manage(obs_manager.clone());
+            let scene_link_obs = obs_manager.clone();
+            app.manage(mixer_commands::SceneLoadedHook::new(move |name| {
+                scene_link_obs.on_studio_scene_loaded(name)
+            }));
+            obs_manager.start();
 
             #[cfg(all(desktop, not(debug_assertions)))]
             {

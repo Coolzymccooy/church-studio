@@ -13,6 +13,18 @@ use tauri::{AppHandle, Manager, State};
 
 const SCENES_DIR: &str = "scenes";
 
+/// Optional listener told when the operator loads a scene through
+/// `mixer_load_scene` (the OBS scene link registers one). Loads made by the
+/// backend itself via `load_scene_state` don't call it, so a linked change
+/// can't bounce back.
+pub struct SceneLoadedHook(Box<dyn Fn(&str) + Send + Sync>);
+
+impl SceneLoadedHook {
+    pub fn new<F: Fn(&str) + Send + Sync + 'static>(f: F) -> Self {
+        Self(Box::new(f))
+    }
+}
+
 /// (input channel count, NDI input count, running). 1 channel and no NDI
 /// inputs when stopped.
 fn engine_info(engine: &EngineState) -> (u32, u32, bool) {
@@ -55,7 +67,7 @@ fn read_scene_file(path: &Path) -> Result<StoredScene, String> {
 
 /// Display names of the saved scenes, sorted case-insensitively. A file that
 /// cannot be parsed is listed by its slug so it can still be deleted.
-fn list_scene_names(app: &AppHandle) -> Result<Vec<String>, String> {
+pub(crate) fn list_scene_names(app: &AppHandle) -> Result<Vec<String>, String> {
     let dir = scenes_dir(app)?;
     let entries = match fs::read_dir(&dir) {
         Ok(entries) => entries,
@@ -179,6 +191,19 @@ pub fn mixer_save_scene(
     })
 }
 
+/// Load a saved scene into the mixer without notifying `SceneLoadedHook`.
+pub(crate) fn load_scene_state(
+    app: &AppHandle,
+    mixer: &MixerControl,
+    engine: &EngineState,
+    name: &str,
+) -> Result<MixerState, String> {
+    let path = scene_path(app, name)?;
+    let scene = read_scene_file(&path)?;
+    mixer.apply_scene(&scene);
+    Ok(build_state(app, mixer, engine))
+}
+
 #[tauri::command]
 pub fn mixer_load_scene(
     app: AppHandle,
@@ -186,10 +211,11 @@ pub fn mixer_load_scene(
     engine: State<'_, EngineState>,
     name: String,
 ) -> Result<MixerState, String> {
-    let path = scene_path(&app, &name)?;
-    let scene = read_scene_file(&path)?;
-    mixer.apply_scene(&scene);
-    Ok(build_state(&app, mixer.inner(), engine.inner()))
+    let state = load_scene_state(&app, mixer.inner(), engine.inner(), &name)?;
+    if let Some(hook) = app.try_state::<SceneLoadedHook>() {
+        (hook.0)(name.as_str());
+    }
+    Ok(state)
 }
 
 #[tauri::command]

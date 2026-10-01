@@ -15,6 +15,7 @@ import HelpCorner from './components/HelpCorner';
 import LandingPage from './components/LandingPage';
 import StudioStatusBar from './components/StudioStatusBar';
 import DeviceSettingsModal from './components/DeviceSettingsModal';
+import ObsPanel from './components/obs/ObsPanel.jsx';
 import MainOutputSelect from './components/MainOutputSelect';
 import NdiOutputPanel from './components/NdiOutputPanel';
 import NdiInputPanel from './components/NdiInputPanel';
@@ -122,6 +123,7 @@ const AudioProcessor = ({ goHome }) => {
   const [outputTarget, setOutputTarget] = useState('OBS Studio');
 
   const [showSettings, setShowSettings] = useState(false);
+  const [showObs, setShowObs] = useState(false);
   const [showAI, setShowAI] = useState(false);
   const [isMonitoring, setIsMonitoring] = useState(false);
   const [isBypassed, setIsBypassed] = useState(false);
@@ -3320,6 +3322,7 @@ const AudioProcessor = ({ goHome }) => {
       <MenuBar
         onGoHome={goHome}
         onShowSettings={() => setShowSettings(true)}
+        onShowObs={() => setShowObs(true)}
         themeSelector={<ThemeSelector />}
         onToggleLive={toggleLive}
         onHardReset={hardReset}
@@ -3352,6 +3355,8 @@ const AudioProcessor = ({ goHome }) => {
         voiceActive={voiceActive}
         visualizerGateStatus={visualizerGateStatus}
       />
+
+      <ObsPanel open={showObs} onClose={() => setShowObs(false)} mixerController={mixerController} />
 
       <DeviceSettingsModal
         open={showSettings}
