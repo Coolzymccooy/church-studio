@@ -204,7 +204,15 @@ async fn start_audio_engine(
 
 #[tauri::command]
 async fn stop_audio_engine(state: State<'_, EngineState>) -> Result<(), String> {
-    if let Some(engine) = state.inner().lock().unwrap().take() {
+    // Take the engine out and release the lock before stopping it: the stop
+    // finalizes any recording and joins the audio thread, which must not
+    // stall every other command waiting on the engine lock.
+    let engine = state
+        .inner()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .take();
+    if let Some(engine) = engine {
         engine.stop();
     }
     Ok(())
