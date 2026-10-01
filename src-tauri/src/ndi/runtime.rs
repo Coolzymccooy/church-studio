@@ -14,10 +14,13 @@ use super::ffi::{
     SendDestroyFn, SendInstance, VersionFn,
 };
 use libloading::Library;
+use receive_api::ReceiveApi;
 use serde::Serialize;
 use std::ffi::CStr;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+
+mod receive_api;
 
 /// Shown when no runtime could be loaded.
 pub const NOT_INSTALLED: &str =
@@ -31,6 +34,8 @@ struct NdiApi {
     send_create: SendCreateFn,
     send_destroy: SendDestroyFn,
     send_audio_v3: SendAudioV3Fn,
+    /// Discovery and receive (NDI in). Optional: `None` still sends.
+    receive: Option<ReceiveApi>,
 }
 
 // ── Search order ─────────────────────────────────────────────────────────────
@@ -174,6 +179,14 @@ impl NdiApi {
             send_create: resolve::<SendCreateFn>(lib, b"NDIlib_send_create\0")?,
             send_destroy: resolve::<SendDestroyFn>(lib, b"NDIlib_send_destroy\0")?,
             send_audio_v3: resolve::<SendAudioV3Fn>(lib, b"NDIlib_send_send_audio_v3\0")?,
+            // Optional: a runtime without the receive group still sends.
+            receive: match ReceiveApi::resolve(lib) {
+                Ok(api) => Some(api),
+                Err(err) => {
+                    log::warn!("NDI receive unavailable: {err}");
+                    None
+                }
+            },
         })
     }
 }
@@ -319,6 +332,8 @@ pub struct NdiStatus {
     pub version: Option<String>,
     pub path: Option<String>,
     pub error: Option<String>,
+    /// The runtime can also discover and receive sources (NDI in).
+    pub receive: bool,
 }
 
 /// Never blocks: reports `loading` until the background load is done.
@@ -335,6 +350,7 @@ pub(crate) fn status_from(slot: Option<&Result<NdiRuntime, String>>) -> NdiStatu
             version: None,
             path: None,
             error: None,
+            receive: false,
         },
         Some(Ok(runtime)) => NdiStatus {
             available: true,
@@ -342,6 +358,7 @@ pub(crate) fn status_from(slot: Option<&Result<NdiRuntime, String>>) -> NdiStatu
             version: runtime.version().map(str::to_string),
             path: Some(runtime.path().display().to_string()),
             error: None,
+            receive: runtime.supports_receive(),
         },
         Some(Err(err)) => NdiStatus {
             available: false,
@@ -349,6 +366,7 @@ pub(crate) fn status_from(slot: Option<&Result<NdiRuntime, String>>) -> NdiStatu
             version: None,
             path: None,
             error: Some(err.clone()),
+            receive: false,
         },
     }
 }

@@ -19,7 +19,7 @@
 use super::audio_frame::{FltpFramer, NDI_CHANNELS, NDI_FRAME_SAMPLES};
 use super::ffi::{AudioFrameV3, SendInstance};
 use super::runtime::NdiRuntime;
-use ringbuf::traits::{Consumer, Observer};
+use ringbuf::traits::Consumer;
 use std::ffi::CString;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc};

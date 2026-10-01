@@ -40,15 +40,7 @@ pub fn outputs_or_default(text: Option<&str>) -> (NdiOutputs, Option<String>) {
 /// Load from `path`, logging a warning and returning the defaults when the
 /// file is missing, unreadable or corrupt.
 pub fn load_from_path(path: &Path) -> NdiOutputs {
-    let text = match fs::read_to_string(path) {
-        Ok(text) => Some(text),
-        Err(e) => {
-            if e.kind() != std::io::ErrorKind::NotFound {
-                log::warn!("cannot read {}: {e}", path.display());
-            }
-            None
-        }
-    };
+    let text = read_optional(path);
     let (outputs, warning) = outputs_or_default(text.as_deref());
     if let Some(warning) = warning {
         log::warn!("{warning} ({})", path.display());
@@ -59,10 +51,29 @@ pub fn load_from_path(path: &Path) -> NdiOutputs {
 /// Write `outputs` to `path` atomically: temp file, then rename (which
 /// replaces an existing file on every platform std supports).
 pub fn save_to_path(path: &Path, outputs: &NdiOutputs) -> Result<(), String> {
+    write_atomic(path, &outputs_to_json(outputs)?)
+}
+
+/// The file's text, or `None` when it is missing (silently) or unreadable
+/// (with a logged warning).
+pub fn read_optional(path: &Path) -> Option<String> {
+    match fs::read_to_string(path) {
+        Ok(text) => Some(text),
+        Err(e) => {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                log::warn!("cannot read {}: {e}", path.display());
+            }
+            None
+        }
+    }
+}
+
+/// Write `text` to `path` atomically: temp file, then rename (which
+/// replaces an existing file on every platform std supports).
+pub fn write_atomic(path: &Path, text: &str) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
     }
-    let text = outputs_to_json(outputs)?;
     let tmp = temp_path(path);
     fs::write(&tmp, text).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
     fs::rename(&tmp, path).map_err(|e| {

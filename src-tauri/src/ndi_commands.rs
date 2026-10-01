@@ -94,11 +94,13 @@ pub fn engine_ndi_status(engine: Option<&RunningEngine>) -> serde_json::Value {
             "available": available,
             "sending": engine.ndi_sending,
             "dropped_samples": engine.ndi_dropped_samples(),
+            "inputs": crate::ndi_input_commands::engine_inputs_status(Some(engine)),
         }),
         None => serde_json::json!({
             "available": available,
             "sending": [],
             "dropped_samples": 0,
+            "inputs": crate::ndi_input_commands::engine_inputs_status(None),
         }),
     }
 }

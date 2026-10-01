@@ -24,10 +24,13 @@ use crate::dsp::mixer::{BUS_MAIN, BUS_MONITOR, BUS_STREAM};
 use crate::dsp::noise::compute_noise_profile;
 use crate::dsp::{AudioDeviceInfo, DspChain, DspParams, MetersPayload};
 use crate::history::HistoryRing;
-use crate::mixer_control::{MixerLink, MAX_STRIPS};
+use crate::mixer_control::MixerLink;
+use crate::mixer_layout::StripLayout;
 use crate::mixer_meters::MixerMeterSlots;
+use crate::ndi::receive::receiver::NdiReceivers;
+use crate::ndi::receive::{NdiInputHandle, NdiInputs};
 use crate::ndi::sender::NdiBusSender;
-use crate::ndi::NdiOutputs;
+use crate::ndi::{NdiEngineConfig, NdiOutputs};
 
 mod input_proc;
 use input_proc::{InputProcessor, OutputRoute};
@@ -64,6 +67,11 @@ pub struct AudioEngine {
     /// callback (the ring producers' owner) is gone.
     ndi_senders: Vec<NdiBusSender>,
     ndi_applied: NdiOutputs,
+    /// NDI receivers; they stop after the input callback too, all signalled
+    /// before any is joined.
+    _ndi_receivers: NdiReceivers,
+    ndi_inputs: Vec<NdiInputHandle>,
+    ndi_inputs_applied: NdiInputs,
     pub sample_rate: u32,
     pub buffer_frames: u32,
     pub latency_ms: f32,
@@ -100,6 +108,11 @@ pub struct RunningEngine {
     pub ndi_sending: Vec<String>,
     /// The NDI settings this engine was started with.
     pub ndi_applied: NdiOutputs,
+    /// NDI inputs that are receiving, each feeding a strip after the
+    /// hardware ones.
+    pub ndi_inputs: Vec<NdiInputHandle>,
+    /// The NDI input settings this engine was started with.
+    pub ndi_inputs_applied: NdiInputs,
 }
 
 enum EngineCommand {
@@ -119,6 +132,8 @@ struct EngineInfo {
     input_channels: u32,
     ndi_sending: Vec<String>,
     ndi_applied: NdiOutputs,
+    ndi_inputs: Vec<NdiInputHandle>,
+    ndi_inputs_applied: NdiInputs,
 }
 
 /// State shared between the audio callback and the control (Tauri) thread.
@@ -225,6 +240,8 @@ impl AudioEngine {
                 .map(|sender| sender.name().to_string())
                 .collect(),
             ndi_applied: self.ndi_applied.clone(),
+            ndi_inputs: self.ndi_inputs.clone(),
+            ndi_inputs_applied: self.ndi_inputs_applied.clone(),
         }
     }
 
@@ -234,7 +251,7 @@ impl AudioEngine {
         shared: Arc<EngineShared>,
         mixer: MixerLink,
         devices: DeviceSelection,
-        ndi_outputs: NdiOutputs,
+        ndi: NdiEngineConfig,
     ) -> Result<Self, String> {
         let host = cpal::default_host();
 
@@ -335,7 +352,7 @@ impl AudioEngine {
         // NDI: one ring + sender thread per enabled bus (never called from
         // the callback). A missing runtime only skips NDI.
         let (ndi_producers, ndi_senders) = crate::ndi::start_senders(
-            &ndi_outputs,
+            &ndi.outputs,
             sr,
             &shared.ndi_dropped_samples,
             |capacity| ringbuf::HeapRb::<f32>::new(capacity).split(),
@@ -348,6 +365,52 @@ impl AudioEngine {
                 bus,
             })
             .collect();
+
+        // NDI inputs: one receiver thread + ring per source, each read by
+        // the callback as a strip after the hardware channels.
+        // Never receive one of this engine's own outputs: it would feed the
+        // mix back into itself. The UI flags these, but a saved selection or
+        // a renamed output can still match, so the engine checks too.
+        let own_outputs: Vec<String> = ndi
+            .outputs
+            .plan()
+            .into_iter()
+            .map(|(_, name)| name)
+            .collect();
+        let local_machines = crate::ndi::receive::local_machine_names();
+        let receivable = NdiInputs {
+            sources: ndi
+                .inputs
+                .sources
+                .iter()
+                .filter(|source| {
+                    !crate::ndi::receive::is_own_source(source, &local_machines, &own_outputs)
+                })
+                .cloned()
+                .collect(),
+        };
+        let hardware_strips = StripLayout::new(in_channels, 0).hardware;
+        let ndi_in = crate::ndi::receive::start_receivers(
+            &receivable,
+            sr,
+            hardware_strips,
+            StripLayout::ndi_room(in_channels),
+        );
+        let layout = StripLayout::new(in_channels, ndi_in.feeds.len());
+        // Record what feeds each strip before the stream plays: a strip whose
+        // feed changed since the last start is reset to the new-strip
+        // defaults (fader off) before any audio passes through it. NDI strips
+        // are named after their sources unless the operator renamed them.
+        let ndi_strips: Vec<(usize, String, String)> = ndi_in
+            .handles
+            .iter()
+            .map(|input| (input.strip, input.source.clone(), input.label.clone()))
+            .collect();
+        let feeds = crate::mixer_control::engine_strip_feeds(layout.hardware, &ndi_strips);
+        let reset = mixer.assign_strip_feeds(&feeds);
+        if !reset.is_empty() {
+            log::info!("mixer strips {reset:?} have a new source; reset to defaults");
+        }
 
         let (meters_tx, meters_rx) = mpsc::sync_channel::<MetersPayload>(32);
         let mut dsp = DspChain::new(sr as f64);
@@ -363,7 +426,7 @@ impl AudioEngine {
             buffer_size: BufferSize::Fixed(buf_frames),
         };
 
-        let meter_slots = Arc::new(MixerMeterSlots::new(in_channels.min(MAX_STRIPS)));
+        let meter_slots = Arc::new(MixerMeterSlots::new(layout.total()));
         let mut processor = InputProcessor::new(
             sr,
             in_channels,
@@ -374,6 +437,7 @@ impl AudioEngine {
             meter_slots.clone(),
             routes,
             ndi_routes,
+            ndi_in.feeds,
             meters_tx,
         );
 
@@ -463,7 +527,10 @@ impl AudioEngine {
             _in_stream: in_stream,
             _out_streams: out_streams,
             ndi_senders,
-            ndi_applied: ndi_outputs,
+            ndi_applied: ndi.outputs,
+            _ndi_receivers: NdiReceivers(ndi_in.receivers),
+            ndi_inputs: ndi_in.handles,
+            ndi_inputs_applied: ndi.inputs,
             sample_rate: sr,
             buffer_frames: buf_frames,
             latency_ms,
@@ -592,7 +659,7 @@ impl RunningEngine {
         params: Arc<DspParams>,
         mixer: MixerLink,
         devices: DeviceSelection,
-        ndi_outputs: NdiOutputs,
+        ndi: NdiEngineConfig,
     ) -> Result<Self, String> {
         let (ready_tx, ready_rx) = mpsc::sync_channel::<Result<EngineInfo, String>>(1);
         let (stop_tx, stop_rx) = mpsc::channel::<EngineCommand>();
@@ -605,7 +672,7 @@ impl RunningEngine {
             thread_shared,
             mixer,
             devices,
-            ndi_outputs,
+            ndi,
         ) {
             Ok(engine) => {
                 let info = engine.info();
@@ -644,6 +711,8 @@ impl RunningEngine {
             input_channels: info.input_channels,
             ndi_sending: info.ndi_sending,
             ndi_applied: info.ndi_applied,
+            ndi_inputs: info.ndi_inputs,
+            ndi_inputs_applied: info.ndi_inputs_applied,
         })
     }
 
@@ -747,6 +816,11 @@ impl RunningEngine {
 
     pub fn dropped_output_samples(&self) -> u64 {
         self.shared.dropped_output_samples.load(Ordering::Relaxed)
+    }
+
+    /// Mixer strips: input channels, then NDI inputs.
+    pub fn strip_layout(&self) -> StripLayout {
+        StripLayout::new(self.input_channels as usize, self.ndi_inputs.len())
     }
 
     pub fn ndi_dropped_samples(&self) -> u64 {

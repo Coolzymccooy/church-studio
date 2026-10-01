@@ -12,6 +12,7 @@ use crate::dsp::mixer::params::{
     clamp_or, BusParams, StripParams, BUS_MAIN, BUS_MONITOR, BUS_STREAM, NUM_BUSES,
 };
 use crate::dsp::mixer::{MixerParams, MixerScene};
+use crate::mixer_layout::StripLayout;
 pub use crate::mixer_model::{BusState, MixerState, StoredScene, StripState};
 use atomic_float::AtomicF32;
 use parking_lot::Mutex;
@@ -251,17 +252,139 @@ fn is_reserved_file_name(slug: &str) -> bool {
         && (b'1'..=b'9').contains(&bytes[3])
 }
 
+/// Identity of a strip fed by an input-device channel.
+pub const HARDWARE_STRIP: &str = "hw";
+
+/// Identity of a strip fed by the NDI® source `source`.
+pub fn ndi_strip_identity(source: &str) -> String {
+    format!("ndi:{source}")
+}
+
+/// What feeds one strip at engine start, and the automatic name to give it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StripFeed {
+    pub index: usize,
+    /// `HARDWARE_STRIP` or `ndi_strip_identity(source)`.
+    pub identity: String,
+    /// Automatic name (an NDI source's label); `None` keeps the name.
+    pub label: Option<String>,
+}
+
+/// The feeds of a started engine: `hardware` input-channel strips, then each
+/// NDI input as `(strip, source, label)`.
+pub fn engine_strip_feeds(hardware: usize, ndi: &[(usize, String, String)]) -> Vec<StripFeed> {
+    let mut feeds: Vec<StripFeed> = (0..hardware)
+        .map(|index| StripFeed {
+            index,
+            identity: HARDWARE_STRIP.to_string(),
+            label: None,
+        })
+        .collect();
+    feeds.extend(ndi.iter().map(|(index, source, label)| StripFeed {
+        index: *index,
+        identity: ndi_strip_identity(source),
+        label: Some(label.clone()),
+    }));
+    feeds
+}
+
+/// `name` on strip `index` may be replaced by an automatic label: it is empty,
+/// the default name, or the automatic label it was given last time (the
+/// operator has not renamed it).
+pub fn name_is_automatic(index: usize, name: &str, previous_auto: Option<&str>) -> bool {
+    name.trim().is_empty() || name == default_strip_name(index) || previous_auto == Some(name)
+}
+
+/// What fed a strip at the last engine start, and the automatic name it got.
+/// Control side only; not stored in scene files, which stay unchanged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StripOrigin {
+    identity: String,
+    auto_label: Option<String>,
+}
+
+impl StripOrigin {
+    fn hardware() -> Self {
+        StripOrigin {
+            identity: HARDWARE_STRIP.to_string(),
+            auto_label: None,
+        }
+    }
+}
+
+/// Record what feeds each strip at engine start (`engine_strip_feeds`).
+///
+/// Strip params are kept by index, so a strip whose feed changed since
+/// the last start (hardware ↔ NDI, or another NDI source) goes back to
+/// the new-strip defaults (fader off above strip 0) and its default name,
+/// and drops the voice chain rather than moving it to another signal.
+/// An automatic label only replaces a default name or the previous
+/// automatic label, never the operator's rename; an invalid label is
+/// ignored. Strips not in `feeds` keep their record. Returns the indices
+/// that were reset.
+fn assign_feeds(link: &MixerLink, feeds: &[StripFeed]) -> Vec<usize> {
+    let mut names = link.names.lock();
+    let mut origins = link.origins.lock();
+    let mut reset = Vec::new();
+    for feed in feeds {
+        let index = feed.index;
+        let (Some(strip), Some(name), Some(origin)) = (
+            link.params.strips.get(index),
+            names.get_mut(index),
+            origins.get_mut(index),
+        ) else {
+            continue;
+        };
+        if origin.identity != feed.identity {
+            reset_strip(index, strip);
+            *name = default_strip_name(index);
+            if link.voice_strip.load(Relaxed) == index {
+                link.voice_strip.store(NO_VOICE_STRIP, Relaxed);
+            }
+            reset.push(index);
+        }
+        let label = feed
+            .label
+            .as_deref()
+            .and_then(|label| clean_strip_name(index, label).ok());
+        if let Some(label) = label.as_ref() {
+            if name_is_automatic(index, name.as_str(), origin.auto_label.as_deref()) {
+                *name = label.clone();
+            }
+        }
+        *origin = StripOrigin {
+            identity: feed.identity.clone(),
+            auto_label: label,
+        };
+    }
+    reset
+}
+
 /// What the audio engine needs from the mixer control state.
 #[derive(Clone)]
 pub struct MixerLink {
     pub params: Arc<MixerParams>,
     pub voice_strip: Arc<AtomicUsize>,
+    /// Shared with `MixerControl`, for `assign_strip_feeds`.
+    names: Arc<Mutex<Vec<String>>>,
+    origins: Arc<Mutex<Vec<StripOrigin>>>,
+}
+
+impl MixerLink {
+    /// Record what feeds each strip. The engine calls this before its input
+    /// stream plays, so a strip whose feed changed is reset (fader off)
+    /// before any audio passes through it. See `assign_feeds`.
+    pub fn assign_strip_feeds(&self, feeds: &[StripFeed]) -> Vec<usize> {
+        assign_feeds(self, feeds)
+    }
 }
 
 pub struct MixerControl {
     pub params: Arc<MixerParams>,
     pub voice_strip: Arc<AtomicUsize>,
-    names: Mutex<Vec<String>>,
+    names: Arc<Mutex<Vec<String>>>,
+    /// What fed each strip at the last engine start. Locked after `names`.
+    origins: Arc<Mutex<Vec<StripOrigin>>>,
 }
 
 impl Default for MixerControl {
@@ -284,7 +407,10 @@ impl MixerControl {
         MixerControl {
             params: Arc::new(params),
             voice_strip: Arc::new(AtomicUsize::new(0)),
-            names: Mutex::new((0..MAX_STRIPS).map(default_strip_name).collect()),
+            names: Arc::new(Mutex::new((0..MAX_STRIPS).map(default_strip_name).collect())),
+            origins: Arc::new(Mutex::new(
+                (0..MAX_STRIPS).map(|_| StripOrigin::hardware()).collect(),
+            )),
         }
     }
 
@@ -292,6 +418,8 @@ impl MixerControl {
         MixerLink {
             params: self.params.clone(),
             voice_strip: self.voice_strip.clone(),
+            names: self.names.clone(),
+            origins: self.origins.clone(),
         }
     }
 
@@ -403,7 +531,20 @@ impl MixerControl {
     /// engine's channel count (1 when stopped); one strip is listed per
     /// input channel, capped at `MAX_STRIPS`.
     pub fn snapshot(&self, input_channels: u32, running: bool, scenes: Vec<String>) -> MixerState {
-        let count = (input_channels as usize).clamp(1, MAX_STRIPS);
+        self.snapshot_with_ndi(input_channels, 0, running, scenes)
+    }
+
+    /// `snapshot`, plus one strip per running NDI input after the hardware
+    /// strips (`StripLayout`).
+    pub fn snapshot_with_ndi(
+        &self,
+        input_channels: u32,
+        ndi_inputs: u32,
+        running: bool,
+        scenes: Vec<String>,
+    ) -> MixerState {
+        let layout = StripLayout::new(input_channels as usize, ndi_inputs as usize);
+        let count = layout.total();
         let names: Vec<String> = self.names.lock().clone();
         let strips = (0..count)
             .map(|i| {
@@ -423,6 +564,7 @@ impl MixerControl {
             .collect();
         MixerState {
             input_channels: input_channels.max(1),
+            ndi_strips: layout.ndi as u32,
             running,
             strips,
             buses,
