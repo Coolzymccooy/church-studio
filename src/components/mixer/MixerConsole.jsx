@@ -5,6 +5,7 @@ import { validateSceneName } from '../../lib/mixerEngine.js';
 import { useMixer } from './useMixer.js';
 import ChannelStrip from './ChannelStrip.jsx';
 import BusStrip from './BusStrip.jsx';
+import RecordPanel from '../recorder/RecordPanel.jsx';
 
 const BUS_LABELS = { main: 'Main', stream: 'Stream', monitor: 'Monitor' };
 
@@ -141,6 +142,8 @@ export default function MixerConsole({ controller, demoBanner }) {
       {sceneNameError && (
         <div className="px-3 py-1 text-[9px] text-[#FF5252]">{sceneNameError}</div>
       )}
+
+      <RecordPanel strips={state.strips} engineRunning={Boolean(state.running)} />
 
       {/* Strips */}
       <div className="flex-1 flex overflow-hidden">

@@ -20,6 +20,7 @@ import ObsPanel from './components/obs/ObsPanel.jsx';
 import MainOutputSelect from './components/MainOutputSelect';
 import NdiOutputPanel from './components/NdiOutputPanel';
 import NdiInputPanel from './components/NdiInputPanel';
+import DesktopRecordButton from './components/recorder/DesktopRecordButton.jsx';
 import InputRackAiTab from './components/InputRackAiTab';
 import MixerConsole from './components/mixer/MixerConsole';
 import { createMixerController, createMockMixerController } from './lib/mixerEngine';
@@ -3987,8 +3988,14 @@ const AudioProcessor = ({ goHome }) => {
                 </span>
               )}
             </div>
-            {/* Recording check — right side of center bar */}
-            {isLive && mainTab === 'live' && (
+            {/* Desktop: the native multitrack recorder (strips + Stream mix). */}
+            {isTauri && isLive && mainTab === 'live' && (
+              <div className="ml-auto flex items-center">
+                <DesktopRecordButton />
+              </div>
+            )}
+            {/* Browser: Web Audio record check of the processed stream. */}
+            {!isTauri && isLive && mainTab === 'live' && (
               <div className="ml-auto flex items-center">
                 <div className={`flex items-center gap-1 p-0.5 pl-1.5 rounded-full border ${recordingState === 'recording' ? 'border-red-500 bg-red-900/60' : 'border-slate-600 bg-slate-800/60'}`}>
                   {recordingState === 'idle' && (

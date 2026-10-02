@@ -1,5 +1,6 @@
 mod audio;
 mod dsp;
+mod engine_stopping;
 mod history;
 mod link;
 mod mixer_commands;
@@ -11,6 +12,8 @@ mod mixer_meters;
 mod mixer_model;
 mod obs;
 mod ndi;
+mod recorder;
+mod recorder_commands;
 mod ndi_commands;
 mod ndi_input_commands;
 mod routing;
@@ -149,6 +152,7 @@ async fn check_for_app_update(app: AppHandle) {
 async fn start_audio_engine(
     app: AppHandle,
     state: State<'_, EngineState>,
+    stopping: State<'_, engine_stopping::EngineStopping>,
     params: State<'_, SharedParams>,
     mixer: State<'_, MixerControl>,
     ndi: State<'_, NdiSettings>,
@@ -161,6 +165,10 @@ async fn start_audio_engine(
     let mut guard = state.inner().lock().unwrap();
     if guard.is_some() {
         return Err("Engine already running".to_string());
+    }
+    // Checked under the engine lock, where a stop sets the flag.
+    if stopping.is_stopping() {
+        return Err("The engine is still stopping; try again in a moment".to_string());
     }
 
     let engine = RunningEngine::spawn(
@@ -201,8 +209,26 @@ async fn start_audio_engine(
 }
 
 #[tauri::command]
-async fn stop_audio_engine(state: State<'_, EngineState>) -> Result<(), String> {
-    if let Some(engine) = state.inner().lock().unwrap().take() {
+async fn stop_audio_engine(
+    state: State<'_, EngineState>,
+    stopping: State<'_, engine_stopping::EngineStopping>,
+) -> Result<(), String> {
+    // Take the engine out and release the lock before stopping it: the stop
+    // finalizes any recording and joins the audio thread, which must not
+    // stall every other command waiting on the engine lock. The stopping
+    // flag is set under the lock (only when an engine was taken) and
+    // cleared by the guard on every path, so start_audio_engine refuses
+    // to open a second engine until this one is gone.
+    let (engine, _stopping_guard) = {
+        let mut guard = state
+            .inner()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let engine = guard.take();
+        let stopping_guard = engine.as_ref().map(|_| stopping.begin());
+        (engine, stopping_guard)
+    };
+    if let Some(engine) = engine {
         engine.stop();
     }
     Ok(())
@@ -323,11 +349,13 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_os::init())
         .manage(Mutex::new(None::<RunningEngine>) as EngineState)
+        .manage(engine_stopping::EngineStopping::default())
         .manage(SharedParams(Arc::new(DspParams::defaults())))
         .manage(MixerControl::new())
         .manage(mixer_commands::CurrentScene::default())
         .manage(NdiSettings::new())
         .manage(NdiInputSettings::new())
+        .manage(recorder_commands::RecorderControl::default())
         .invoke_handler(tauri::generate_handler![
             start_audio_engine,
             stop_audio_engine,
@@ -368,6 +396,13 @@ pub fn run() {
             ndi_input_commands::ndi_list_sources,
             ndi_input_commands::ndi_get_inputs,
             ndi_input_commands::ndi_set_inputs,
+            recorder_commands::recorder_status,
+            recorder_commands::recorder_get_config,
+            recorder_commands::recorder_set_config,
+            recorder_commands::recorder_start,
+            recorder_commands::recorder_stop,
+            recorder_commands::recorder_add_marker,
+            recorder_commands::recorder_open_folder,
         ])
         .setup(|app| {
             // Load the NDI runtime off the main thread; ndi_status reports
@@ -377,6 +412,9 @@ pub fn run() {
             app.state::<NdiSettings>().replace(saved_ndi);
             let saved_inputs = ndi_input_commands::load_saved_inputs(app.handle());
             app.state::<NdiInputSettings>().replace(saved_inputs);
+            let saved_recorder = recorder_commands::load_saved_config(app.handle());
+            app.state::<recorder_commands::RecorderControl>()
+                .replace_config(saved_recorder);
 
             #[cfg(desktop)]
             app.handle()
