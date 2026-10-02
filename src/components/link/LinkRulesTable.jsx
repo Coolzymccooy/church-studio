@@ -5,6 +5,7 @@ import {
   CONTENT_KIND_OPTIONS,
   RULE_EVENT_OPTIONS,
   itemTypeOptions,
+  sceneSelectValue,
   moveRule,
   newRule,
   updateRule,
@@ -75,7 +76,7 @@ function RuleRow({ rule, index, count, scenes, onChange, onMove, onRemove }) {
       <td className="py-1.5 pr-1">
         <select
           className={selectClass}
-          value={rule.then.loadScene}
+          value={sceneSelectValue(scenes, rule.then.loadScene)}
           onChange={(e) => onChange({ then: { loadScene: e.target.value } })}
         >
           <option value="">Choose scene…</option>
