@@ -16,7 +16,7 @@ architectures = subprocess.check_output(["lipo", "-archs", str(binary)], text=Tr
 assert "arm64" in architectures and "x86_64" in architectures, architectures
 subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], check=True)
 entitlements = plistlib.loads(subprocess.check_output(
-    ["codesign", "-d", "--entitlements", "-", str(app)], stderr=subprocess.DEVNULL
+    ["codesign", "-d", "--entitlements", "-", "--xml", str(app)], stderr=subprocess.DEVNULL
 ))
 assert entitlements.get("com.apple.security.device.audio-input") is True, "Hardened runtime blocks audio input"
 assert entitlements.get("com.apple.security.cs.disable-library-validation") is True, "External NDI runtime cannot load"
