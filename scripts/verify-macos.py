@@ -15,6 +15,11 @@ binary = app / "Contents/MacOS" / info["CFBundleExecutable"]
 architectures = subprocess.check_output(["lipo", "-archs", str(binary)], text=True).strip()
 assert "arm64" in architectures and "x86_64" in architectures, architectures
 subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], check=True)
+entitlements = plistlib.loads(subprocess.check_output(
+    ["codesign", "-d", "--entitlements", "-", str(app)], stderr=subprocess.DEVNULL
+))
+assert entitlements.get("com.apple.security.device.audio-input") is True, "Hardened runtime blocks audio input"
+assert entitlements.get("com.apple.security.cs.disable-library-validation") is True, "External NDI runtime cannot load"
 process = subprocess.Popen([str(binary)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 try:
     time.sleep(10)
@@ -26,6 +31,7 @@ finally:
 report = {
     "version": info["CFBundleShortVersionString"], "architectures": architectures,
     "microphone_description": True, "local_network_description": True,
+    "audio_input_entitlement": True, "ndi_runtime_loading_entitlement": True,
     "native_launch_10_seconds": True,
     "hardware_audio_and_network_devices": "requires operator testing",
     "notarization": "not verified; this is a test package",

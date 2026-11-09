@@ -32,6 +32,9 @@ The universal DMG supports Apple Silicon and Intel Macs on macOS 11 or later.
 Open it and drag **TIWATON AI Studio** into **Applications**. Mac test builds
 include microphone and local-network privacy descriptions. Real audio devices,
 microphone permission approval and NDI/OBS network devices require operator testing.
+The signed hardened-runtime app also declares audio-input access and the targeted
+library-validation exception needed to load a separately installed NDI runtime.
+The microphone entitlement does not grant permission on the user's behalf.
 
 On a Mac with Node.js and Rust, build with:
 
