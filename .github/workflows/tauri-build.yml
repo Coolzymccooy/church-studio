@@ -164,3 +164,23 @@ jobs:
           args: ${{ matrix.args }}
           projectPath: .
           tauriScript: npx tauri
+
+      - name: Run native Mac tests
+        if: matrix.platform == 'macos-latest'
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --all-targets
+
+      - name: Verify packaged universal Mac app
+        if: matrix.platform == 'macos-latest'
+        run: python3 scripts/verify-macos.py 'src-tauri/target/universal-apple-darwin/release/bundle/macos/TIWATON AI Studio.app'
+
+      - name: Upload Mac test downloads
+        if: matrix.platform == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: church-studio-macos-universal
+          path: |
+            src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+            src-tauri/target/universal-apple-darwin/release/bundle/macos/*.tar.gz*
+            macos-verification.json
+          if-no-files-found: error
+          retention-days: 30
