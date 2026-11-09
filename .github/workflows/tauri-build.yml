@@ -161,7 +161,7 @@ jobs:
 
             ### Changes
             See [commit history](https://github.com/Coolzymccooy/church-studio/commits)
-          releaseDraft: false
+          releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
           projectPath: .
@@ -186,3 +186,17 @@ jobs:
             macos-verification.json
           if-no-files-found: error
           retention-days: 30
+
+  publish-release:
+    name: Publish verified release
+    needs: [rust-tests, build]
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release && inputs.tag != '')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+    steps:
+      - name: Publish only after every build and verification succeeds
+        run: gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest

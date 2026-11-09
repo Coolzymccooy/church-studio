@@ -34,7 +34,7 @@
     "createUpdaterArtifacts": true,
     "targets": "all",
     "publisher": "TIWATON",
-    "copyright": "\u00c2\u00a9 2025 TIWATON",
+    "copyright": "\u00a9 2025 TIWATON",
     "category": "Music",
     "shortDescription": "AI-powered church audio workstation",
     "longDescription": "Professional church audio workstation with real-time AI processing, LUFS metering, spectral dereverberation, and one-click sermon mastering.",
