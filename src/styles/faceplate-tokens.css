@@ -1,0 +1,240 @@
+/* Faceplate design tokens: the single token source for the hardware-faceplate redesign.
+   See docs/PRODUCT_DESIGN_SYSTEM.md for what each colour means and where it may be used.
+
+   Nothing in the app reads these yet. Screens migrate to them one plate at a time.
+   The finish is chosen by data-finish on <html>: "graphite" (default), "bone", or "auto".
+   The two typefaces are bundled (src/styles/faceplate-fonts.js) so the desk works offline. */
+
+/* ---------- shared: the same in every finish ---------- */
+:root {
+  /* glass: meter windows and readouts are always dark, like lit displays */
+  --fp-glass: #0D1110;
+  --fp-glass-text: #D6E4D8;
+  --fp-glass-dim: #7F9585;
+  --fp-glass-edge: #3A4A40;
+  --fp-glass-grid: #1E2A24;
+  --fp-meter-bg: #0F1211;
+
+  /* lamps: green = running or safe, amber = caution or armed, red = recording, clip or fault */
+  --fp-led-g: #3CC777;
+  --fp-led-g-dim: #1C3526;
+  --fp-led-a: #F2B43E;
+  --fp-led-a-dim: #3A2E14;
+  --fp-led-r: #F0533F;
+  --fp-led-r-dim: #3A1A16;
+
+  /* orange = processing engaged (voice chain, mastering) */
+  --fp-orange: #EE8A2C;
+
+  /* ink: dark legend printed on lit keys, scribble strips and light caps */
+  --fp-ink: #1A1408;
+  --fp-on-green: #08170E;
+  --fp-on-red: #1A1408;
+  --fp-ptr-light: #F7F4EE;
+
+  /* knob caps by job: trim, filter, dynamics, eq, pan, sends */
+  --fp-cap-trim: #C9473C;
+  --fp-cap-hpf: #5F7FA3;
+  --fp-cap-dyn: #4F9264;
+  --fp-cap-eq: #E3D8C0;
+  --fp-cap-pan: #8C939C;
+  --fp-cap-send: #B7B0A0;
+
+  /* channel scribble-strip colours, picked per strip by the operator */
+  --fp-ch-amber: #E9A23B;
+  --fp-ch-clay: #DB6E4B;
+  --fp-ch-teal: #5FAAA1;
+  --fp-ch-olive: #97B85F;
+  --fp-ch-sky: #7FA6D9;
+  --fp-ch-rose: #D08FA8;
+  --fp-ch-stone: #BDB6A6;
+
+  /* type */
+  --fp-font-legend: 'Barlow Semi Condensed', system-ui, sans-serif;
+  --fp-font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+  --fp-text-xs: 11px;
+  --fp-text-sm: 12px;
+  --fp-text-md: 13px;
+  --fp-text-lg: 14px;
+  --fp-text-xl: 16px;
+  --fp-text-2xl: 20px;
+  --fp-text-3xl: 24px;
+  --fp-weight-regular: 400;
+  --fp-weight-medium: 500;
+  --fp-weight-semibold: 600;
+
+  /* shape */
+  --fp-radius-meter: 1px;
+  --fp-radius-led: 2px;
+  --fp-radius-key: 3px;
+  --fp-radius-strip: 4px;
+  --fp-radius-plate: 6px;
+
+  /* depth: glass is recessed; the record key's lit state is the product's one glow */
+  --fp-inset-glass: inset 0 1px 2px rgba(0, 0, 0, 0.6);
+  --fp-glow-rec: 0 0 16px 2px rgba(240, 83, 63, 0.55);
+
+  /* motion */
+  --fp-motion-meter: 60ms linear;
+  --fp-motion-fast: 120ms ease-out;
+  --fp-motion-base: 160ms ease-out;
+  --fp-arm-timeout: 3s;
+}
+
+/* ---------- finish: graphite (default) ---------- */
+:root {
+  --fp-chassis: #141517;
+  --fp-plate: #1D1F23;
+  --fp-raised: #24272C;
+  --fp-seam: #2E3238;
+  --fp-legend: #CDD1D6;
+  --fp-muted: #9097A0;
+  --fp-key: #30343A;
+  --fp-key-edge: #70767F;
+  --fp-key-text: #CDD1D6;
+  --fp-slot: #0B0C0E;
+  --fp-slot-edge: #5A6068;
+  --fp-cap-rim: #0B0C0E;
+  --fp-led-off: #2B3036;
+  --fp-ring-trk: #33373D;
+  --fp-focus: #EFE6CF;
+  --fp-sel: #EFE6CF;
+  --fp-sel-ink: #1A1408;
+  --fp-bus-cap: #E8E2D2;
+  --fp-bus-line: #1A1408;
+  --fp-eq-arc: #E3D8C0;
+  --fp-arm: #F2B43E;
+  --fp-arm-r: #FF7A66;
+}
+
+/* ---------- finish: bone ---------- */
+:root[data-finish="bone"] {
+  --fp-chassis: #D8D3C8;
+  --fp-plate: #ECE8DF;
+  --fp-raised: #F4F1EA;
+  --fp-seam: #C9C3B7;
+  --fp-legend: #22252A;
+  --fp-muted: #4F545B;
+  --fp-key: #F7F4EE;
+  --fp-key-edge: #857F73;
+  --fp-key-text: #22252A;
+  --fp-slot: #2A2C30;
+  --fp-slot-edge: #2A2C30;
+  --fp-cap-rim: #3A3C40;
+  --fp-led-off: #C2BCB0;
+  --fp-ring-trk: #CFC9BD;
+  --fp-focus: #22252A;
+  --fp-sel: #2A2C30;
+  --fp-sel-ink: #EFE6CF;
+  --fp-bus-cap: #2A2C30;
+  --fp-bus-line: #EFE6CF;
+  --fp-eq-arc: #8A7F66;
+  --fp-arm: #8A5A00;
+  --fp-arm-r: #B0281A;
+}
+
+/* ---------- finish: auto follows the system; this block must match bone exactly ---------- */
+@media (prefers-color-scheme: light) {
+  :root[data-finish="auto"] {
+    --fp-chassis: #D8D3C8;
+    --fp-plate: #ECE8DF;
+    --fp-raised: #F4F1EA;
+    --fp-seam: #C9C3B7;
+    --fp-legend: #22252A;
+    --fp-muted: #4F545B;
+    --fp-key: #F7F4EE;
+    --fp-key-edge: #857F73;
+    --fp-key-text: #22252A;
+    --fp-slot: #2A2C30;
+    --fp-slot-edge: #2A2C30;
+    --fp-cap-rim: #3A3C40;
+    --fp-led-off: #C2BCB0;
+    --fp-ring-trk: #CFC9BD;
+    --fp-focus: #22252A;
+    --fp-sel: #2A2C30;
+    --fp-sel-ink: #EFE6CF;
+    --fp-bus-cap: #2A2C30;
+    --fp-bus-line: #EFE6CF;
+    --fp-eq-arc: #8A7F66;
+    --fp-arm: #8A5A00;
+    --fp-arm-r: #B0281A;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --fp-motion-meter: 0ms linear;
+    --fp-motion-fast: 0ms linear;
+    --fp-motion-base: 0ms linear;
+  }
+}
+
+/* ---------- Tailwind utilities: bg-fp-plate, text-fp-legend, border-fp-seam, font-fp-mono, text-fp-xs, rounded-fp-key ---------- */
+@theme inline {
+  --color-fp-glass: var(--fp-glass);
+  --color-fp-glass-text: var(--fp-glass-text);
+  --color-fp-glass-dim: var(--fp-glass-dim);
+  --color-fp-glass-edge: var(--fp-glass-edge);
+  --color-fp-glass-grid: var(--fp-glass-grid);
+  --color-fp-meter-bg: var(--fp-meter-bg);
+  --color-fp-led-g: var(--fp-led-g);
+  --color-fp-led-g-dim: var(--fp-led-g-dim);
+  --color-fp-led-a: var(--fp-led-a);
+  --color-fp-led-a-dim: var(--fp-led-a-dim);
+  --color-fp-led-r: var(--fp-led-r);
+  --color-fp-led-r-dim: var(--fp-led-r-dim);
+  --color-fp-orange: var(--fp-orange);
+  --color-fp-ink: var(--fp-ink);
+  --color-fp-on-green: var(--fp-on-green);
+  --color-fp-on-red: var(--fp-on-red);
+  --color-fp-ptr-light: var(--fp-ptr-light);
+  --color-fp-cap-trim: var(--fp-cap-trim);
+  --color-fp-cap-hpf: var(--fp-cap-hpf);
+  --color-fp-cap-dyn: var(--fp-cap-dyn);
+  --color-fp-cap-eq: var(--fp-cap-eq);
+  --color-fp-cap-pan: var(--fp-cap-pan);
+  --color-fp-cap-send: var(--fp-cap-send);
+  --color-fp-ch-amber: var(--fp-ch-amber);
+  --color-fp-ch-clay: var(--fp-ch-clay);
+  --color-fp-ch-teal: var(--fp-ch-teal);
+  --color-fp-ch-olive: var(--fp-ch-olive);
+  --color-fp-ch-sky: var(--fp-ch-sky);
+  --color-fp-ch-rose: var(--fp-ch-rose);
+  --color-fp-ch-stone: var(--fp-ch-stone);
+  --color-fp-chassis: var(--fp-chassis);
+  --color-fp-plate: var(--fp-plate);
+  --color-fp-raised: var(--fp-raised);
+  --color-fp-seam: var(--fp-seam);
+  --color-fp-legend: var(--fp-legend);
+  --color-fp-muted: var(--fp-muted);
+  --color-fp-key: var(--fp-key);
+  --color-fp-key-edge: var(--fp-key-edge);
+  --color-fp-key-text: var(--fp-key-text);
+  --color-fp-slot: var(--fp-slot);
+  --color-fp-slot-edge: var(--fp-slot-edge);
+  --color-fp-cap-rim: var(--fp-cap-rim);
+  --color-fp-led-off: var(--fp-led-off);
+  --color-fp-ring-trk: var(--fp-ring-trk);
+  --color-fp-focus: var(--fp-focus);
+  --color-fp-sel: var(--fp-sel);
+  --color-fp-sel-ink: var(--fp-sel-ink);
+  --color-fp-bus-cap: var(--fp-bus-cap);
+  --color-fp-bus-line: var(--fp-bus-line);
+  --color-fp-eq-arc: var(--fp-eq-arc);
+  --color-fp-arm: var(--fp-arm);
+  --color-fp-arm-r: var(--fp-arm-r);
+  --font-fp-legend: var(--fp-font-legend);
+  --font-fp-mono: var(--fp-font-mono);
+  --text-fp-xs: var(--fp-text-xs);
+  --text-fp-sm: var(--fp-text-sm);
+  --text-fp-md: var(--fp-text-md);
+  --text-fp-lg: var(--fp-text-lg);
+  --text-fp-xl: var(--fp-text-xl);
+  --text-fp-2xl: var(--fp-text-2xl);
+  --text-fp-3xl: var(--fp-text-3xl);
+  --radius-fp-meter: var(--fp-radius-meter);
+  --radius-fp-led: var(--fp-radius-led);
+  --radius-fp-key: var(--fp-radius-key);
+  --radius-fp-strip: var(--fp-radius-strip);
+  --radius-fp-plate: var(--fp-radius-plate);
+}
