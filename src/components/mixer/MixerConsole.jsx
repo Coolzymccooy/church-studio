@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-import { bankStrips, pickBank, stripBanks } from '../../lib/mixerBanks.js';
+import { bankStrips, pickBank, stripBanks, stripCounts } from '../../lib/mixerBanks.js';
 import { nextStripSize, readStripSize, stripRowPx, stripScale, stripSizeLabel } from '../../lib/stripScale.js';
 import InfoTip from '../faceplate/InfoTip.jsx';
 import Key from '../faceplate/Key.jsx';
@@ -96,7 +96,8 @@ export default function MixerConsole({ controller, demoBanner, onOpenObs }) {
     return <div className="flex-1 grid place-items-center fp-sub">loading mixer</div>;
   }
 
-  const banks = stripBanks(state.strips.length, state.ndi_strips ?? 0);
+  const counts = stripCounts(state);
+  const banks = stripBanks(counts.total, counts.ndi, counts.computer);
   const bank = pickBank(banks, bankId);
   const shown = bankStrips(state.strips, bank);
 
