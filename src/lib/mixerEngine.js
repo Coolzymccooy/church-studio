@@ -77,6 +77,12 @@ const STRIP_BOOL_KEYS = new Set([
   'voice_chain',
 ]);
 
+/** The contract range [min, max] for a numeric strip or bus key, or null when it has none. */
+export function paramRange(key) {
+  const range = PARAM_RANGES[key];
+  return range ? [...range] : null;
+}
+
 export function clampStripValue(key, value) {
   const range = PARAM_RANGES[key];
   if (!range) return value;
