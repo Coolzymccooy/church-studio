@@ -164,6 +164,7 @@ fn apply_preset(preset: StripPreset, p: &StripParams) {
     if let StripPreset::Music { pan } = preset {
         p.hpf_enabled.store(false, Relaxed);
         p.gate_enabled.store(false, Relaxed);
+        p.monitor_post_fader.store(true, Relaxed);
         let pan = pan.clamp(-1.0, 1.0);
         p.pan.store(pan, Relaxed);
         if pan.abs() >= 1.0 {
@@ -292,7 +293,8 @@ pub enum StripPreset {
     Standard,
     /// Music: the contract defaults with HPF and gate off (and the voice
     /// chain off, as on every reset), panned to `pan`, trimmed to
-    /// `MUSIC_TRIM_DB` when panned hard.
+    /// `MUSIC_TRIM_DB` when panned hard, and with the Monitor send after
+    /// the fader, so the fader sets what the operator hears too.
     Music { pan: f32 },
 }
 

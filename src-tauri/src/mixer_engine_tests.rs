@@ -596,8 +596,10 @@ fn computer_audio_adds_a_music_pair_between_hardware_and_ndi() {
     for strip in [left, right] {
         // Music never goes through the speech chain, the gate or the HPF.
         assert!(!strip.voice_chain && !strip.gate_enabled && !strip.hpf_enabled);
-        // Fader off until the operator raises it, like every new strip.
+        // Fader off until the operator raises it, like every new strip,
+        // and the Monitor follows the fader.
         assert_eq!(strip.fader_db, OTHER_STRIPS_FADER_DB);
+        assert!(strip.monitor_post_fader);
     }
     assert_eq!((left.pan, right.pan), (-1.0, 1.0));
     // The hard pan's +3 dB is taken back off, so full-scale music stays
@@ -606,6 +608,7 @@ fn computer_audio_adds_a_music_pair_between_hardware_and_ndi() {
     assert_eq!(m.voice_strip.load(Relaxed), NO_VOICE_STRIP);
     // The NDI strip keeps the standard defaults.
     assert!(state.strips[4].hpf_enabled);
+    assert!(!state.strips[4].monitor_post_fader);
     assert_eq!(state.strips[4].pan, 0.0);
     assert_eq!(state.strips[4].trim_db, 0.0);
 }
@@ -659,4 +662,27 @@ fn a_hard_panned_music_pair_passes_full_scale_at_unity() {
     let ratio_r = rms(&out_r[256..512]) / rms(&right[256..512]);
     assert!((ratio_l - 1.0).abs() < 0.02, "left {ratio_l}");
     assert!((ratio_r - 1.0).abs() < 0.02, "right {ratio_r}");
+}
+
+#[test]
+fn a_music_strip_with_its_fader_down_is_silent_in_the_monitor() {
+    let m = MixerControl::new();
+    m.link().assign_strip_feeds(&engine_strip_feeds(1, Some(1), &[]));
+    // Faders stay at their new-strip default: off.
+    let mut mixer = Mixer::new(48_000.0, 512, 3, m.link().params.clone());
+    let silent = vec![0.0f32; 512];
+    let music = sine(512, 1_000.0, 48_000.0, 0.5);
+    for _ in 0..40 {
+        mixer.process(&[&silent, &music, &music], 512);
+    }
+    let (left, right) = mixer.output(BUS_MONITOR);
+    assert!(rms(&left[..512]) < 1e-4 && rms(&right[..512]) < 1e-4);
+    // Raising the faders brings the music into the Monitor.
+    m.set_strip_param(1, "fader_db", 0.0).unwrap();
+    m.set_strip_param(2, "fader_db", 0.0).unwrap();
+    for _ in 0..40 {
+        mixer.process(&[&silent, &music, &music], 512);
+    }
+    let (left, _) = mixer.output(BUS_MONITOR);
+    assert!(rms(&left[..512]) > 0.1);
 }
