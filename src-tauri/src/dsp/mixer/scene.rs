@@ -1,6 +1,6 @@
 //! Mixer scenes: a by-value snapshot of every strip and bus control that can
 //! be saved as JSON and recalled onto the live `MixerParams`.
-use super::params::{BusParams, MixerParams, StripParams, NUM_BUSES};
+use super::params::{BusParams, MixerParams, StripParams, DUCK_DEPTH_DEFAULT_DB, NUM_BUSES};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::Ordering::Relaxed;
 
@@ -24,6 +24,17 @@ pub struct StripScene {
     pub fader_db: f32,
     pub send_db: Vec<f32>,
     pub monitor_post_fader: bool,
+    /// Missing in scene files saved before automix existed: off.
+    #[serde(default)]
+    pub automix: bool,
+    #[serde(default)]
+    pub duck: bool,
+    #[serde(default = "default_duck_depth")]
+    pub duck_depth_db: f32,
+}
+
+fn default_duck_depth() -> f32 {
+    DUCK_DEPTH_DEFAULT_DB
 }
 
 impl StripScene {
@@ -47,6 +58,9 @@ impl StripScene {
             fader_db: p.fader_db.load(Relaxed),
             send_db: p.send_db.iter().map(|s| s.load(Relaxed)).collect(),
             monitor_post_fader: p.monitor_post_fader.load(Relaxed),
+            automix: p.automix.load(Relaxed),
+            duck: p.duck.load(Relaxed),
+            duck_depth_db: p.duck_depth_db.load(Relaxed),
         }
     }
 
@@ -71,6 +85,11 @@ impl StripScene {
             dst.store(src, Relaxed);
         }
         p.monitor_post_fader.store(self.monitor_post_fader, Relaxed);
+        // `duck` and `automix` are exclusive; a hand-edited file with both
+        // keeps `duck` (the engine treats it that way too).
+        p.automix.store(self.automix && !self.duck, Relaxed);
+        p.duck.store(self.duck, Relaxed);
+        p.duck_depth_db.store(self.duck_depth_db, Relaxed);
     }
 }
 

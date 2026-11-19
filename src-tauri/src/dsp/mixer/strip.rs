@@ -2,9 +2,16 @@
 //!
 //! Signal flow:
 //!   input → trim × polarity (ramped) → HPF → gate (switched, lookahead)
-//!         → 3-band EQ → compressor → [pre-fader] → fader (ramped) → [post-fader]
+//!         → 3-band EQ → compressor → [pre-fader] → fader (ramped)
+//!         × automix × duck (per-sample, from `automix.rs`) → [post-fader]
 //!         → pan (constant power, 0 dB at centre, ramped) × send (ramped)
 //!         × mute (ramped) → buses
+//!
+//! The strip runs in two passes so the automixer can see every strip at the
+//! same sample: `process_pre` (up to the pre-fader point, plus a copy of the
+//! post-HPF signal for the detector) and `process_out` (fader × automix ×
+//! duck, pan, sends). Automix and duck reach the post-fader paths only; the
+//! pre-fader Monitor send and PFL stay untouched.
 //!
 //! Main and Stream sends are post-fader. The Monitor send is pre-fader unless
 //! `monitor_post_fader` is set. Mute removes the strip from every bus mix.
@@ -47,6 +54,12 @@ pub struct StripMeters {
     pub gate_open: bool,
     /// Compressor gain reduction, dB (≤ 0).
     pub gain_reduction_db: f32,
+    /// Automix attenuation, dB (≤ 0; deepest of the block).
+    pub automix_gr_db: f32,
+    /// Auto-duck attenuation, dB (≤ 0; deepest of the block).
+    pub duck_gr_db: f32,
+    /// The automix detector hears speech on this strip.
+    pub speech: bool,
 }
 
 impl StripMeters {
@@ -56,6 +69,9 @@ impl StripMeters {
             post_fader_peak_db: -120.0,
             gate_open: false,
             gain_reduction_db: 0.0,
+            automix_gr_db: 0.0,
+            duck_gr_db: 0.0,
+            speech: false,
         }
     }
 }
@@ -65,6 +81,13 @@ pub struct Strip {
     scratch: Vec<f32>,
     /// Compressed copy of `scratch`, crossfaded in by `comp_mix`.
     comp_buf: Vec<f32>,
+    /// Post-trim/HPF copy of the block for the automix detector.
+    det_buf: Vec<f32>,
+    /// Frames, gate state and compressor GR from `process_pre`.
+    pending_frames: usize,
+    pending_gate_open: bool,
+    pending_gr_db: f32,
+    monitor_post: bool,
 
     in_gain: LinearSmoother,
     fader: LinearSmoother,
@@ -95,6 +118,11 @@ impl Strip {
             sr,
             scratch: vec![0.0; max_block.max(1)],
             comp_buf: vec![0.0; max_block.max(1)],
+            det_buf: vec![0.0; max_block.max(1)],
+            pending_frames: 0,
+            pending_gate_open: true,
+            pending_gr_db: 0.0,
+            monitor_post: false,
             in_gain: LinearSmoother::new(1.0, ramp),
             fader: LinearSmoother::new(1.0, ramp),
             pan_l: LinearSmoother::new(1.0, ramp),
@@ -223,8 +251,7 @@ impl Strip {
         self.comp.set_ratio(clamp_or(p.comp_ratio.load(Relaxed), 1.0, 20.0, 3.0));
     }
 
-    /// Process `frames` samples of `input` (zero-extended if shorter) and ADD
-    /// the result into the three bus buffers. `frames` must be ≤ max_block.
+    /// Both passes at unity automix gain (a strip on its own).
     pub fn process(
         &mut self,
         input: &[f32],
@@ -233,6 +260,25 @@ impl Strip {
         any_solo: bool,
         snap: bool,
         buses: &mut [StereoBuffer; NUM_BUSES],
+    ) {
+        self.process_pre(input, frames, p, any_solo, snap);
+        self.process_out(&[], buses);
+    }
+
+    /// Detection signal of the last `process_pre` (post trim and HPF).
+    pub fn detection(&self) -> &[f32] {
+        &self.det_buf[..self.pending_frames]
+    }
+
+    /// Pass 1: process `frames` samples of `input` (zero-extended if shorter)
+    /// up to the pre-fader point. `frames` must be ≤ max_block.
+    pub fn process_pre(
+        &mut self,
+        input: &[f32],
+        frames: usize,
+        p: &StripParams,
+        any_solo: bool,
+        snap: bool,
     ) {
         let n = frames.min(self.scratch.len());
         self.update_targets(p, any_solo, snap);
@@ -250,6 +296,7 @@ impl Strip {
                 y = self.hpf.tick(y);
             }
             self.scratch[i] = y;
+            self.det_buf[i] = y;
         }
 
         // Gate: zero latency and no work while off (see module docs).
@@ -282,13 +329,25 @@ impl Strip {
             }
         }
 
+        self.pending_frames = n;
+        self.pending_gate_open = !gate_on || gate_gain > 0.5;
+        self.pending_gr_db = gr_db;
+        self.monitor_post = monitor_post;
+    }
+
+    /// Pass 2: fader × `auto_gain[i]` (automix × duck; missing samples are
+    /// unity), pan, sends and mute, ADDED into the bus buffers.
+    pub fn process_out(&mut self, auto_gain: &[f32], buses: &mut [StereoBuffer; NUM_BUSES]) {
+        let n = self.pending_frames;
+        let monitor_post = self.monitor_post;
         // Stage 3: fader, pan, sends, mute → buses.
         let mut pre_peak = 0.0f32;
         let mut post_peak = 0.0f32;
         let [main, stream, monitor] = buses;
         for i in 0..n {
             let pre = self.scratch[i];
-            let post = pre * self.fader.next();
+            let auto = auto_gain.get(i).copied().unwrap_or(1.0);
+            let post = pre * self.fader.next() * auto;
             let pl = self.pan_l.next();
             let pr = self.pan_r.next();
             let m = self.mute.next();
@@ -312,9 +371,19 @@ impl Strip {
         self.meters = StripMeters {
             pre_fader_peak_db: lin_to_db(pre_peak),
             post_fader_peak_db: lin_to_db(post_peak),
-            gate_open: !gate_on || gate_gain > 0.5,
-            gain_reduction_db: gr_db,
+            gate_open: self.pending_gate_open,
+            gain_reduction_db: self.pending_gr_db,
+            automix_gr_db: 0.0,
+            duck_gr_db: 0.0,
+            speech: false,
         };
+    }
+
+    /// Attach the automix readouts to this block's meters.
+    pub fn set_auto_meters(&mut self, automix_gr_db: f32, duck_gr_db: f32, speech: bool) {
+        self.meters.automix_gr_db = automix_gr_db;
+        self.meters.duck_gr_db = duck_gr_db;
+        self.meters.speech = speech;
     }
 }
 

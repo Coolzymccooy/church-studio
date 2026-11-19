@@ -9,7 +9,8 @@
 //!
 //! Everything here is pure (no Tauri, no files) so it can be unit-tested.
 use crate::dsp::mixer::params::{
-    clamp_or, BusParams, StripParams, BUS_MAIN, BUS_MONITOR, BUS_STREAM, NUM_BUSES,
+    clamp_or, BusParams, StripParams, BUS_MAIN, BUS_MONITOR, BUS_STREAM, DUCK_DEPTH_DEFAULT_DB,
+    DUCK_DEPTH_MAX_DB, NUM_BUSES,
 };
 use crate::dsp::mixer::{MixerParams, MixerScene};
 use crate::mixer_layout::StripLayout;
@@ -47,11 +48,12 @@ const STRIP_F32_KEYS: &[F32Key] = &[
     ("send_main_db", -90.0, 10.0, 0.0),
     ("send_stream_db", -90.0, 10.0, 0.0),
     ("send_monitor_db", -90.0, 10.0, 0.0),
+    ("duck_depth_db", 0.0, DUCK_DEPTH_MAX_DB, DUCK_DEPTH_DEFAULT_DB),
 ];
 
 /// Bool strip keys stored in `StripParams` with their defaults
 /// (`voice_chain` is handled separately).
-const STRIP_BOOL_KEYS: [(&str, bool); 7] = [
+const STRIP_BOOL_KEYS: [(&str, bool); 9] = [
     ("polarity", false),
     ("hpf_enabled", true),
     ("gate_enabled", false),
@@ -59,6 +61,8 @@ const STRIP_BOOL_KEYS: [(&str, bool); 7] = [
     ("mute", false),
     ("solo", false),
     ("monitor_post_fader", false),
+    ("automix", false),
+    ("duck", false),
 ];
 
 const BUS_F32_KEYS: &[F32Key] = &[
@@ -90,6 +94,7 @@ fn strip_f32<'a>(p: &'a StripParams, key: &str) -> Option<&'a AtomicF32> {
         "send_main_db" => &p.send_db[BUS_MAIN],
         "send_stream_db" => &p.send_db[BUS_STREAM],
         "send_monitor_db" => &p.send_db[BUS_MONITOR],
+        "duck_depth_db" => &p.duck_depth_db,
         _ => return None,
     };
     Some(field)
@@ -104,6 +109,8 @@ fn strip_bool<'a>(p: &'a StripParams, key: &str) -> Option<&'a AtomicBool> {
         "mute" => &p.mute,
         "solo" => &p.solo,
         "monitor_post_fader" => &p.monitor_post_fader,
+        "automix" => &p.automix,
+        "duck" => &p.duck,
         _ => return None,
     };
     Some(field)
@@ -252,6 +259,22 @@ fn is_reserved_file_name(slug: &str) -> bool {
         && (b'1'..=b'9').contains(&bytes[3])
 }
 
+/// A live attenuation readout for `mixer_state`: 0 while stopped or NaN.
+fn live_gr(value: &AtomicF32, running: bool) -> f32 {
+    let gr = value.load(Relaxed);
+    if running && gr.is_finite() {
+        gr.max(0.0)
+    } else {
+        0.0
+    }
+}
+
+/// Strips fed by computer audio (PR 38: `computer:left` / `computer:right`)
+/// are music: they start with `duck` on when their feed is first assigned.
+pub fn is_music_identity(identity: &str) -> bool {
+    identity.starts_with("computer:")
+}
+
 /// Identity of a strip fed by an input-device channel.
 pub const HARDWARE_STRIP: &str = "hw";
 
@@ -337,6 +360,9 @@ fn assign_feeds(link: &MixerLink, feeds: &[StripFeed]) -> Vec<usize> {
         };
         if origin.identity != feed.identity {
             reset_strip(index, strip);
+            if is_music_identity(&feed.identity) {
+                strip.duck.store(true, Relaxed);
+            }
             *name = default_strip_name(index);
             if link.voice_strip.load(Relaxed) == index {
                 link.voice_strip.store(NO_VOICE_STRIP, Relaxed);
@@ -447,6 +473,14 @@ impl MixerControl {
             return self.set_voice_chain(index as usize, value);
         }
         let field = strip_bool(strip, key).ok_or_else(|| format!("unknown strip key '{key}'"))?;
+        // `automix` and `duck` are exclusive: turning one on clears the other.
+        if value {
+            match key {
+                "automix" => strip.duck.store(false, Relaxed),
+                "duck" => strip.automix.store(false, Relaxed),
+                _ => {}
+            }
+        }
         field.store(value, Relaxed);
         Ok(())
     }
@@ -496,7 +530,7 @@ impl MixerControl {
         }
     }
 
-    fn strip_state(&self, index: usize, name: String) -> StripState {
+    fn strip_state(&self, index: usize, name: String, running: bool) -> StripState {
         let p = &self.params.strips[index];
         let f = |key: &str| strip_f32(p, key).map(|a| a.load(Relaxed)).unwrap_or(0.0);
         let b = |key: &str| strip_bool(p, key).map(|a| a.load(Relaxed)).unwrap_or(false);
@@ -524,6 +558,11 @@ impl MixerControl {
             send_monitor_db: f("send_monitor_db"),
             monitor_post_fader: b("monitor_post_fader"),
             voice_chain: self.voice_strip.load(Relaxed) == index,
+            automix: b("automix"),
+            duck: b("duck"),
+            duck_depth_db: f("duck_depth_db"),
+            automix_gr_db: live_gr(&p.live.automix_gr_db, running),
+            duck_gr_db: live_gr(&p.live.duck_gr_db, running),
         }
     }
 
@@ -549,7 +588,7 @@ impl MixerControl {
         let strips = (0..count)
             .map(|i| {
                 let name = names.get(i).cloned().unwrap_or_else(|| default_strip_name(i));
-                self.strip_state(i, name)
+                self.strip_state(i, name, running)
             })
             .collect();
         let buses = BUS_IDS

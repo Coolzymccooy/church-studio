@@ -67,6 +67,11 @@ Rules:
 | `send_main_db`, `send_stream_db`, `send_monitor_db` | f32 | −90…+10, 0 |
 | `monitor_post_fader` | bool | false |
 | `voice_chain` | bool | true on strip 0 only; at most one strip (none after turning it off on the holder) |
+| `automix` | bool | false. Joins the automix (gain-sharing) group. Turning it on clears `duck` |
+| `duck` | bool | false. Music strip: dips while an automix strip speaks. Turning it on clears `automix`. Computer-audio strips (`computer:left` / `computer:right`) start with it on |
+| `duck_depth_db` | f32 | 0…40, 12. How far a `duck` strip dips |
+
+Automix and ducking (design: `2026-11-19-automix-ducking-design.md`) apply post-fader: they reach Main, Stream and a post-fader Monitor send, never the pre-fader Monitor send or PFL. They add no latency. Muted strips and strips with the fader off leave the automix group.
 
 ### Bus keys
 `fader_db` f32 (−90…+10, 0), `mute` bool, `limiter_ceiling_db` f32 (−12…0, −1).
@@ -82,19 +87,21 @@ Rules:
     "gate_enabled": false, "gate_threshold_db": -45, "eq_low_db": 0, "eq_mid_db": 0, "eq_high_db": 0,
     "comp_enabled": false, "comp_threshold_db": -18, "comp_ratio": 3, "pan": 0, "mute": false, "solo": false,
     "fader_db": 0, "send_main_db": 0, "send_stream_db": 0, "send_monitor_db": 0,
-    "monitor_post_fader": false, "voice_chain": true }],
+    "monitor_post_fader": false, "voice_chain": true,
+    "automix": false, "duck": false, "duck_depth_db": 12, "automix_gr_db": 0, "duck_gr_db": 0 }],
   "buses": [{ "id": "main", "fader_db": 0, "mute": false, "limiter_ceiling_db": -1 },
             { "id": "stream", "fader_db": 0, "mute": false, "limiter_ceiling_db": -1 },
             { "id": "monitor", "fader_db": 0, "mute": false, "limiter_ceiling_db": -1 }],
   "scenes": ["Sermon", "Worship"]
 }
 ```
-`inputChannels` is the running engine's input channel count, or 1 when stopped; `strips` lists one entry per input channel (capped at 32). `ndiStrips` is the number of received NDI® sources (0–4, see decision 5 of `2026-09-28-integrations-design.md`); they are extra strips after the hardware ones, named after the source, and the total never exceeds 32. They start with the fader off, like every strip after the first. Strip settings are kept by index, so at each engine start a strip whose feed changed (hardware ↔ NDI, or another NDI source) is reset to the new-strip defaults and its default name, and loses the voice chain (none is set). A source name only replaces a default name or the previous automatic name, never the operator's rename. The top-level fields are camelCase (`inputChannels`, `running`). Strip and bus fields use the snake_case key names, so the UI sends back exactly the key it reads.
+`inputChannels` is the running engine's input channel count, or 1 when stopped; `strips` lists one entry per input channel (capped at 32). `ndiStrips` is the number of received NDI® sources (0–4, see decision 5 of `2026-09-28-integrations-design.md`); they are extra strips after the hardware ones, named after the source, and the total never exceeds 32. They start with the fader off, like every strip after the first. Strip settings are kept by index, so at each engine start a strip whose feed changed (hardware ↔ NDI, or another NDI source) is reset to the new-strip defaults and its default name, and loses the voice chain (none is set). A source name only replaces a default name or the previous automatic name, never the operator's rename. `automix_gr_db` and `duck_gr_db` are live readouts (positive dB of attenuation, 0 while the engine is stopped), not settings. The top-level fields are camelCase (`inputChannels`, `running`). Strip and bus fields use the snake_case key names, so the UI sends back exactly the key it reads.
 
 ## Event `mixer-meters` (~20 Hz while running)
 
 ```json
-{ "strips": [{ "pre_db": -30.1, "post_db": -33.0, "gate_open": true, "gr_db": 2.5 }],
+{ "strips": [{ "pre_db": -30.1, "post_db": -33.0, "gate_open": true, "gr_db": 2.5,
+               "automix_gr_db": 9.0, "duck_gr_db": 0, "speech": false }],
   "buses": [{ "id": "main", "peak_l_db": -12, "peak_r_db": -12, "rms_l_db": -20, "rms_r_db": -20 }] }
 ```
-dB values are clamped to ≥ −96.
+dB values are clamped to ≥ −96. `gr_db` (compressor), `automix_gr_db` and `duck_gr_db` are positive amounts of attenuation, held at their maximum since the last event. `speech` is true if the strip's automix detector heard speech since the last event (automix strips only).

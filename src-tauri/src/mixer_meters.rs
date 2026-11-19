@@ -25,6 +25,12 @@ pub struct StripMeterPayload {
     pub gate_open: bool,
     /// Compressor gain reduction as a positive amount in dB.
     pub gr_db: f32,
+    /// Automix attenuation as a positive amount in dB.
+    pub automix_gr_db: f32,
+    /// Auto-duck attenuation as a positive amount in dB.
+    pub duck_gr_db: f32,
+    /// The automix detector heard speech since the last event.
+    pub speech: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -48,6 +54,9 @@ struct StripSlot {
     post_db: AtomicF32,
     gate_open: AtomicBool,
     gr_db: AtomicF32,
+    automix_gr_db: AtomicF32,
+    duck_gr_db: AtomicF32,
+    speech: AtomicBool,
 }
 
 struct BusSlot {
@@ -97,6 +106,16 @@ fn take(slot: &AtomicF32, reset: f32) -> f32 {
     value
 }
 
+/// Read a held gain reduction (positive dB; NaN → 0) and reset it.
+fn take_gr(slot: &AtomicF32) -> f32 {
+    let gr = take(slot, 0.0);
+    if gr.is_nan() {
+        0.0
+    } else {
+        gr.max(0.0)
+    }
+}
+
 impl MixerMeterSlots {
     /// Slots for `num_strips` strips (sized once, at engine start).
     pub fn new(num_strips: usize) -> Self {
@@ -107,6 +126,9 @@ impl MixerMeterSlots {
                     post_db: AtomicF32::new(RESET_DB),
                     gate_open: AtomicBool::new(false),
                     gr_db: AtomicF32::new(0.0),
+                    automix_gr_db: AtomicF32::new(0.0),
+                    duck_gr_db: AtomicF32::new(0.0),
+                    speech: AtomicBool::new(false),
                 })
                 .collect(),
             buses: [BusSlot::new(), BusSlot::new(), BusSlot::new()],
@@ -120,6 +142,11 @@ impl MixerMeterSlots {
             hold_max(&slot.post_db, m.post_fader_peak_db);
             slot.gate_open.store(m.gate_open, Relaxed);
             hold_max(&slot.gr_db, -m.gain_reduction_db);
+            hold_max(&slot.automix_gr_db, -m.automix_gr_db);
+            hold_max(&slot.duck_gr_db, -m.duck_gr_db);
+            if m.speech {
+                slot.speech.store(true, Relaxed);
+            }
         }
         for (slot, m) in self.buses.iter().zip(buses.iter()) {
             hold_max(&slot.peak_l_db, m.peak_l_db);
@@ -138,14 +165,10 @@ impl MixerMeterSlots {
                 pre_db: clamp_db(take(&slot.pre_db, RESET_DB)),
                 post_db: clamp_db(take(&slot.post_db, RESET_DB)),
                 gate_open: slot.gate_open.load(Relaxed),
-                gr_db: {
-                    let gr = take(&slot.gr_db, 0.0);
-                    if gr.is_nan() {
-                        0.0
-                    } else {
-                        gr.max(0.0)
-                    }
-                },
+                gr_db: take_gr(&slot.gr_db),
+                automix_gr_db: take_gr(&slot.automix_gr_db),
+                duck_gr_db: take_gr(&slot.duck_gr_db),
+                speech: slot.speech.swap(false, Relaxed),
             })
             .collect();
         let buses = BUS_IDS

@@ -325,7 +325,7 @@ fn mixer_state_json_shape_matches_contract() {
             "gate_threshold_db", "eq_low_db", "eq_mid_db", "eq_high_db", "comp_enabled",
             "comp_threshold_db", "comp_ratio", "pan", "mute", "solo", "fader_db",
             "send_main_db", "send_stream_db", "send_monitor_db", "monitor_post_fader",
-            "voice_chain",
+            "voice_chain", "automix", "duck", "duck_depth_db", "automix_gr_db", "duck_gr_db",
         ])
     );
     // Contract defaults.
@@ -366,12 +366,18 @@ fn mixer_meters_json_shape_and_clamping() {
             post_fader_peak_db: -33.0,
             gate_open: true,
             gain_reduction_db: -2.5,
+            automix_gr_db: -9.0,
+            duck_gr_db: 0.0,
+            speech: true,
         },
         StripMeters {
             pre_fader_peak_db: -120.0,
             post_fader_peak_db: -120.0,
             gate_open: false,
             gain_reduction_db: 0.0,
+            automix_gr_db: 0.0,
+            duck_gr_db: -12.0,
+            speech: false,
         },
     ];
     let bus = BusMeters { peak_l_db: -12.0, peak_r_db: -14.0, rms_l_db: -20.0, rms_r_db: -130.0 };
@@ -384,7 +390,14 @@ fn mixer_meters_json_shape_and_clamping() {
     assert_eq!(keys(&v), set(&["strips", "buses"]));
     let s = v["strips"].as_array().unwrap();
     assert_eq!(s.len(), 2);
-    assert_eq!(keys(&s[0]), set(&["pre_db", "post_db", "gate_open", "gr_db"]));
+    assert_eq!(
+        keys(&s[0]),
+        set(&["pre_db", "post_db", "gate_open", "gr_db", "automix_gr_db", "duck_gr_db", "speech"])
+    );
+    assert_eq!(s[0]["automix_gr_db"], 9.0);
+    assert_eq!(s[0]["speech"], true);
+    assert_eq!(s[1]["duck_gr_db"], 12.0);
+    assert_eq!(s[1]["speech"], false);
     assert_eq!(s[0]["pre_db"], -30.0);
     assert_eq!(s[0]["post_db"], -33.0);
     assert_eq!(s[0]["gate_open"], true);
@@ -406,6 +419,8 @@ fn mixer_meters_json_shape_and_clamping() {
     let again = slots.take_payload();
     assert_eq!(again.strips[0].pre_db, METER_FLOOR_DB);
     assert_eq!(again.strips[0].gr_db, 0.0);
+    assert_eq!(again.strips[0].automix_gr_db, 0.0);
+    assert!(!again.strips[0].speech);
 }
 
 // ── Mono backwards compatibility ────────────────────────────────────────────
