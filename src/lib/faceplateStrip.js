@@ -60,7 +60,9 @@ export function stripGateTone(gateEnabled, gateOpen) {
 }
 
 export function grText(grDb) {
-  return Number.isFinite(grDb) && grDb >= 0.1 ? `gr -${grDb.toFixed(1)}` : 'gr 0.0';
+  if (!Number.isFinite(grDb) || grDb < 0.1) return 'gr 0.0';
+  // Ten dB and more drop the decimal, so the reading always fits the strip ("gr -12").
+  return grDb < 9.95 ? `gr -${grDb.toFixed(1)}` : `gr -${Math.min(99, Math.round(grDb))}`;
 }
 
 // ---------- buses ----------

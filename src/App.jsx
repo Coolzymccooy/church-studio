@@ -1330,7 +1330,13 @@ const AudioProcessor = ({ goHome }) => {
   };
 
   const handleModeSwitch = (newMode) => {
-    if (isLive) cleanupAudio();
+    // Choosing the mode you are already in changes nothing; it must not stop the engine.
+    if (newMode === mode) return;
+    // Leaving live for file stops the engine fully, so the header and the engine agree.
+    if (isLive) {
+      cleanupAudio();
+      setIsLive(false);
+    }
     setMode(newMode);
 
     if (newMode === 'file') {
