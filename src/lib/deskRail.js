@@ -54,3 +54,8 @@ export function popPosition(keyRect, popSize, viewport, side) {
     left: Math.round(Math.min(viewport.w - popSize.w - EDGE, Math.max(EDGE, left))),
   };
 }
+
+/** The tallest a popover may be from `top` without leaving the viewport. */
+export function popMaxHeight(top, viewportHeight) {
+  return Math.max(120, Math.floor(viewportHeight - top - EDGE));
+}

@@ -1,7 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
-import { popPosition } from '../../lib/deskRail.js';
+import { popMaxHeight, popPosition } from '../../lib/deskRail.js';
 import Key from '../faceplate/Key.jsx';
+
+/** Vertical padding of .fp-pop-bd (10px top and bottom). */
+const POP_BODY_PAD = 20;
 
 const LED = { g: 'fp-led-g', a: 'fp-led-a', r: 'fp-led-r', o: 'fp-led-o', off: '' };
 
@@ -31,15 +34,36 @@ function RailKey({ item, open, onPress, keyRef }) {
 /** The open popover, placed beside its key with fixed positioning measured before paint. */
 function RailPop({ item, side, getAnchor, onClose }) {
   const ref = useRef(null);
+  // Placement is measured from the key and the popover itself. Content can grow after opening
+  // (a refreshed NDI source list), so a ResizeObserver places it again, and the height is capped
+  // from the actual top so the bottom never leaves the window; the body scrolls inside instead.
   useLayoutEffect(() => {
     const el = ref.current;
-    const anchor = getAnchor();
-    if (!el || !anchor) return;
-    const pos = popPosition(anchor.getBoundingClientRect(), { w: el.offsetWidth, h: el.offsetHeight },
-      { w: window.innerWidth, h: window.innerHeight }, side);
-    el.style.top = `${pos.top}px`;
-    el.style.left = `${pos.left}px`;
-  });
+    if (!el) return undefined;
+    const place = () => {
+      const anchor = getAnchor();
+      if (!anchor) return;
+      const viewport = { w: window.innerWidth, h: window.innerHeight };
+      // The natural height (header plus the body's full content), not the capped one, so a tall
+      // popover moves up to use the room it needs before its body has to scroll.
+      const head = el.firstElementChild;
+      const inner = el.querySelector('.fp-pop-in');
+      const natural = (head?.offsetHeight ?? 0) + (inner?.offsetHeight ?? 0) + POP_BODY_PAD + 2;
+      const pos = popPosition(anchor.getBoundingClientRect(), { w: el.offsetWidth, h: natural }, viewport, side);
+      const style = { top: `${pos.top}px`, left: `${pos.left}px`, maxHeight: `${popMaxHeight(pos.top, viewport.h)}px` };
+      for (const [k, v] of Object.entries(style)) if (el.style[k] !== v) el.style[k] = v;
+    };
+    place();
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
+    // Watch the content, not the capped popover: a capped popover does not change size.
+    const inner = el.querySelector('.fp-pop-in');
+    ro?.observe(inner ?? el);
+    window.addEventListener('resize', place);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('resize', place);
+    };
+  }, [getAnchor, side]);
   return (
     <section ref={ref} id={`rail-pop-${item.id}`} className="fp-pop" role="dialog" aria-modal="false" aria-label={item.title}>
       <div className="fp-pop-hd">
@@ -49,7 +73,7 @@ function RailPop({ item, side, getAnchor, onClose }) {
           <Key onClick={onClose} aria-label={`close ${item.title}`}>close</Key>
         </span>
       </div>
-      <div className="fp-pop-bd">{item.render()}</div>
+      <div className="fp-pop-bd"><div className="fp-pop-in">{item.render()}</div></div>
     </section>
   );
 }
@@ -64,6 +88,7 @@ export default function DeskRail({ side, label, items, top = null }) {
   const keys = useRef({});
   const railRef = useRef(null);
   const open = items.find((i) => i.id === openId) ?? null;
+  const getAnchor = useCallback(() => (openId ? keys.current[openId] : null), [openId]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -97,7 +122,7 @@ export default function DeskRail({ side, label, items, top = null }) {
           onPress={() => setOpenId((cur) => (cur === item.id ? null : item.id))}
         />
       ))}
-      {open && <RailPop item={open} side={side} getAnchor={() => keys.current[open.id]} onClose={() => setOpenId(null)} />}
+      {open && <RailPop item={open} side={side} getAnchor={getAnchor} onClose={() => setOpenId(null)} />}
     </nav>
   );
 }

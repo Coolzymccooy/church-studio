@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { alertLamp, deskAlerts, popPosition } from './deskRail.js';
+import { alertLamp, deskAlerts, popMaxHeight, popPosition } from './deskRail.js';
 
 test('no alerts when all is well', () => {
   assert.deepEqual(deskAlerts({ ndi: { checked: true, available: true }, broadcastSet: true, isLive: true }), []);
@@ -31,4 +31,10 @@ test('popPosition places beside the key and stays on screen', () => {
   assert.deepEqual(popPosition({ left: 8, right: 60, top: 100 }, size, vp, 'left'), { top: 100, left: 68 });
   assert.equal(popPosition({ left: 1380, right: 1432, top: 800 }, size, vp, 'right').top, 900 - 400 - 8);
   assert.equal(popPosition({ left: 8, right: 60, top: -50 }, size, vp, 'left').top, 8);
+});
+
+test('popMaxHeight keeps the popover above the bottom edge', () => {
+  assert.equal(popMaxHeight(100, 900), 792);
+  assert.equal(popMaxHeight(8, 900), 884);
+  assert.equal(popMaxHeight(850, 900), 120);
 });
