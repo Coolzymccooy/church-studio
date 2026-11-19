@@ -1265,7 +1265,10 @@ const AudioProcessor = ({ goHome }) => {
     }
 
     // ── Tauri native Rust engine (CPAL — sub-5ms, direct hardware audio) ──────
-    if (isTauri && mode === 'live') {
+    // In the desktop app "start" always means the native engine. From file mode it first returns
+    // the rack to live; the browser microphone path does not work in the desktop webview.
+    if (isTauri) {
+      if (mode !== 'live') setMode('live');
       try {
         const { invoke } = await import('@tauri-apps/api/core');
         // The engine may already be running while this screen thinks it is off (a reload, or an
@@ -3398,7 +3401,7 @@ const AudioProcessor = ({ goHome }) => {
       {/* Small screens: the essentials in one bottom plate. */}
       <div className="lg:hidden">
       <nav className="fp-bar fixed bottom-0 left-0 right-0 z-40" aria-label="Quick controls" style={{ borderTop: '1px solid var(--fp-seam)', borderBottom: 0 }}>
-        <Key lit={isLive ? 'red' : 'green'} onClick={mode === 'live' ? toggleLive : undefined} disabled={mode !== 'live'}>
+        <Key lit={isLive ? 'red' : 'green'} onClick={mode === 'live' || isTauri ? toggleLive : undefined} disabled={mode !== 'live' && !isTauri}>
           {isLive ? 'stop' : 'start'}
         </Key>
         <Lamp tone={isLive ? 'g' : 'off'}>{isLive ? 'running' : 'standby'}</Lamp>

@@ -2,6 +2,7 @@ import { AudioLines, Gauge, Mic, UserRound } from 'lucide-react';
 
 import InputRackAiTab from '../InputRackAiTab.jsx';
 import Key from '../faceplate/Key.jsx';
+import TwoPressKey from '../faceplate/TwoPressKey.jsx';
 import DeskRail from './DeskRail.jsx';
 import RackCore from './RackCore.jsx';
 import RackProfiles from './RackProfiles.jsx';
@@ -30,7 +31,13 @@ export default function InputRack({ mode, onModeSwitch, core, voice, profiles, s
     <>
       <div className="fp-mode-keys" role="group" aria-label="Source">
         <Key lit={mode === 'live' ? 'sel' : null} pressed={mode === 'live'} onClick={() => onModeSwitch('live')}>live</Key>
-        <Key lit={mode === 'file' ? 'sel' : null} pressed={mode === 'file'} onClick={() => onModeSwitch('file')}>file</Key>
+        {mode === 'live' && core.isLive
+          ? (
+            <TwoPressKey label="stop the engine and switch to file playback" onConfirm={() => onModeSwitch('file')}>
+              file
+            </TwoPressKey>
+          )
+          : <Key lit={mode === 'file' ? 'sel' : null} pressed={mode === 'file'} onClick={() => onModeSwitch('file')}>file</Key>}
       </div>
       <span className="fp-rail-sep" aria-hidden="true" />
     </>
