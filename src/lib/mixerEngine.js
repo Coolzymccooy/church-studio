@@ -64,6 +64,7 @@ const PARAM_RANGES = {
   send_stream_db: [FADER_MIN_DB, FADER_MAX_DB],
   send_monitor_db: [FADER_MIN_DB, FADER_MAX_DB],
   limiter_ceiling_db: [-12, 0],
+  duck_depth_db: [0, 40],
 };
 
 const STRIP_BOOL_KEYS = new Set([
@@ -75,7 +76,12 @@ const STRIP_BOOL_KEYS = new Set([
   'solo',
   'monitor_post_fader',
   'voice_chain',
+  'automix',
+  'duck',
 ]);
+
+/** Auto-mix and duck are exclusive on a strip: turning one on turns the other off. */
+const EXCLUSIVE_ON_STRIP = { automix: 'duck', duck: 'automix' };
 
 /** The contract range [min, max] for a numeric strip or bus key, or null when it has none. */
 export function paramRange(key) {
@@ -120,6 +126,8 @@ export function applyStripChange(state, index, key, value) {
       return strip;
     }
     const nextValue = STRIP_BOOL_KEYS.has(key) ? Boolean(value) : clampStripValue(key, value);
+    const other = EXCLUSIVE_ON_STRIP[key];
+    if (other && nextValue === true && other in strip) return { ...strip, [key]: true, [other]: false };
     return { ...strip, [key]: nextValue };
   });
   return { ...state, strips };
@@ -240,6 +248,11 @@ function defaultStrip(index, name, overrides = {}) {
     send_monitor_db: 0,
     monitor_post_fader: false,
     voice_chain: false,
+    automix: false,
+    duck: false,
+    duck_depth_db: 12,
+    automix_gr_db: 0,
+    duck_gr_db: 0,
     ...overrides,
   };
 }
@@ -281,13 +294,24 @@ function buildMockMetersPayload(state, tick) {
     const gateOpen = strip.gate_enabled ? pre > strip.gate_threshold_db : true;
     const overshoot = strip.comp_enabled ? Math.max(0, pre - strip.comp_threshold_db) : 0;
     const grDb = strip.comp_enabled ? Math.min(12, overshoot - overshoot / strip.comp_ratio) : 0;
+    // Demo only: an auto-mix strip "speaks" on the louder half of its wave; a ducked strip dips by
+    // its depth while any auto-mix strip speaks.
+    const speech = Boolean(strip.automix) && pre > -18;
     return {
       pre_db: round1(pre),
       post_db: round1(post),
       gate_open: gateOpen,
       gr_db: round1(grDb),
+      speech,
+      automix_gr_db: strip.automix && !speech ? 6 : 0,
+      duck_gr_db: 0,
     };
   });
+
+  const anyoneSpeaking = strips.some((m) => m.speech);
+  const ducked = strips.map((m, i) => (state.strips[i].duck && anyoneSpeaking
+    ? { ...m, duck_gr_db: round1(state.strips[i].duck_depth_db ?? 12) }
+    : m));
 
   const buses = state.buses.map((bus, bi) => {
     const activePosts = strips
@@ -308,7 +332,7 @@ function buildMockMetersPayload(state, tick) {
     };
   });
 
-  return { strips, buses };
+  return { strips: ducked, buses };
 }
 
 export function createMockMixerController() {
