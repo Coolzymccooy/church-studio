@@ -164,7 +164,11 @@ fn apply_preset(preset: StripPreset, p: &StripParams) {
     if let StripPreset::Music { pan } = preset {
         p.hpf_enabled.store(false, Relaxed);
         p.gate_enabled.store(false, Relaxed);
-        p.pan.store(pan.clamp(-1.0, 1.0), Relaxed);
+        let pan = pan.clamp(-1.0, 1.0);
+        p.pan.store(pan, Relaxed);
+        if pan.abs() >= 1.0 {
+            p.trim_db.store(MUSIC_TRIM_DB, Relaxed);
+        }
     }
 }
 
@@ -276,13 +280,19 @@ pub const COMPUTER_RIGHT_STRIP: &str = "computer:right";
 pub const COMPUTER_LEFT_LABEL: &str = "Computer L";
 pub const COMPUTER_RIGHT_LABEL: &str = "Computer R";
 
+/// Trim of a new music strip: a hard pan adds `PAN_LAW_NORM` (+3 dB) to its
+/// side, so a full-scale stereo pair would hit the bus limiters. −3 dB
+/// brings each side back to unity.
+pub const MUSIC_TRIM_DB: f32 = -3.0;
+
 /// Starting values a strip gets when its feed changes.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum StripPreset {
     /// The contract defaults (`reset_strip`).
     Standard,
     /// Music: the contract defaults with HPF and gate off (and the voice
-    /// chain off, as on every reset), panned to `pan`.
+    /// chain off, as on every reset), panned to `pan`, trimmed to
+    /// `MUSIC_TRIM_DB` when panned hard.
     Music { pan: f32 },
 }
 

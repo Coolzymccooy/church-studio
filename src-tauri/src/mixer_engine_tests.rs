@@ -7,7 +7,7 @@ use crate::dsp::test_util::{rms, sine};
 use crate::mixer_control::{
     engine_strip_feeds, name_is_automatic, ndi_strip_identity, scene_slug, MixerControl,
     StoredScene, COMPUTER_LEFT_LABEL, COMPUTER_LEFT_STRIP, COMPUTER_RIGHT_LABEL,
-    COMPUTER_RIGHT_STRIP, HARDWARE_STRIP, MAX_STRIPS, NO_VOICE_STRIP, OTHER_STRIPS_FADER_DB,
+    COMPUTER_RIGHT_STRIP, HARDWARE_STRIP, MUSIC_TRIM_DB, MAX_STRIPS, NO_VOICE_STRIP, OTHER_STRIPS_FADER_DB,
 };
 use crate::mixer_layout::StripLayout;
 use crate::mixer_meters::{MixerMeterSlots, METER_FLOOR_DB};
@@ -600,10 +600,14 @@ fn computer_audio_adds_a_music_pair_between_hardware_and_ndi() {
         assert_eq!(strip.fader_db, OTHER_STRIPS_FADER_DB);
     }
     assert_eq!((left.pan, right.pan), (-1.0, 1.0));
+    // The hard pan's +3 dB is taken back off, so full-scale music stays
+    // under the bus limiters.
+    assert_eq!((left.trim_db, right.trim_db), (MUSIC_TRIM_DB, MUSIC_TRIM_DB));
     assert_eq!(m.voice_strip.load(Relaxed), NO_VOICE_STRIP);
     // The NDI strip keeps the standard defaults.
     assert!(state.strips[4].hpf_enabled);
     assert_eq!(state.strips[4].pan, 0.0);
+    assert_eq!(state.strips[4].trim_db, 0.0);
 }
 
 #[test]
@@ -635,4 +639,24 @@ fn mixer_state_json_lists_computer_strips() {
     assert_eq!(json["computerStrips"], 2);
     assert_eq!(json["ndiStrips"], 0);
     assert_eq!(json["strips"].as_array().unwrap().len(), 3);
+}
+
+#[test]
+fn a_hard_panned_music_pair_passes_full_scale_at_unity() {
+    let m = MixerControl::new();
+    m.link().assign_strip_feeds(&engine_strip_feeds(1, Some(1), &[]));
+    m.set_strip_param(1, "fader_db", 0.0).unwrap();
+    m.set_strip_param(2, "fader_db", 0.0).unwrap();
+    let mut mixer = Mixer::new(48_000.0, 512, 3, m.link().params.clone());
+    let silent = vec![0.0f32; 512];
+    let left = sine(512, 1_000.0, 48_000.0, 0.5);
+    let right = sine(512, 500.0, 48_000.0, 0.5);
+    for _ in 0..40 {
+        mixer.process(&[&silent, &left, &right], 512);
+    }
+    let (out_l, out_r) = mixer.output(BUS_MONITOR);
+    let ratio_l = rms(&out_l[256..512]) / rms(&left[256..512]);
+    let ratio_r = rms(&out_r[256..512]) / rms(&right[256..512]);
+    assert!((ratio_l - 1.0).abs() < 0.02, "left {ratio_l}");
+    assert!((ratio_r - 1.0).abs() < 0.02, "right {ratio_r}");
 }
