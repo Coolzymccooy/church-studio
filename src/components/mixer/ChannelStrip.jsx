@@ -54,7 +54,14 @@ export default function ChannelStrip({ strip, metersRef, onSetParam, onSetBool, 
     setNameDraft(strip.name);
   }
 
+  // Escape blurs the field to cancel; blur runs before the reset lands, so it must skip the commit.
+  const cancelRename = useRef(false);
   const commitName = () => {
+    if (cancelRename.current) {
+      cancelRename.current = false;
+      setNameDraft(strip.name);
+      return;
+    }
     const trimmed = nameDraft.trim();
     if (trimmed && trimmed !== strip.name) onRename(trimmed);
     else setNameDraft(strip.name);
@@ -105,7 +112,7 @@ export default function ChannelStrip({ strip, metersRef, onSetParam, onSetBool, 
           onBlur={commitName}
           onKeyDown={(e) => {
             if (e.key === 'Enter') e.currentTarget.blur();
-            if (e.key === 'Escape') { setNameDraft(strip.name); e.currentTarget.blur(); }
+            if (e.key === 'Escape') { cancelRename.current = true; e.currentTarget.blur(); }
           }}
           aria-label={`Rename channel ${strip.index + 1}`}
         />
