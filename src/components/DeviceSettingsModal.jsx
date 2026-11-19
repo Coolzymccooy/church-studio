@@ -8,6 +8,7 @@ import {
   X,
 } from 'lucide-react';
 
+import ComputerAudioToggle from './ComputerAudioToggle';
 import MainOutputSelect from './MainOutputSelect';
 
 function VirtualCableHint({ outputs }) {
@@ -123,6 +124,7 @@ export default function DeviceSettingsModal({
               </option>
             ))}
           </select>
+          <div className="mt-2"><ComputerAudioToggle /></div>
         </div>
 
         <div>

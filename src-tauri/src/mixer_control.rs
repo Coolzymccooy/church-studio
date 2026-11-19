@@ -159,6 +159,15 @@ fn reset_strip(index: usize, p: &StripParams) {
     }
 }
 
+/// Overlay a feed's preset on a freshly reset strip.
+fn apply_preset(preset: StripPreset, p: &StripParams) {
+    if let StripPreset::Music { pan } = preset {
+        p.hpf_enabled.store(false, Relaxed);
+        p.gate_enabled.store(false, Relaxed);
+        p.pan.store(pan.clamp(-1.0, 1.0), Relaxed);
+    }
+}
+
 fn reset_bus(p: &BusParams) {
     p.fader_db.store(0.0, Relaxed);
     p.mute.store(false, Relaxed);
@@ -260,30 +269,68 @@ pub fn ndi_strip_identity(source: &str) -> String {
     format!("ndi:{source}")
 }
 
+/// Identities of the computer-audio strips (left, right).
+pub const COMPUTER_LEFT_STRIP: &str = "computer:left";
+pub const COMPUTER_RIGHT_STRIP: &str = "computer:right";
+/// Automatic names of the computer-audio strips (left, right).
+pub const COMPUTER_LEFT_LABEL: &str = "Computer L";
+pub const COMPUTER_RIGHT_LABEL: &str = "Computer R";
+
+/// Starting values a strip gets when its feed changes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum StripPreset {
+    /// The contract defaults (`reset_strip`).
+    Standard,
+    /// Music: the contract defaults with HPF and gate off (and the voice
+    /// chain off, as on every reset), panned to `pan`.
+    Music { pan: f32 },
+}
+
 /// What feeds one strip at engine start, and the automatic name to give it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StripFeed {
     pub index: usize,
-    /// `HARDWARE_STRIP` or `ndi_strip_identity(source)`.
+    /// `HARDWARE_STRIP`, `ndi_strip_identity(source)` or a computer side.
     pub identity: String,
     /// Automatic name (an NDI source's label); `None` keeps the name.
     pub label: Option<String>,
+    /// Applied when the strip is reset for a new feed.
+    pub preset: StripPreset,
 }
 
-/// The feeds of a started engine: `hardware` input-channel strips, then each
-/// NDI input as `(strip, source, label)`.
-pub fn engine_strip_feeds(hardware: usize, ndi: &[(usize, String, String)]) -> Vec<StripFeed> {
+/// The feeds of a started engine: `hardware` input-channel strips, the
+/// computer-audio pair from strip `computer` (left, right) when it runs,
+/// then each NDI input as `(strip, source, label)`.
+pub fn engine_strip_feeds(
+    hardware: usize,
+    computer: Option<usize>,
+    ndi: &[(usize, String, String)],
+) -> Vec<StripFeed> {
     let mut feeds: Vec<StripFeed> = (0..hardware)
         .map(|index| StripFeed {
             index,
             identity: HARDWARE_STRIP.to_string(),
             label: None,
+            preset: StripPreset::Standard,
         })
         .collect();
+    if let Some(left) = computer {
+        let sides = [
+            (COMPUTER_LEFT_STRIP, COMPUTER_LEFT_LABEL, -1.0),
+            (COMPUTER_RIGHT_STRIP, COMPUTER_RIGHT_LABEL, 1.0),
+        ];
+        feeds.extend(sides.iter().enumerate().map(|(side, (identity, label, pan))| StripFeed {
+            index: left + side,
+            identity: identity.to_string(),
+            label: Some(label.to_string()),
+            preset: StripPreset::Music { pan: *pan },
+        }));
+    }
     feeds.extend(ndi.iter().map(|(index, source, label)| StripFeed {
         index: *index,
         identity: ndi_strip_identity(source),
         label: Some(label.clone()),
+        preset: StripPreset::Standard,
     }));
     feeds
 }
@@ -337,6 +384,7 @@ fn assign_feeds(link: &MixerLink, feeds: &[StripFeed]) -> Vec<usize> {
         };
         if origin.identity != feed.identity {
             reset_strip(index, strip);
+            apply_preset(feed.preset, strip);
             *name = default_strip_name(index);
             if link.voice_strip.load(Relaxed) == index {
                 link.voice_strip.store(NO_VOICE_STRIP, Relaxed);
@@ -530,12 +578,14 @@ impl MixerControl {
     /// Build the `MixerState` JSON model. `input_channels` is the running
     /// engine's channel count (1 when stopped); one strip is listed per
     /// input channel, capped at `MAX_STRIPS`.
+    #[cfg(test)] // tests only; the app uses `snapshot_layout`
     pub fn snapshot(&self, input_channels: u32, running: bool, scenes: Vec<String>) -> MixerState {
         self.snapshot_with_ndi(input_channels, 0, running, scenes)
     }
 
     /// `snapshot`, plus one strip per running NDI input after the hardware
     /// strips (`StripLayout`).
+    #[cfg(test)] // tests only; the app uses `snapshot_layout`
     pub fn snapshot_with_ndi(
         &self,
         input_channels: u32,
@@ -543,7 +593,17 @@ impl MixerControl {
         running: bool,
         scenes: Vec<String>,
     ) -> MixerState {
-        let layout = StripLayout::new(input_channels as usize, ndi_inputs as usize);
+        let layout = StripLayout::new(input_channels as usize, false, ndi_inputs as usize);
+        self.snapshot_layout(layout, running, scenes)
+    }
+
+    /// `MixerState` for the strips of `layout` (hardware, computer, NDI).
+    pub fn snapshot_layout(
+        &self,
+        layout: StripLayout,
+        running: bool,
+        scenes: Vec<String>,
+    ) -> MixerState {
         let count = layout.total();
         let names: Vec<String> = self.names.lock().clone();
         let strips = (0..count)
@@ -563,7 +623,8 @@ impl MixerControl {
             })
             .collect();
         MixerState {
-            input_channels: input_channels.max(1),
+            input_channels: layout.hardware as u32,
+            computer_strips: layout.computer as u32,
             ndi_strips: layout.ndi as u32,
             running,
             strips,
