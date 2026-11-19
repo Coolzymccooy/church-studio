@@ -1,50 +1,31 @@
-import React from 'react';
-
 import { armedIndices } from '../../lib/recorder.js';
+import Key from '../faceplate/Key.jsx';
 
 /**
- * Armed-track chips: one per mixer strip (click to arm/disarm), then the
- * Stream mix (always recorded) and Main mix (when included).
+ * Armed-track keys: one per mixer strip (press to arm or skip it), then the Stream mix (always
+ * recorded) and the Main mix (when included).
  */
 export default function RecordTrackChips({ strips, armedStrips, includeMain, disabled, onToggle }) {
   const indices = strips.map((strip) => strip.index);
   const armed = new Set(armedIndices(armedStrips, indices));
   return (
-    <div className="flex items-center gap-1 flex-wrap" role="group" aria-label="Tracks to record">
+    <div className="fp-keys" role="group" aria-label="Tracks to record" style={{ alignItems: 'center' }}>
       {strips.map((strip) => {
         const on = armed.has(strip.index);
         return (
-          <button
+          <Key
             key={strip.index}
-            type="button"
+            lit={on ? 'red' : null}
+            pressed={on}
             disabled={disabled}
             onClick={() => onToggle(strip.index)}
-            aria-pressed={on}
-            title={on ? `Recording ${strip.name} (raw). Click to skip it.` : `Not recording ${strip.name}. Click to arm it.`}
-            className="px-1.5 py-0.5 rounded text-[9px] font-semibold border transition-colors disabled:opacity-50"
-            style={on
-              ? { background: 'rgba(255,82,82,0.15)', borderColor: 'rgba(255,82,82,0.5)', color: '#FF8A80' }
-              : { background: 'transparent', borderColor: '#1e293b', color: '#64748b' }}
+            title={on ? `Recording ${strip.name} (raw)` : `Not recording ${strip.name}`}
           >
             {String(strip.index + 1).padStart(2, '0')} {strip.name}
-          </button>
+          </Key>
         );
       })}
-      <span
-        className="px-1.5 py-0.5 rounded text-[9px] font-semibold border"
-        style={{ background: 'rgba(var(--accent-rgb),0.12)', borderColor: 'rgba(var(--accent-rgb),0.4)', color: 'var(--accent)' }}
-        title="The Stream mix is always recorded, exactly as it went to broadcast."
-      >
-        Stream Mix
-      </span>
-      {includeMain && (
-        <span
-          className="px-1.5 py-0.5 rounded text-[9px] font-semibold border"
-          style={{ background: 'rgba(var(--accent-rgb),0.12)', borderColor: 'rgba(var(--accent-rgb),0.4)', color: 'var(--accent)' }}
-        >
-          Main Mix
-        </span>
-      )}
+      <span className="fp-sub">+ stream mix{includeMain ? ' + main mix' : ''}</span>
     </div>
   );
 }

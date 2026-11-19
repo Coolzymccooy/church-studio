@@ -78,7 +78,7 @@ export default function MenuBar({
   onGoHome,
   onShowSettings,
   onShowObs,
-  themeSelector,
+  onShowHelp,
   onToggleLive,
   onHardReset,
   onStartAutoCalibrate,
@@ -186,8 +186,8 @@ export default function MenuBar({
       id: 'help',
       label: 'Help',
       items: [
-        { label: 'TIWATON Setup Guide', action: () => document.querySelector('[data-help-button]')?.click() },
-        { label: 'Routing: OBS + Virtual Cable', action: () => document.querySelector('[data-help-button]')?.click() },
+        { label: 'TIWATON Setup Guide', action: onShowHelp },
+        { label: 'Routing: OBS + Virtual Cable', action: onShowHelp },
       ],
     },
   ];
@@ -227,7 +227,6 @@ export default function MenuBar({
 
       {/* Right side — theme selector + mode switcher */}
       <div className="ml-auto flex items-center gap-2">
-        {themeSelector}
         <div
           className="flex items-center rounded p-0.5 border border-slate-800 gap-0.5"
           style={{ background: '#050A1C' }}

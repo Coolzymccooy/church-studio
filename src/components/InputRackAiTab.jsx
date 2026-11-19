@@ -1,124 +1,30 @@
-import { Mic, Radio, Sliders, Speaker, Volume2, Waves } from 'lucide-react';
+import InfoTip from './faceplate/InfoTip.jsx';
+import Key from './faceplate/Key.jsx';
+import ToggleRow from './desk/ToggleRow.jsx';
 
-const nextGenDspFeatures = [
-  {
-    key: 'lookaheadGate',
-    icon: <Waves size={11} />,
-    label: 'Lookahead Gate',
-    desc: '20ms pre-opens gate - no clipped first syllable',
-  },
-  {
-    key: 'dynamicDeEsser',
-    icon: <Mic size={11} />,
-    label: 'Dynamic De-esser',
-    desc: 'Sidechain sibilance detector - more transparent than notch',
-  },
-  {
-    key: 'multibandComp',
-    icon: <Sliders size={11} />,
-    label: 'Multiband Compressor',
-    desc: '4-band (sub/low/mid/air) independent compression',
-  },
-  {
-    key: 'dereverb',
-    icon: <Radio size={11} />,
-    label: 'Spectral Dereverberation',
-    desc: 'Overlap-add FFT reverb tail subtraction',
-  },
+const DSP_STAGES = [
+  { key: 'lookaheadGate', label: 'Lookahead gate', tip: 'Opens the gate 20 ms early so the first syllable is not clipped.' },
+  { key: 'dynamicDeEsser', label: 'De-esser', tip: 'Turns down harsh s and sh sounds only when they happen.', readout: 'deess' },
+  { key: 'multibandComp', label: 'Multiband compressor', tip: 'Compresses sub, low, mid and air bands separately.' },
+  { key: 'dereverb', label: 'Dereverb', tip: 'Reduces the room echo tail after each word.' },
 ];
 
-const aiProcessingFeatures = [
-  {
-    key: 'voicePattern',
-    icon: <Waves size={11} />,
-    label: 'Voice Pattern Cleanse',
-    desc: 'Removes non-voice spectral content',
-  },
-  {
-    key: 'musicDucking',
-    icon: <Volume2 size={11} />,
-    label: 'Music Ducking',
-    desc: 'Drops music when speech detected',
-  },
-  {
-    key: 'pastorIsolation',
-    icon: <Mic size={11} />,
-    label: 'Pastor Voice Isolation',
-    desc: 'Prioritises pastor over choir',
-  },
-  {
-    key: 'sermonWarmth',
-    icon: <Speaker size={11} />,
-    label: 'Sermon Warmth',
-    desc: 'Low-mid body - podcast feel',
-  },
-  {
-    key: 'smartMixing',
-    icon: <Sliders size={11} />,
-    label: 'Smart Auto-Mixing',
-    desc: 'Continuous level riding',
-  },
-  {
-    key: 'mastering',
-    icon: <Volume2 size={11} />,
-    label: 'Voice Polish',
-    desc: 'Broadcast loudness + sheen',
-  },
+const VOICE_STAGES = [
+  { key: 'voicePattern', label: 'Voice cleanse', tip: 'Removes sound that does not match a voice.' },
+  { key: 'musicDucking', label: 'Music ducking', tip: 'Lowers music while someone speaks.' },
+  { key: 'pastorIsolation', label: 'Pastor isolation', tip: 'Favours the pastor over the choir.' },
+  { key: 'sermonWarmth', label: 'Warmth', tip: 'Adds low-mid body to the voice.' },
+  { key: 'smartMixing', label: 'Auto-mix', tip: 'Rides the voice level continuously.', readout: 'rider' },
+  { key: 'mastering', label: 'Voice polish', tip: 'Broadcast loudness and presence.' },
 ];
 
-function ToggleCard({ featureKey, icon, label, desc, features, onToggle }) {
-  const active = Boolean(features[featureKey]);
+const signedDb = (db) => `${db >= 0 ? '+' : ''}${db.toFixed(1)} dB`;
 
-  return (
-    <div
-      onClick={() => onToggle(featureKey)}
-      className={`cursor-pointer p-2.5 rounded-lg border transition-all ${
-        active
-          ? 'border-[var(--accent)]/40'
-          : 'border-slate-800 hover:border-slate-700 opacity-60 hover:opacity-100'
-      }`}
-      style={active ? { background: 'rgba(var(--accent-rgb),0.08)' } : {}}
-    >
-      <div className="flex items-center justify-between">
-        <div
-          className={`flex items-center gap-1.5 ${
-            active ? 'text-[var(--accent)]' : 'text-slate-500'
-          }`}
-        >
-          {icon}
-          <span className="text-[10px] font-semibold text-slate-300">{label}</span>
-        </div>
-        <div
-          className={`w-6 h-3 rounded-full transition-colors relative ${
-            active ? 'bg-[var(--accent)]' : 'bg-slate-700'
-          }`}
-        >
-          <div
-            className={`absolute top-0.5 w-2 h-2 bg-white rounded-full transition-transform ${
-              active ? 'translate-x-3 left-0.5' : 'left-0.5'
-            }`}
-          />
-        </div>
-      </div>
-      <p className="text-[9px] text-slate-600 mt-1 pl-4">{desc}</p>
-    </div>
-  );
-}
+/** The rack's voice tab: every voice-chain stage as an on/off key, plus "all on" for a church service. */
+export default function InputRackAiTab({ features, setFeatures, setGateMode, setSpeakerPreset, desserGrDb = 0, gainRiderDb = 0 }) {
+  const toggle = (key) => setFeatures((prev) => ({ ...prev, [key]: !prev[key] }));
 
-export default function InputRackAiTab({
-  features,
-  setFeatures,
-  setGateMode,
-  setSpeakerPreset,
-}) {
-  const toggleFeature = (featureKey) => {
-    setFeatures((prev) => ({
-      ...prev,
-      [featureKey]: !prev[featureKey],
-    }));
-  };
-
-  const enableChurchBeta = () => {
+  const allOn = () => {
     setFeatures((prev) => ({
       ...prev,
       denoise: true,
@@ -138,58 +44,41 @@ export default function InputRackAiTab({
     setSpeakerPreset('pastor');
   };
 
+  const readouts = {
+    deess: desserGrDb < -0.5 ? signedDb(desserGrDb) : null,
+    rider: features.smartMixing ? signedDb(gainRiderDb) : null,
+  };
+
+  const rows = (stages) => stages.map((s) => (
+    <ToggleRow
+      key={s.key}
+      label={s.label}
+      tip={s.tip}
+      on={Boolean(features[s.key])}
+      onToggle={() => toggle(s.key)}
+      readout={s.readout ? readouts[s.readout] : null}
+    />
+  ));
+
   return (
-    <div className="space-y-2">
-      <button
-        onClick={enableChurchBeta}
-        className="w-full py-2 rounded-lg border border-[#00E676]/30 text-[#00E676] text-[9px] font-bold tracking-[0.15em] hover:opacity-90 transition-opacity"
-        style={{ background: 'rgba(0,230,118,0.08)' }}
-      >
-        CHURCH BETA - ALL ON
-      </button>
-      <p className="text-[9px] text-slate-600 text-center pb-1">
-        All AI features + Speech-Only gate + Pastor preset
-      </p>
-
-      <div className="flex items-center gap-2 pt-1">
-        <div className="flex-1 h-px bg-slate-800" />
-        <span className="text-[8px] font-bold tracking-[0.15em] text-slate-600 uppercase">
-          Next-Gen DSP
-        </span>
-        <div className="flex-1 h-px bg-slate-800" />
-      </div>
-
-      {nextGenDspFeatures.map((feature) => (
-        <ToggleCard
-          key={feature.key}
-          featureKey={feature.key}
-          icon={feature.icon}
-          label={feature.label}
-          desc={feature.desc}
-          features={features}
-          onToggle={toggleFeature}
-        />
-      ))}
-
-      <div className="flex items-center gap-2 pt-1">
-        <div className="flex-1 h-px bg-slate-800" />
-        <span className="text-[8px] font-bold tracking-[0.15em] text-slate-600 uppercase">
-          AI Processing
-        </span>
-        <div className="flex-1 h-px bg-slate-800" />
-      </div>
-
-      {aiProcessingFeatures.map((feature) => (
-        <ToggleCard
-          key={feature.key}
-          featureKey={feature.key}
-          icon={feature.icon}
-          label={feature.label}
-          desc={feature.desc}
-          features={features}
-          onToggle={toggleFeature}
-        />
-      ))}
-    </div>
+    <>
+      <section className="fp-mod">
+        <div className="fp-mod-hd">
+          <span>Church service</span>
+          <InfoTip label="all on">Every stage on, speech-only gate and the pastor preset.</InfoTip>
+        </div>
+        <div className="fp-mod-bd">
+          <Key className="fp-key-wide fp-key-tall" onClick={allOn}>all on</Key>
+        </div>
+      </section>
+      <section className="fp-mod">
+        <div className="fp-mod-hd"><span>Dynamics</span></div>
+        <div className="fp-mod-bd">{rows(DSP_STAGES)}</div>
+      </section>
+      <section className="fp-mod">
+        <div className="fp-mod-hd"><span>Voice</span></div>
+        <div className="fp-mod-bd">{rows(VOICE_STAGES)}</div>
+      </section>
+    </>
   );
 }
