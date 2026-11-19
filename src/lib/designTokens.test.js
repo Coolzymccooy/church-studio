@@ -114,3 +114,16 @@ test('every colour token has a Tailwind fp- utility', () => {
     .filter((k) => !theme.includes(`--color-${k.slice(2)}: var(${k});`));
   assert.deepEqual(missing, []);
 });
+
+test('index.css keeps every @import above all other statements', () => {
+  // CSS ignores an @import that follows any other rule, which silently dropped the faceplate
+  // tokens once (PR 31). Strip comments, then every @import must come before the first non-import.
+  const indexCss = readFileSync(new URL('../index.css', import.meta.url), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '');
+  const statements = indexCss.split(';').map((x) => x.trim()).filter(Boolean);
+  const firstOther = statements.findIndex((x) => !x.startsWith('@import'));
+  const lateImports = statements.slice(firstOther).filter((x) => x.startsWith('@import'));
+  assert.deepEqual(lateImports, []);
+  assert.ok(statements.slice(0, firstOther).some((x) => x.includes('faceplate-tokens.css')));
+  assert.ok(statements.slice(0, firstOther).some((x) => x.includes('faceplate-parts.css')));
+});

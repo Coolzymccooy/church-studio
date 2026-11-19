@@ -178,7 +178,7 @@ Order of work:
 
 1. Tokens and fonts (done). This added rules and changed nothing on screen.
 2. Primitives: key, lamp, glass, knob, fader, meter, info tip. Built on tokens, with tests (done).
-3. Header and engine control, then the strip, then buses and loudness, then the voice module, then
+3. Header and engine control (done: `DeskHeader` replaced the old status bar), then the strip, then buses and loudness, then the voice module, then
    scenes, OBS and the recorder, then the setup screen, the editor and the states. Each plate ships
    as its own PR, with before and after screenshots from the running app.
 4. Retire the old `[data-theme]` accent system and the amber overrides in `index.css` once no

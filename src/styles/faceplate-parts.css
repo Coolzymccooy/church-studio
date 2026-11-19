@@ -122,3 +122,18 @@
   background: var(--fp-raised); color: var(--fp-legend);
   font: var(--fp-weight-regular) var(--fp-text-sm)/1.35 var(--fp-font-legend);
 }
+
+/* ---------- desk header ---------- */
+.fp-header {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; flex-shrink: 0; z-index: 20;
+  padding: 6px 8px; background: var(--fp-plate); border-bottom: 1px solid var(--fp-seam);
+  color: var(--fp-legend); font-family: var(--fp-font-legend);
+}
+.fp-brand { display: flex; align-items: baseline; gap: 8px; }
+.fp-brand b { font: var(--fp-weight-semibold) var(--fp-text-xl)/1 var(--fp-font-legend); letter-spacing: 0.02em; }
+.fp-grp { display: flex; align-items: center; gap: 8px; }
+.fp-read { display: flex; gap: 14px; padding: 5px 10px; font-size: var(--fp-text-sm); line-height: 1.2; }
+.fp-read em { font-style: normal; color: var(--fp-glass-dim); margin-right: 4px; }
+.fp-read .fp-warn { color: var(--fp-led-a); }
+.fp-end { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.fp-clock { padding: 5px 10px; font-size: var(--fp-text-lg); line-height: 1.1; }
