@@ -41,6 +41,7 @@ import {
   captureNativeNoiseProfile,
   describeNativeEngineError,
   getNativeEngineStatus,
+  learnNativeMicFingerprint,
   startNativeEngine,
   stopNativeEngine,
   subscribeToNativeMeters,
@@ -1395,7 +1396,22 @@ const AudioProcessor = ({ goHome }) => {
   const [isMicLearning, setIsMicLearning] = useState(false);
   const [micLearned, setMicLearned] = useState(false);
 
-  const startMicLearn = () => {
+  const startMicLearn = async () => {
+    // Desktop: the native Hyper gate learns from the voice strip (5 s).
+    if (isTauri && isLive) {
+      setIsMicLearning(true);
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        await learnNativeMicFingerprint(invoke);
+        setMicLearned(true);
+        setAudioEngineError(null);
+      } catch (err) {
+        setAudioEngineError(describeNativeEngineError(err, 'Could not learn the mic.'));
+      } finally {
+        setIsMicLearning(false);
+      }
+      return;
+    }
     if (!processingRefs.current.analyser || !audioContext) {
       alert('Go Live first so I can learn your mic\'s spectral signature.');
       return;
@@ -2929,11 +2945,12 @@ const AudioProcessor = ({ goHome }) => {
         isBypassed,
         noiseFloorThreshold,
         inputGainValue,
+        gateMode,
       }).catch(() => {});
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLive, features.denoise, features.dereverb, features.dynamicDeEsser,
-      isBypassed, noiseFloorThreshold, inputGainValue]);
+      isBypassed, noiseFloorThreshold, inputGainValue, gateMode]);
 
   useEffect(() => {
     if (!isTauri || !isLive) return;
