@@ -32,11 +32,3 @@ export function readVisualiserPalette(read) {
   }
   return out;
 }
-
-/** Bar colour for one spectrum bin, by gate and voice state. */
-export function barColour(p, { voiceActive, gateClosed, inVoiceBand, level }) {
-  if (voiceActive && !gateClosed) return inVoiceBand ? p.g : p.gDim;
-  if (gateClosed && inVoiceBand && level > 30) return p.a;
-  if (gateClosed && level > 20) return p.aDim;
-  return inVoiceBand ? p.dim : p.grid;
-}

@@ -82,8 +82,7 @@ export default function LiveView({ v, canvasRef }) {
           </div>
         </div>
       )}
-      <canvas ref={canvasRef} width={1000} height={500}
-        className="w-full h-full object-cover" style={{ opacity: v.isBypassed ? 0.4 : 0.9, filter: v.isBypassed ? 'grayscale(1)' : undefined }} />
+      <canvas ref={canvasRef} className="block w-full h-full" role="img" aria-label="Live analyser: spectrum, gate state and level history" />
       {v.mode === 'file' && v.fileInfo && v.trim.duration > 0 && <TrimPlate t={v.trim} formatTime={v.formatTime} />}
     </div>
   );
