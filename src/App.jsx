@@ -17,7 +17,6 @@ import RecordCheckKeys from './components/recorder/RecordCheckKeys.jsx';
 import DeviceSettingsModal from './components/DeviceSettingsModal';
 import LinkPanel from './components/link/LinkPanel.jsx';
 import ObsPanel from './components/obs/ObsPanel.jsx';
-import MainOutputSelect from './components/MainOutputSelect';
 import OutputRouter from './components/desk/OutputRouter.jsx';
 import LiveView from './components/desk/LiveView.jsx';
 import DesktopRecordButton from './components/recorder/DesktopRecordButton.jsx';
@@ -27,7 +26,10 @@ import { createMixerController, createMockMixerController } from './lib/mixerEng
 import { getExportAvailability } from './lib/exportFlow';
 import { loadRnnoiseAssets } from './lib/rnnoise';
 import { pickVideoMimeType } from './lib/mediaFormats';
-import { barColour, readVisualiserPalette } from './lib/visualiserPalette.js';
+import { readVisualiserPalette } from './lib/visualiserPalette.js';
+import {
+  analyserRange, bandEdges, bandLevels, createScope, createWaterfall, dbFraction, drawScope, fitCanvas, gateState, stepScope,
+} from './lib/liveScope.js';
 import {
   describeBroadcastRoute,
   normalizeTauriDevices,
@@ -1259,6 +1261,9 @@ const AudioProcessor = ({ goHome }) => {
         // Spectrum data is injected from 'audio-meters' Tauri events into tauriSpectrumRef.
         processingRefs.current.analyser = {
           frequencyBinCount: 128,
+          // Native bins are normalised over -90..0 dB (Spectrum::take_bins).
+          minDecibels: -90,
+          maxDecibels: 0,
           getByteFrequencyData(arr) {
             const spec = tauriSpectrumRef.current;
             for (let i = 0; i < arr.length && i < spec.length; i++) {
@@ -2323,6 +2328,11 @@ const AudioProcessor = ({ goHome }) => {
 
     const rootStyle = getComputedStyle(document.documentElement);
     const palette = readVisualiserPalette((name) => rootStyle.getPropertyValue(name));
+    const scopeBands = bandEdges(audioContext?.sampleRate || 48000, bufferLength);
+    const scopeRange = analyserRange(analyser);
+    let scope = createScope(scopeBands.length);
+    const waterfall = createWaterfall();
+    let lastFrameAt = 0;
 
     const draw = (timestamp) => {
       animationRef.current = requestAnimationFrame(draw);
@@ -2331,39 +2341,22 @@ const AudioProcessor = ({ goHome }) => {
       analyser.getByteTimeDomainData(timeData);
       latestSpectrumRef.current = freqData.slice(0);
 
-      const pal = palette;
-
-      const w = canvas.width;
-      const h = canvas.height;
-      const cx = w / 2;
-      const cy = h / 2;
-
-      // Glass background
-      ctx.fillStyle = pal.bg;
-      ctx.fillRect(0, 0, w, h);
+      const scopeSize = fitCanvas(canvas, ctx, window.devicePixelRatio || 1);
+      const frameDt = lastFrameAt ? Math.min(0.1, Math.max(0, (timestamp - lastFrameAt) / 1000)) : 0;
+      lastFrameAt = timestamp;
 
       // Gate/voice state (declared early so spectrum bars can use them)
       let gateClosed = false;
       let localVoiceActive = false;
       let voiceCandidate = false;
 
-      const barWidth = (w / bufferLength) * 2.5;
-      let x = 0;
-
       // Spectrum + band energies
       let lowEnergy = 0;
       let highEnergy = 0;
       const splitIndex = Math.floor(bufferLength * 0.4);
 
-      // Compute voice band bin range for coloring
-      const sampleRateVal = audioContext?.sampleRate || 48000;
-      const binHzVis = sampleRateVal / 2 / bufferLength;
-      const voiceStartBin = Math.floor(300 / binHzVis);
-      const voiceEndBin = Math.ceil(3400 / binHzVis);
-
       for (let i = 0; i < bufferLength; i++) {
         const v = freqData[i];
-        const barHeight = v * 1.5;
 
         if (i < splitIndex) {
           lowEnergy += v;
@@ -2371,17 +2364,6 @@ const AudioProcessor = ({ goHome }) => {
           highEnergy += v;
         }
 
-        // Green: voice passing. Amber: energy the gate is holding back. Quiet bins stay dim.
-        const barColor = barColour(pal, {
-          voiceActive: localVoiceActive,
-          gateClosed,
-          inVoiceBand: i >= voiceStartBin && i <= voiceEndBin,
-          level: v,
-        });
-
-        ctx.fillStyle = barColor;
-        ctx.fillRect(x, h - barHeight / 2, barWidth, barHeight / 2);
-        x += barWidth + 1;
       }
 
       const lowAvg = lowEnergy / (splitIndex || 1);
@@ -2813,108 +2795,31 @@ const AudioProcessor = ({ goHome }) => {
         }
       }
 
-      // ===== ON-CANVAS STATUS TEXT =====
-      ctx.textAlign = 'center';
-
-      // Gate status (large, center)
-      if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
-        ctx.font = `500 16px ${pal.mono}`;
-        ctx.fillStyle = gateClosed ? pal.a : pal.g;
-        ctx.fillText(gateClosed ? 'gate closed' : 'gate open', cx, cy - 35);
-
-        ctx.font = `400 13px ${pal.mono}`;
-        ctx.fillStyle = pal.dim;
-        if (gateClosed && highOnlyNoise) {
-          ctx.fillText('holding back hiss', cx, cy - 16);
-        } else if (gateClosed) {
-          ctx.fillText('waiting for voice', cx, cy - 16);
-        } else if (localVoiceActive) {
-          ctx.fillText('voice passing', cx, cy - 16);
-        }
-      }
-
-      // Voice confidence / noise ratio display
+      // ===== LIVE ANALYSER (src/lib/liveScope.js) =====
       ensureBandMetrics();
       {
-        const ratio = voiceRatio;
-        const confidence = Math.min(100, Math.max(0, (ratio - 1) * 50));
-        const barW = 120;
-        const barH = 6;
-        const barX = cx - barW / 2;
-        const barY = cy + 5;
-
-        // Background
-        ctx.fillStyle = pal.grid;
-        ctx.fillRect(barX - 2, barY - 2, barW + 4, barH + 4);
-
-        // Fill - green when voice winning, red when noise winning
-        const fillW = (confidence / 100) * barW;
-        ctx.fillStyle = confidence > 50 ? pal.g : confidence > 25 ? pal.a : pal.dim;
-        ctx.fillRect(barX, barY, Math.max(2, fillW), barH);
-
-        ctx.font = `400 12px ${pal.mono}`;
-        ctx.fillStyle = pal.dim;
-        ctx.fillText(`voice ${Math.round(confidence)}%`, cx, barY + barH + 16);
-      }
-
-      // Boost indicator (when gain rider is active)
-      {
         const autoGainVal = processingRefs.current.autoGain?.gain?.value || 1;
-        const boostDb = 20 * Math.log10(autoGainVal || 0.00001);
-        if (Math.abs(boostDb) > 0.5) {
-          const boostLabel = `rider ${boostDb > 0 ? '+' : ''}${boostDb.toFixed(1)} dB`;
-          ctx.font = `400 12px ${pal.mono}`;
-          ctx.fillStyle = pal.text;
-          ctx.fillText(boostLabel, cx, cy + 50);
-        }
+        const state = gateState({
+          denoise: settingsRef.current.denoise,
+          bypassed: settingsRef.current.isBypassed,
+          gateClosed,
+          voiceActive: localVoiceActive,
+        });
+        const prevHistory = scope.history;
+        scope = stepScope(scope, bandLevels(freqData, scopeBands), frameDt, {
+          level: dbFraction(db, -70, 0),
+          state,
+        });
+        drawScope(ctx, palette, scopeSize, {
+          ...scope,
+          state,
+          confidence: Math.min(100, Math.max(0, (voiceRatio - 1) * 50)),
+          riderDb: 20 * Math.log10(autoGainVal || 0.00001),
+          thresholdDb: settingsRef.current.denoise && !settingsRef.current.isBypassed ? settingsRef.current.threshold : null,
+          range: scopeRange,
+        }, scopeBands, waterfall, scope.history !== prevHistory);
       }
 
-      // Spectral quality indicators (top-left legend)
-      {
-        ctx.textAlign = 'left';
-        ctx.font = `400 12px ${pal.mono}`;
-        const legendX = 14;
-        let legendY = 18;
-        const lineH = 14;
-
-        // Legend dots
-        const dot = (color, label) => {
-          ctx.fillStyle = color;
-          ctx.fillRect(legendX - 4, legendY - 8, 8, 8);
-          ctx.fillStyle = pal.dim;
-          ctx.fillText(label, legendX + 10, legendY);
-          legendY += lineH;
-        };
-
-        dot(pal.g, 'voice passing');
-        dot(pal.a, 'held back');
-        dot(pal.dim, 'voice band');
-
-        ctx.textAlign = 'center';
-      }
-
-      // ===== THRESHOLD LINE =====
-      if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
-        const threshY =
-          canvas.height * (1 - (settingsRef.current.threshold + 100) / 100);
-
-        // Threshold line
-        ctx.strokeStyle = pal.dim;
-        ctx.setLineDash([4, 6]);
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(0, threshY);
-        ctx.lineTo(canvas.width, threshY);
-        ctx.stroke();
-        ctx.setLineDash([]);
-
-        // Threshold label
-        ctx.textAlign = 'right';
-        ctx.font = `400 12px ${pal.mono}`;
-        ctx.fillStyle = pal.dim;
-        ctx.fillText(`threshold ${settingsRef.current.threshold} dB`, w - 8, threshY - 4);
-        ctx.textAlign = 'center';
-      }
       // Smart Gain Rider
       const autoGainNode = processingRefs.current.autoGain;
       const gainRiderEnabled =
@@ -3243,6 +3148,7 @@ const AudioProcessor = ({ goHome }) => {
         onShowObs={isTauri ? () => setShowObs(true) : null}
         onShowLink={() => setShowLink(true)}
         onShowHelp={() => setShowHelp(true)}
+        loudness={{ st: lufsST, target: loudnessTarget }}
       />
       <HelpCorner open={showHelp} onClose={() => setShowHelp(false)} />
 
@@ -3259,6 +3165,8 @@ const AudioProcessor = ({ goHome }) => {
         }}
         availableDevices={availableDevices}
         audioStats={audioStats}
+        mixerController={mixerController}
+        isLive={isLive}
       />
 
       {/* ─── MAIN 3-PANEL WORKSPACE ─── */}
@@ -3372,6 +3280,7 @@ const AudioProcessor = ({ goHome }) => {
               engineError: audioEngineError,
               onErrorBack: () => { cleanupAudio(); setIsLive(false); },
               onGoLive: toggleLive,
+              loudness: { m: lufsM, st: lufsST, i: lufsI, target: loudnessTarget, limiterOn: Boolean(features.streamingSafe) },
               trim: {
                 duration: fileDuration,
                 start: trimStart,
@@ -3415,9 +3324,6 @@ const AudioProcessor = ({ goHome }) => {
           broadcastLabel,
           targetApp: outputTarget,
           onCycleTarget: cycleOutputTarget,
-          streamSafe: features.streamingSafe,
-          target: loudnessTarget,
-          lufsST,
           features,
         }} />
 

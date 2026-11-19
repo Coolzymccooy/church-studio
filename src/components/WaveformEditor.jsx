@@ -1,4 +1,7 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { readEditorPalette } from '../lib/editorPalette.js';
+import InfoTip from './faceplate/InfoTip.jsx';
+import Key from './faceplate/Key.jsx';
 
 /**
  * WaveformEditor — Audacity-style waveform editor
@@ -151,20 +154,6 @@ function spectralSubtract(input, noisePower, alpha, beta, N, win) {
   return new Float32Array(output);
 }
 
-const COLORS = {
-  bg: '#050A1C',
-  panel: '#0D1428',
-  wave: '#F59E0B',           // resolved from --accent at draw time
-  waveActive: '#00E676',
-  selection: 'rgba(245,158,11,0.25)', // resolved from --accent-rgb at draw time
-  selectionBorder: '#F59E0B',         // resolved from --accent at draw time
-  playhead: '#FF5252',
-  grid: 'rgba(255,255,255,0.06)',
-  text: '#94a3b8',
-  textBright: '#e2e8f0',
-  noiseProfile: '#FF5252',
-  fadeOverlay: 'rgba(245,158,11,0.15)', // resolved from --accent-rgb at draw time
-};
 
 // Resample AudioBuffer channel data to fit pixel width
 function getPeaks(channelData, width, startSample = 0, endSample) {
@@ -348,22 +337,13 @@ export default function WaveformEditor({ audioContext, onExport }) {
     canvas.height = canvasHeight;
 
     const draw = () => {
-      // Resolve CSS custom properties for canvas (ctx.fillStyle can't use var(...))
-      const accentRgb = getComputedStyle(document.documentElement).getPropertyValue('--accent-rgb').trim() || '245,158,11';
-      const accentHex = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#F59E0B';
-      const resolvedColors = {
-        ...COLORS,
-        wave: accentHex,
-        selection: `rgba(${accentRgb},0.25)`,
-        selectionBorder: accentHex,
-        fadeOverlay: `rgba(${accentRgb},0.15)`,
-      };
+      const resolvedColors = readEditorPalette((name) => getComputedStyle(document.documentElement).getPropertyValue(name));
       ctx.fillStyle = resolvedColors.panel;
       ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
       if (!audioBuffer) {
         ctx.fillStyle = resolvedColors.text;
-        ctx.font = '13px Inter, sans-serif';
+        ctx.font = `400 14px ${resolvedColors.mono}`;
         ctx.textAlign = 'center';
         ctx.fillText('Drop an audio file or click "Import" to begin editing', canvasWidth / 2, canvasHeight / 2);
         return;
@@ -392,7 +372,7 @@ export default function WaveformEditor({ audioContext, onExport }) {
         ctx.stroke();
         // Time label
         ctx.fillStyle = resolvedColors.text;
-        ctx.font = '10px JetBrains Mono, monospace';
+        ctx.font = `400 11px ${resolvedColors.mono}`;
         ctx.textAlign = 'center';
         const label = t >= 60 ? `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}` : t.toFixed(1) + 's';
         ctx.fillText(label, x, 12);
@@ -424,7 +404,7 @@ export default function WaveformEditor({ audioContext, onExport }) {
       }
 
       // Center line
-      ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+      ctx.strokeStyle = resolvedColors.centre;
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(0, mid);
@@ -451,7 +431,7 @@ export default function WaveformEditor({ audioContext, onExport }) {
 
       // Duration label
       ctx.fillStyle = resolvedColors.textBright;
-      ctx.font = '11px JetBrains Mono, monospace';
+      ctx.font = `400 12px ${resolvedColors.mono}`;
       ctx.textAlign = 'right';
       ctx.fillText(`${duration.toFixed(2)}s | ${sr}Hz | ${audioBuffer.numberOfChannels}ch`, canvasWidth - 8, canvasHeight - 8);
 
@@ -1080,118 +1060,91 @@ export default function WaveformEditor({ audioContext, onExport }) {
   // Hidden file inputs
   const trackInputRef = useRef(null);
 
+  const noBuffer = !audioBuffer;
+  const selection = selStart !== null && selEnd !== null && Math.abs(selEnd - selStart) > 0.001;
+
   return (
-    <div className="flex flex-col h-full bg-[#050A1C] text-slate-300 font-sans select-none">
-      {/* Toolbar */}
-      <div className="flex items-center gap-1 px-3 py-1.5 bg-[#0D1428] border-b border-slate-800 text-[11px] flex-wrap">
-        {/* File */}
-        <button onClick={() => fileInputRef.current?.click()} className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold">Import</button>
-        <input ref={fileInputRef} type="file" accept="audio/*" className="hidden" onChange={(e) => { if (e.target.files[0]) handleFileLoad(e.target.files[0]); e.target.value = ''; }} />
-        <button onClick={exportWav} disabled={!audioBuffer} className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold disabled:opacity-30">Export WAV</button>
-        <div className="w-px h-5 bg-slate-700 mx-1" />
+    <div className="flex flex-col h-full select-none fp-centre" style={{ color: 'var(--fp-legend)', fontFamily: 'var(--fp-font-legend)' }}>
+      <div className="fp-bar" style={{ flexWrap: 'wrap', gap: 12 }} role="toolbar" aria-label="Editor">
+        <div className="fp-keys" role="group" aria-label="File">
+          <Key onClick={() => fileInputRef.current?.click()}>import</Key>
+          <input ref={fileInputRef} type="file" accept="audio/*" className="hidden" onChange={(e) => { if (e.target.files[0]) handleFileLoad(e.target.files[0]); e.target.value = ''; }} />
+          <Key onClick={exportWav} disabled={noBuffer}>export wav</Key>
+        </div>
 
-        {/* Transport */}
-        <button onClick={isPlaying ? stopAudio : playAudio} disabled={!audioBuffer} className={`px-2.5 py-1 rounded font-semibold ${isPlaying ? 'bg-red-600 text-white' : 'bg-emerald-700 text-white'} disabled:opacity-30`}>
-          {isPlaying ? 'Stop' : 'Play'}
-        </button>
-        <div className="w-px h-5 bg-slate-700 mx-1" />
+        <Key lit={isPlaying ? 'green' : null} pressed={isPlaying} onClick={isPlaying ? stopAudio : playAudio} disabled={noBuffer}>
+          {isPlaying ? 'stop' : 'play'}
+        </Key>
 
-        {/* Edit */}
-        <button onClick={undo} disabled={undoStack.length === 0} className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30" title="Undo (Ctrl+Z)">Undo</button>
-        <button onClick={redo} disabled={redoStack.length === 0} className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30" title="Redo (Ctrl+Y)">Redo</button>
-        <div className="w-px h-5 bg-slate-700 mx-1" />
-        <button onClick={cutSelection} disabled={!audioBuffer} className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30" title="Cut (Ctrl+X)">Cut</button>
-        <button onClick={copySelection} disabled={!audioBuffer} className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30" title="Copy (Ctrl+C)">Copy</button>
-        <button onClick={paste} disabled={!hasClipboardContent} className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30" title="Paste (Ctrl+V)">Paste</button>
-        <button onClick={deleteSelection} disabled={!audioBuffer} className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30" title="Delete">Delete</button>
-        <button onClick={silenceSelection} disabled={!audioBuffer} className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-30" title="Silence Selection">Silence</button>
-        <div className="w-px h-5 bg-slate-700 mx-1" />
+        <div className="fp-keys" role="group" aria-label="Edit">
+          <Key onClick={undo} disabled={undoStack.length === 0} title="Undo (Ctrl+Z)">undo</Key>
+          <Key onClick={redo} disabled={redoStack.length === 0} title="Redo (Ctrl+Y)">redo</Key>
+          <Key onClick={cutSelection} disabled={noBuffer} title="Cut (Ctrl+X)">cut</Key>
+          <Key onClick={copySelection} disabled={noBuffer} title="Copy (Ctrl+C)">copy</Key>
+          <Key onClick={paste} disabled={!hasClipboardContent} title="Paste (Ctrl+V)">paste</Key>
+          <Key onClick={deleteSelection} disabled={noBuffer} title="Delete">delete</Key>
+          <Key onClick={silenceSelection} disabled={noBuffer}>silence</Key>
+        </div>
 
-        {/* Effects */}
-        <button onClick={fadeIn} disabled={!audioBuffer} className="px-2 py-1 rounded bg-amber-900/40 hover:bg-amber-800/50 text-amber-300 disabled:opacity-30">Fade In</button>
-        <button onClick={fadeOut} disabled={!audioBuffer} className="px-2 py-1 rounded bg-amber-900/40 hover:bg-amber-800/50 text-amber-300 disabled:opacity-30">Fade Out</button>
-        <button onClick={normalize} disabled={!audioBuffer} className="px-2 py-1 rounded bg-amber-900/40 hover:bg-amber-800/50 text-amber-300 disabled:opacity-30">Normalize</button>
-        <button onClick={trimSilence} disabled={!audioBuffer} className="px-2 py-1 rounded bg-amber-900/40 hover:bg-amber-800/50 text-amber-300 disabled:opacity-30">Trim Silence</button>
-        <div className="w-px h-5 bg-slate-700 mx-1" />
+        <div className="fp-keys" role="group" aria-label="Effects">
+          <Key onClick={fadeIn} disabled={noBuffer}>fade in</Key>
+          <Key onClick={fadeOut} disabled={noBuffer}>fade out</Key>
+          <Key onClick={normalize} disabled={noBuffer}>normalize</Key>
+          <Key onClick={trimSilence} disabled={noBuffer}>trim silence</Key>
+        </div>
 
-        {/* Noise Removal */}
-        <button onClick={captureNoiseProfile} disabled={!audioBuffer} className={`px-2 py-1 rounded font-semibold disabled:opacity-30 ${noiseProfile ? 'bg-amber-700 text-white' : 'bg-slate-800 hover:bg-slate-700 text-amber-300'}`}>
-          {noiseProfile ? 'Re-capture Noise' : 'Capture Noise'}
-        </button>
-        <button onClick={applyNoiseRemoval} disabled={!noiseProfile} className="px-2 py-1 rounded bg-red-900/40 hover:bg-red-800/50 text-red-300 font-semibold disabled:opacity-30">Remove Noise</button>
-        <select value={noiseReduction} onChange={(e) => setNoiseReduction(Number(e.target.value))} className="bg-slate-800 text-slate-300 rounded px-1.5 py-1 text-[10px] border border-slate-700">
-          <option value={6}>Light (-6dB)</option>
-          <option value={12}>Medium (-12dB)</option>
-          <option value={18}>Heavy (-18dB)</option>
-          <option value={24}>Extreme (-24dB)</option>
-        </select>
-        <div className="w-px h-5 bg-slate-700 mx-1" />
+        <div className="fp-keys" role="group" aria-label="Noise removal" style={{ alignItems: 'center' }}>
+          <Key lit={noiseProfile ? 'sel' : null} onClick={captureNoiseProfile} disabled={noBuffer}>
+            {noiseProfile ? 'recapture noise' : 'capture noise'}
+          </Key>
+          <Key onClick={applyNoiseRemoval} disabled={!noiseProfile}>remove noise</Key>
+          <select value={noiseReduction} onChange={(e) => setNoiseReduction(Number(e.target.value))} className="fp-field" style={{ width: 'auto', height: 24 }} aria-label="Noise reduction amount">
+            <option value={6}>light, -6 dB</option>
+            <option value={12}>medium, -12 dB</option>
+            <option value={18}>heavy, -18 dB</option>
+            <option value={24}>extreme, -24 dB</option>
+          </select>
+        </div>
 
-        {/* Sermon Master */}
-        <div className="w-px h-5 bg-slate-700 mx-1" />
-        <select
-          value={masterPreset}
-          onChange={e => setMasterPreset(e.target.value)}
-          disabled={!!masterStage}
-          className="bg-[#1a0a00] text-amber-300 rounded px-1.5 py-1 text-[10px] border border-amber-800/60 disabled:opacity-40"
-        >
-          <option value="sermon">Sermon (Warm)</option>
-          <option value="podcast">Podcast (Crisp)</option>
-          <option value="broadcast">Broadcast (Punchy)</option>
-        </select>
-        <button
-          onClick={sermonMaster}
-          disabled={!audioBuffer || !!masterStage}
-          className="px-3 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white font-bold text-[11px] disabled:opacity-40 whitespace-nowrap shadow-[0_0_10px_rgba(var(--accent-rgb),0.35)]"
-          title="One-click podcast mastering: noise reduction → EQ warmth → compression → limiting → normalize"
-        >
-          {masterStage ? '⏳ Processing...' : '🎙 Sermon Master'}
-        </button>
-        {masterProgress > 0 && (
-          <div className="flex items-center gap-1.5">
-            <div className="w-24 h-1.5 bg-slate-700 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-amber-500 rounded-full transition-all duration-300"
-                style={{ width: `${masterProgress}%` }}
-              />
-            </div>
-            <span className="text-[10px] text-amber-400 font-mono">{masterProgress}%</span>
-          </div>
-        )}
-        <div className="w-px h-5 bg-slate-700 mx-1" />
+        <div className="fp-keys" role="group" aria-label="Mastering" style={{ alignItems: 'center' }}>
+          <select value={masterPreset} onChange={(e) => setMasterPreset(e.target.value)} disabled={!!masterStage} className="fp-field" style={{ width: 'auto', height: 24 }} aria-label="Mastering preset">
+            <option value="sermon">sermon, warm</option>
+            <option value="podcast">podcast, crisp</option>
+            <option value="broadcast">broadcast, punchy</option>
+          </select>
+          <Key lit={masterStage ? 'orange' : null} onClick={sermonMaster} disabled={noBuffer || !!masterStage}>
+            {masterStage ? 'mastering' : 'sermon master'}
+          </Key>
+          <InfoTip label="Sermon master">Noise reduction, warmth EQ, compression, limiting and normalise in one pass.</InfoTip>
+          {masterProgress > 0 && <span className="fp-num fp-sub">{masterProgress}%</span>}
+        </div>
 
-        {/* Multi-track */}
-        <button onClick={() => trackInputRef.current?.click()} className="px-2 py-1 rounded bg-cyan-900/40 hover:bg-cyan-800/50 text-cyan-300 disabled:opacity-30">+ Track</button>
-        <input ref={trackInputRef} type="file" accept="audio/*" className="hidden" onChange={(e) => { if (e.target.files[0]) addTrack(e.target.files[0]); e.target.value = ''; }} />
-        {tracks.length > 1 && (
-          <button onClick={mixDown} className="px-2 py-1 rounded bg-cyan-900/40 hover:bg-cyan-800/50 text-cyan-300">Mix Down</button>
-        )}
+        <div className="fp-keys" role="group" aria-label="Tracks">
+          <Key onClick={() => trackInputRef.current?.click()}>+ track</Key>
+          <input ref={trackInputRef} type="file" accept="audio/*" className="hidden" onChange={(e) => { if (e.target.files[0]) addTrack(e.target.files[0]); e.target.value = ''; }} />
+          {tracks.length > 1 && <Key onClick={mixDown}>mix down</Key>}
+        </div>
 
-        {/* Zoom */}
-        <div className="ml-auto flex items-center gap-1 text-[10px] text-slate-500">
-          <button onClick={() => setZoom(z => Math.min(z * 1.3, audioBuffer ? canvasWidth * 10 / audioBuffer.duration : 9999))} className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-400">+</button>
-          <button onClick={() => setZoom(z => Math.max(5, z * 0.7))} className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-400">-</button>
-          <span className="font-mono">{zoom.toFixed(0)}px/s</span>
-          {audioBuffer && (
-            <button onClick={() => { setZoom(canvasWidth / audioBuffer.duration); setScrollX(0); }} className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-400">Fit</button>
-          )}
+        <div className="fp-bar-end" role="group" aria-label="Zoom">
+          <Key onClick={() => setZoom(z => Math.min(z * 1.3, audioBuffer ? canvasWidth * 10 / audioBuffer.duration : 9999))} aria-label="zoom in">+</Key>
+          <Key onClick={() => setZoom(z => Math.max(5, z * 0.7))} aria-label="zoom out">−</Key>
+          <span className="fp-num fp-sub">{zoom.toFixed(0)} px/s</span>
+          {audioBuffer && <Key onClick={() => { setZoom(canvasWidth / audioBuffer.duration); setScrollX(0); }}>fit</Key>}
         </div>
       </div>
 
-      {/* Multi-track lane headers */}
       {tracks.length > 1 && (
-        <div className="flex gap-1 px-3 py-1 bg-[#0A0F20] border-b border-slate-800 text-[10px] overflow-x-auto">
+        <div className="fp-bar" role="group" aria-label="Track lanes">
           {tracks.map((t, idx) => (
-            <div key={idx} className={`flex items-center gap-1 px-2 py-0.5 rounded ${idx === activeTrackIdx ? 'bg-amber-900/40 border border-amber-500/50' : 'bg-slate-800/50'}`}>
-              <button onClick={() => { setActiveTrackIdx(idx); setAudioBuffer(t.buffer); }} className="font-semibold truncate max-w-[100px]">{t.name}</button>
-              <button onClick={() => setTracks(prev => prev.map((tr, i) => i === idx ? { ...tr, muted: !tr.muted } : tr))} className={`px-1 rounded ${t.muted ? 'text-red-400' : 'text-slate-500'}`}>M</button>
-              <button onClick={() => setTracks(prev => prev.map((tr, i) => i === idx ? { ...tr, solo: !tr.solo } : tr))} className={`px-1 rounded ${t.solo ? 'text-amber-400' : 'text-slate-500'}`}>S</button>
-            </div>
+            <span key={idx} className="fp-keys" style={{ flexWrap: 'nowrap' }}>
+              <Key lit={idx === activeTrackIdx ? 'sel' : null} pressed={idx === activeTrackIdx} onClick={() => { setActiveTrackIdx(idx); setAudioBuffer(t.buffer); }}>{t.name}</Key>
+              <Key lit={t.muted ? 'amber' : null} pressed={t.muted} aria-label={`mute ${t.name}`} onClick={() => setTracks(prev => prev.map((tr, i) => i === idx ? { ...tr, muted: !tr.muted } : tr))}>m</Key>
+              <Key lit={t.solo ? 'sel' : null} pressed={t.solo} aria-label={`solo ${t.name}`} onClick={() => setTracks(prev => prev.map((tr, i) => i === idx ? { ...tr, solo: !tr.solo } : tr))}>s</Key>
+            </span>
           ))}
         </div>
       )}
 
-      {/* Waveform Canvas */}
       <div ref={containerRef} className="flex-1 relative cursor-crosshair overflow-hidden" onWheel={handleWheel}>
         <canvas
           ref={canvasRef}
@@ -1204,17 +1157,16 @@ export default function WaveformEditor({ audioContext, onExport }) {
         />
       </div>
 
-      {/* Status bar */}
-      <div className="flex items-center gap-4 px-3 py-1 bg-[#0D1428] border-t border-slate-800 text-[10px] font-mono text-slate-500">
-        <span>Playhead: {playheadPos.toFixed(2)}s</span>
-        {audioBuffer && <span>Duration: {audioBuffer.duration.toFixed(2)}s</span>}
-        {audioBuffer && <span>SR: {audioBuffer.sampleRate}Hz</span>}
-        {selStart !== null && selEnd !== null && Math.abs(selEnd - selStart) > 0.001 && (
-          <span className="text-amber-400">Sel: {Math.min(selStart, selEnd).toFixed(2)}s → {Math.max(selStart, selEnd).toFixed(2)}s ({Math.abs(selEnd - selStart).toFixed(2)}s)</span>
+      <div className="fp-bar fp-num fp-sub" style={{ borderTop: '1px solid var(--fp-seam)', borderBottom: 0, gap: 16 }}>
+        <span>playhead {playheadPos.toFixed(2)} s</span>
+        {audioBuffer && <span>length {audioBuffer.duration.toFixed(2)} s</span>}
+        {audioBuffer && <span>{audioBuffer.sampleRate} Hz</span>}
+        {selection && (
+          <span>sel {Math.min(selStart, selEnd).toFixed(2)}–{Math.max(selStart, selEnd).toFixed(2)} s ({Math.abs(selEnd - selStart).toFixed(2)} s)</span>
         )}
-        {noiseProfile && <span className="text-amber-400">Noise profile captured</span>}
-        {masterStage && <span className="text-amber-400 animate-pulse">{masterStage}</span>}
-        <span className="ml-auto">Undo: {undoStack.length} | Redo: {redoStack.length}</span>
+        {noiseProfile && <span>noise profile set</span>}
+        {masterStage && <span>{masterStage}</span>}
+        <span className="fp-bar-end">undo {undoStack.length} · redo {redoStack.length}</span>
       </div>
     </div>
   );

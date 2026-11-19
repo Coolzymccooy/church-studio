@@ -1,4 +1,5 @@
 import Key from '../faceplate/Key.jsx';
+import LoudnessPanel from './LoudnessPanel.jsx';
 import Lamp from '../faceplate/Lamp.jsx';
 
 function TrimPlate({ t, formatTime }) {
@@ -51,6 +52,7 @@ function ReviewChip({ v }) {
 /** The live tab: the visualiser canvas, its state chips, the sound-check and error cards, and file trim. */
 export default function LiveView({ v, canvasRef }) {
   return (
+    <div className="flex-1 flex min-h-0 overflow-hidden">
     <div className="flex-1 relative overflow-hidden">
       {!v.isLive && !v.isPlayingFile && v.mode === 'live' && (
         <div className="fp-overlay">
@@ -82,9 +84,10 @@ export default function LiveView({ v, canvasRef }) {
           </div>
         </div>
       )}
-      <canvas ref={canvasRef} width={1000} height={500}
-        className="w-full h-full object-cover" style={{ opacity: v.isBypassed ? 0.4 : 0.9, filter: v.isBypassed ? 'grayscale(1)' : undefined }} />
+      <canvas ref={canvasRef} className="block w-full h-full" role="img" aria-label="Live analyser: spectrum, gate state and level history" />
       {v.mode === 'file' && v.fileInfo && v.trim.duration > 0 && <TrimPlate t={v.trim} formatTime={v.formatTime} />}
+    </div>
+    <LoudnessPanel {...v.loudness} />
     </div>
   );
 }

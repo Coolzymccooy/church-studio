@@ -38,9 +38,9 @@ function Routing({ s }) {
         <Lamp tone={s.isLive ? 'g' : 'off'}>{s.isLive ? 'active' : 'idle'}</Lamp>
       </div>
       <div className="fp-mod-bd">
-        <div className="fp-row"><span>Input</span><span className="fp-sub">{s.route?.input || 'waiting'}</span></div>
-        <div className="fp-row"><span>Monitor</span><span className="fp-sub">{s.route?.monitor || s.monitorLabel}</span></div>
-        <div className="fp-row"><span>Broadcast</span><span className="fp-sub">{s.route?.broadcast || s.broadcastLabel}</span></div>
+        <div className="fp-row"><span>Input</span><span className="fp-sub fp-ellipsis">{s.route?.input || 'waiting'}</span></div>
+        <div className="fp-row"><span>Monitor</span><span className="fp-sub fp-ellipsis">{s.route?.monitor || s.monitorLabel}</span></div>
+        <div className="fp-row"><span>Broadcast</span><span className="fp-sub fp-ellipsis">{s.route?.broadcast || s.broadcastLabel}</span></div>
       </div>
     </section>
   );
