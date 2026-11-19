@@ -176,3 +176,36 @@
 .fp-menu-item:hover:not(:disabled) { background: var(--fp-key); }
 .fp-menu-item:disabled { color: var(--fp-muted); cursor: not-allowed; }
 .fp-menu-sep { margin: 4px 0; border-top: 1px solid var(--fp-seam); }
+
+/* ---------- loudness module (live view) ---------- */
+.fp-loud {
+  width: 264px; flex: none; display: flex; flex-direction: column; gap: 10px; padding: 12px;
+  background: var(--fp-plate); border-left: 1px solid var(--fp-seam); color: var(--fp-legend);
+  font-family: var(--fp-font-legend); overflow-y: auto;
+}
+.fp-loud-read { padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.fp-loud-big { display: flex; align-items: baseline; gap: 6px; }
+.fp-loud-big .fp-num { font-size: var(--fp-text-3xl); line-height: 1; color: var(--fp-glass-text); }
+.fp-loud-big small { font: var(--fp-weight-medium) var(--fp-text-xs)/1 var(--fp-font-mono); color: var(--fp-glass-dim); }
+.fp-gauge { position: relative; height: 14px; border-radius: var(--fp-radius-meter); background: var(--fp-meter-bg); overflow: hidden; }
+.fp-gauge-zone { position: absolute; top: 0; bottom: 0; background: var(--fp-led-g-dim); }
+.fp-gauge-fill { position: absolute; left: 0; top: 4px; bottom: 4px; transition: width 240ms linear; background: var(--fp-glass-text); }
+.fp-gauge-fill.fp-tone-good { background: var(--fp-led-g); }
+.fp-gauge-fill.fp-tone-caution { background: var(--fp-led-a); }
+.fp-gauge-fill.fp-tone-fault { background: var(--fp-led-r); }
+.fp-gauge-fill.fp-tone-idle { background: var(--fp-glass-dim); }
+.fp-gauge-tick { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--fp-glass-text); transition: left 120ms linear; }
+.fp-gauge-int { position: absolute; bottom: 0; width: 0; height: 0; margin-left: -4px; border: 4px solid transparent; border-bottom-color: var(--fp-sel); }
+.fp-gauge-scale { position: relative; height: 14px; font: var(--fp-weight-regular) var(--fp-text-xs)/14px var(--fp-font-mono); color: var(--fp-muted); }
+.fp-gauge-scale span { position: absolute; transform: translateX(-50%); }
+.fp-gauge-scale span:first-child { transform: none; }
+.fp-gauge-scale span:last-child { transform: translateX(-100%); }
+.fp-loud-hist { display: block; width: 100%; height: 140px; flex: 1 1 140px; min-height: 100px; border-radius: var(--fp-radius-meter); }
+@media (prefers-reduced-motion: reduce) { .fp-gauge-fill, .fp-gauge-tick { transition: none; } }
+.fp-minigauge { position: relative; align-self: center; width: 56px; height: 6px; border-radius: 2px; background: var(--fp-meter-bg); overflow: hidden; }
+.fp-minigauge-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--fp-glass-dim); transition: width 240ms linear; }
+.fp-minigauge-fill.fp-tone-good { background: var(--fp-led-g); }
+.fp-minigauge-fill.fp-tone-caution { background: var(--fp-led-a); }
+.fp-minigauge-fill.fp-tone-fault { background: var(--fp-led-r); }
+.fp-minigauge-target { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--fp-glass-text); }
+@media (prefers-reduced-motion: reduce) { .fp-minigauge-fill { transition: none; } }

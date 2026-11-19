@@ -6,6 +6,7 @@ import { engineState, gateLamp, headerReadout, obsLamp, recLamp } from '../../li
 import { useTheme } from '../../contexts/ThemeContext.jsx';
 import { useObsStatus } from '../obs/useObsStatus.js';
 import { useRecorderStatus } from '../recorder/useRecorder.js';
+import { loudFraction, lufsText, targetDelta } from '../../lib/loudness.js';
 import DeskClock from './DeskClock.jsx';
 import Glass from './Glass.jsx';
 import Key from './Key.jsx';
@@ -19,7 +20,7 @@ import TwoPressKey from './TwoPressKey.jsx';
  */
 export default function DeskHeader({
   isLive, isPlayingFile, audioStats, gateClosed, onToggleEngine, onShowSettings,
-  monitor, bypassed, onToggleBypass, onReset, onShowObs, onShowLink, onShowHelp,
+  monitor, bypassed, onToggleBypass, onReset, onShowObs, onShowLink, onShowHelp, loudness = {},
 }) {
   const { finish, cycleFinish } = useTheme();
   const [busy, setBusy] = useState(false);
@@ -56,6 +57,8 @@ export default function DeskHeader({
         ))}
       </Glass>
 
+      <LoudnessChip st={loudness.st} target={loudness.target} />
+
       <div className="fp-grp" role="group" aria-label="Status">
         {lamps.map((l) => <Lamp key={l.word.split(' ')[0]} tone={l.tone}>{l.word}</Lamp>)}
       </div>
@@ -74,5 +77,21 @@ export default function DeskHeader({
         <DeskClock />
       </div>
     </header>
+  );
+}
+
+const CHIP_TONE = { good: 'fp-good', caution: 'fp-caution', fault: 'fp-fault', low: '', idle: 'fp-glass-dim' };
+
+/** Always-visible stream loudness: short-term LUFS, a mini gauge with the target mark, distance. */
+function LoudnessChip({ st, target }) {
+  const delta = targetDelta(st, target);
+  return (
+    <Glass className="fp-read" role="group" aria-label={`Stream loudness ${lufsText(st)} LUFS, ${delta.text}`}>
+      <span><em>lufs</em><span className={CHIP_TONE[delta.tone]}>{lufsText(st)}</span></span>
+      <span className="fp-minigauge" aria-hidden="true">
+        <span className={`fp-minigauge-fill fp-tone-${delta.tone}`} style={{ width: `${loudFraction(st) * 100}%` }} />
+        {typeof target === 'number' && <span className="fp-minigauge-target" style={{ left: `${loudFraction(target) * 100}%` }} />}
+      </span>
+    </Glass>
   );
 }

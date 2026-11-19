@@ -29,7 +29,7 @@ import { loadRnnoiseAssets } from './lib/rnnoise';
 import { pickVideoMimeType } from './lib/mediaFormats';
 import { readVisualiserPalette } from './lib/visualiserPalette.js';
 import {
-  bandEdges, bandLevels, createScope, dbFraction, drawScope, fitCanvas, gateState, stepScope,
+  bandEdges, bandLevels, createScope, createWaterfall, dbFraction, drawScope, fitCanvas, gateState, stepScope,
 } from './lib/liveScope.js';
 import {
   describeBroadcastRoute,
@@ -2328,6 +2328,7 @@ const AudioProcessor = ({ goHome }) => {
     const palette = readVisualiserPalette((name) => rootStyle.getPropertyValue(name));
     const scopeBands = bandEdges(audioContext?.sampleRate || 48000, bufferLength);
     let scope = createScope(scopeBands.length);
+    const waterfall = createWaterfall();
     let lastFrameAt = 0;
 
     const draw = (timestamp) => {
@@ -2801,6 +2802,7 @@ const AudioProcessor = ({ goHome }) => {
           gateClosed,
           voiceActive: localVoiceActive,
         });
+        const prevHistory = scope.history;
         scope = stepScope(scope, bandLevels(freqData, scopeBands), frameDt, {
           level: dbFraction(db, -70, 0),
           state,
@@ -2811,7 +2813,7 @@ const AudioProcessor = ({ goHome }) => {
           confidence: Math.min(100, Math.max(0, (voiceRatio - 1) * 50)),
           riderDb: 20 * Math.log10(autoGainVal || 0.00001),
           thresholdDb: settingsRef.current.denoise && !settingsRef.current.isBypassed ? settingsRef.current.threshold : null,
-        }, scopeBands);
+        }, scopeBands, waterfall, scope.history !== prevHistory);
       }
 
       // Smart Gain Rider
@@ -3142,6 +3144,7 @@ const AudioProcessor = ({ goHome }) => {
         onShowObs={isTauri ? () => setShowObs(true) : null}
         onShowLink={() => setShowLink(true)}
         onShowHelp={() => setShowHelp(true)}
+        loudness={{ st: lufsST, target: loudnessTarget }}
       />
       <HelpCorner open={showHelp} onClose={() => setShowHelp(false)} />
 
@@ -3271,6 +3274,7 @@ const AudioProcessor = ({ goHome }) => {
               engineError: audioEngineError,
               onErrorBack: () => { cleanupAudio(); setIsLive(false); },
               onGoLive: toggleLive,
+              loudness: { m: lufsM, st: lufsST, i: lufsI, target: loudnessTarget, limiterOn: Boolean(features.streamingSafe) },
               trim: {
                 duration: fileDuration,
                 start: trimStart,
@@ -3314,9 +3318,6 @@ const AudioProcessor = ({ goHome }) => {
           broadcastLabel,
           targetApp: outputTarget,
           onCycleTarget: cycleOutputTarget,
-          streamSafe: features.streamingSafe,
-          target: loudnessTarget,
-          lufsST,
           features,
         }} />
 

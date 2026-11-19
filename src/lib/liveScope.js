@@ -5,7 +5,7 @@
  */
 
 export const SCOPE = {
-  bands: 40,
+  bands: 64,
   fMin: 40,
   fMax: 16000,
   dbMin: -100, // AnalyserNode default minDecibels: byte 0
@@ -14,7 +14,7 @@ export const SCOPE = {
   fallRate: 1.6,
   peakHoldS: 0.9,
   peakFallRate: 0.6,
-  historyS: 8,
+  historyS: 6,
   voiceLo: 300,
   voiceHi: 3400,
 };
@@ -105,16 +105,6 @@ export function gateState({ denoise, bypassed, gateClosed, voiceActive }) {
   return voiceActive ? 'voice' : 'open';
 }
 
-const SEG = 4;
-const GAP = 2;
-
-function bandColour(p, state, inVoice) {
-  if (state === 'bypass') return p.dim;
-  if (state === 'voice') return inVoice ? p.g : p.gDim;
-  if (state === 'held') return inVoice ? p.a : p.aDim;
-  return inVoice ? p.text : p.dim;
-}
-
 function stateColour(p, state) {
   if (state === 'voice') return p.g;
   if (state === 'held') return p.a;
@@ -171,29 +161,91 @@ function drawGrid(ctx, p, box) {
   });
 }
 
-function drawBands(ctx, p, box, f, bands) {
+function curvePoints(box, values, bands) {
   const { x, y, w, h } = box;
-  const n = bands.length;
-  const colW = w / n;
-  const barW = Math.max(2, colW - 3);
-  const segs = Math.floor(h / (SEG + GAP));
+  return bands.map((band, i) => ({
+    x: x + freqFraction(band.centre) * w,
+    y: y + h - Math.min(1, Math.max(0, values[i])) * h,
+  }));
+}
+
+/** A smooth line through the points (midpoint quadratic curves). */
+function tracePath(ctx, pts, join = false) {
+  if (join) ctx.lineTo(pts[0].x, pts[0].y);
+  else ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length - 1; i += 1) {
+    const mx = (pts[i].x + pts[i + 1].x) / 2;
+    const my = (pts[i].y + pts[i + 1].y) / 2;
+    ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
+  }
+  const last = pts[pts.length - 1];
+  ctx.lineTo(last.x, last.y);
+}
+
+function drawSpectrum(ctx, p, box, f, bands) {
+  const colour = stateColour(p, f.state);
+  const pts = curvePoints(box, f.levels, bands);
+  const bottom = box.y + box.h;
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, bottom);
+  tracePath(ctx, pts, true);
+  ctx.lineTo(pts[pts.length - 1].x, bottom);
+  ctx.closePath();
+  ctx.globalAlpha = 0.18;
+  ctx.fillStyle = colour;
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.beginPath();
+  tracePath(ctx, curvePoints(box, f.peaks, bands));
+  ctx.strokeStyle = p.dim;
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.beginPath();
+  tracePath(ctx, pts);
+  ctx.strokeStyle = colour;
+  ctx.lineWidth = 2;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+}
+
+/** Off-screen spectrogram that scrolls down one row per timeline sample. */
+export function createWaterfall() {
+  if (typeof document === 'undefined') return null;
+  return { canvas: document.createElement('canvas'), rows: 0 };
+}
+
+function addWaterfallRow(wf, p, w, h, f, bands) {
+  const c = wf.canvas;
+  if (c.width !== w || c.height !== h) {
+    c.width = w;
+    c.height = h;
+    wf.rows = 0;
+  }
+  const g = c.getContext('2d');
+  g.drawImage(c, 0, 1);
+  g.fillStyle = p.bg;
+  g.fillRect(0, 0, w, 1);
+  const colour = stateColour(p, f.state);
   bands.forEach((band, i) => {
-    const bx = x + i * colW + (colW - barW) / 2;
-    const inVoice = band.centre >= SCOPE.voiceLo && band.centre <= SCOPE.voiceHi;
-    const litSegs = Math.round(f.levels[i] * segs);
-    // Unlit cells are faint so the lit column reads first, like an LED bar graph.
-    ctx.globalAlpha = 0.35;
-    ctx.fillStyle = p.grid;
-    for (let s = litSegs; s < segs; s += 1) ctx.fillRect(bx, y + h - (s + 1) * (SEG + GAP) + GAP, barW, SEG);
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = bandColour(p, f.state, inVoice);
-    for (let s = 0; s < litSegs; s += 1) ctx.fillRect(bx, y + h - (s + 1) * (SEG + GAP) + GAP, barW, SEG);
-    const peakSeg = Math.round(f.peaks[i] * segs);
-    if (peakSeg > litSegs && peakSeg > 0) {
-      ctx.fillStyle = p.text;
-      ctx.fillRect(bx, y + h - peakSeg * (SEG + GAP) + GAP, barW, 2);
-    }
+    const x0 = freqFraction(band.fLo) * w;
+    const x1 = freqFraction(band.fHi) * w;
+    g.globalAlpha = Math.pow(Math.min(1, Math.max(0, f.levels[i])), 1.4);
+    g.fillStyle = colour;
+    g.fillRect(x0, 0, Math.max(1, x1 - x0), 1);
   });
+  g.globalAlpha = 1;
+}
+
+function drawWaterfall(ctx, p, box, wf) {
+  const { x, y, w, h } = box;
+  ctx.fillStyle = p.bg;
+  ctx.fillRect(x, y, w, h);
+  if (wf) ctx.drawImage(wf.canvas, x, y, w, h);
+  ctx.strokeStyle = p.grid;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+  label(ctx, p, 'now', x - 6, y + 10, 'right', p.dim, 10);
+  label(ctx, p, `-${SCOPE.historyS} s`, x - 6, y + h, 'right', p.dim, 10);
 }
 
 function drawThreshold(ctx, p, box, thresholdDb) {
@@ -210,40 +262,27 @@ function drawThreshold(ctx, p, box, thresholdDb) {
   label(ctx, p, `gate ${thresholdDb} dB`, x + w, yy - 6, 'right', p.a, 11);
 }
 
-function drawTimeline(ctx, p, box, history) {
-  const { x, y, w, h } = box;
-  ctx.fillStyle = p.grid;
-  ctx.fillRect(x, y + h - 1, w, 1);
-  const max = Math.round(SCOPE.historyS * 30);
-  const colW = w / max;
-  const start = max - history.length;
-  history.forEach((s, i) => {
-    const hh = Math.max(1, s.level * (h - 4));
-    ctx.fillStyle = stateColour(p, s.state);
-    ctx.fillRect(x + (start + i) * colW, y + h - 1 - hh, Math.max(1, colW - 0.5), hh);
-  });
-  label(ctx, p, `${SCOPE.historyS} s`, x, y + h + 14, 'left', p.dim, 10);
-  label(ctx, p, 'now', x + w, y + h + 14, 'right', p.dim, 10);
-}
-
 /**
  * Draws one frame. `size` is { w, h } in CSS px (the context is already scaled for the device
- * pixel ratio). `f` = { levels, peaks, history, state, confidence, riderDb, thresholdDb|null }.
+ * pixel ratio). `f` = { levels, peaks, history, state, confidence, riderDb, thresholdDb|null };
+ * `wf` is the waterfall from createWaterfall() and `newRow` says a timeline sample was added.
  */
-export function drawScope(ctx, p, size, f, bands) {
+export function drawScope(ctx, p, size, f, bands, wf = null, newRow = false) {
   const { w, h } = size;
   ctx.fillStyle = p.bg;
   ctx.fillRect(0, 0, w, h);
   const pad = 16;
   const left = pad + 28;
-  const timelineH = Math.min(64, Math.max(32, h * 0.12));
-  const spec = { x: left, y: 52, w: w - left - pad, h: Math.max(60, h - 52 - timelineH - 56) };
-  const line = { x: left, y: spec.y + spec.h + 30, w: spec.w, h: timelineH };
+  const specW = w - left - pad;
+  const avail = Math.max(120, h - 52 - 30 - 12);
+  const spec = { x: left, y: 52, w: specW, h: Math.round(avail * 0.6) };
+  const fall = { x: left, y: spec.y + spec.h + 30, w: specW, h: Math.max(40, avail - spec.h) };
   drawHeader(ctx, p, f, pad, w - pad * 2);
   drawGrid(ctx, p, spec);
-  drawBands(ctx, p, spec, f, bands);
+  drawSpectrum(ctx, p, spec, f, bands);
   if (f.thresholdDb !== null && f.thresholdDb !== undefined) drawThreshold(ctx, p, spec, f.thresholdDb);
-  drawTimeline(ctx, p, line, f.history);
+  if (wf && newRow) addWaterfallRow(wf, p, Math.max(1, Math.round(fall.w)), Math.max(1, Math.round(fall.h)), f, bands);
+  drawWaterfall(ctx, p, fall, wf);
 }
 
 /** Resizes the canvas backing store to its CSS box at the device pixel ratio; returns CSS size. */
