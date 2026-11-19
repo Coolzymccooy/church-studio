@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 
 /**
  * The ⓘ key that carries every explanation, so the faceplate itself shows only labels and state.
- * Hover or focus shows the tip; a click pins it; Escape or a click elsewhere closes it.
+ * Hover or focus shows the tip; a click pins it; Escape (wherever focus is) or a click elsewhere closes it.
  */
 export default function InfoTip({ label, children }) {
   const id = useId();
@@ -16,8 +16,16 @@ export default function InfoTip({ label, children }) {
     const onDown = (e) => {
       if (wrap.current && !wrap.current.contains(e.target)) setPinned(false);
     };
+    // Escape must still close a pinned tip after focus has moved to another control.
+    const onEscape = (e) => {
+      if (e.key === 'Escape') setPinned(false);
+    };
     document.addEventListener('pointerdown', onDown);
-    return () => document.removeEventListener('pointerdown', onDown);
+    document.addEventListener('keydown', onEscape);
+    return () => {
+      document.removeEventListener('pointerdown', onDown);
+      document.removeEventListener('keydown', onEscape);
+    };
   }, [pinned]);
 
   const onKeyDown = (e) => {
