@@ -188,9 +188,6 @@ export default function MenuBar({
       items: [
         { label: 'TIWATON Setup Guide', action: () => document.querySelector('[data-help-button]')?.click() },
         { label: 'Routing: OBS + Virtual Cable', action: () => document.querySelector('[data-help-button]')?.click() },
-        { separator: true },
-        { label: 'Version: TIWATON AI Studio v1.1', disabled: true },
-        { label: '26-node DSP Pipeline', disabled: true },
       ],
     },
   ];
