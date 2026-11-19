@@ -56,6 +56,11 @@ test('gain reduction text', () => {
   assert.equal(grText(0.05), 'gr 0.0');
   assert.equal(grText(3.24), 'gr -3.2');
   assert.equal(grText(undefined), 'gr 0.0');
+  assert.equal(grText(9.94), 'gr -9.9');
+  assert.equal(grText(9.96), 'gr -10');
+  assert.equal(grText(12.5), 'gr -13');
+  assert.equal(grText(250), 'gr -99');
+  for (const v of [0.3, 5.55, 9.96, 12.5, 40, 250]) assert.ok(grText(v).length <= 7, grText(v));
 });
 
 test('pan and send text', () => {

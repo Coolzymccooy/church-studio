@@ -190,7 +190,11 @@ Order of work:
 5. The `[data-theme]` accent system is retired: `ThemeContext` holds the finish and the header
    finish key cycles graphite, bone and auto. `--accent` stays at one fixed value only for the
    two browser landing pages, which the desktop app never shows; remove it when they move.
-6. Still to build from the canvas: bank keys, the voice module knobs that need engine work
+6. The mixer frame (done): bank keys above the strips (eight inputs per bank, then NDI), and a
+   footer of plates: scenes (now window with who loaded it, numbered keys, two presses to load,
+   store, a red delete mode), OBS (program scene with ‹ ›, two-press go-live and record keys with
+   timecode) and the recorder (round record key, two presses to stop, timer, markers, track keys).
+7. Still to build from the canvas: the voice module knobs that need engine work
    (warmth, clarity, hum), the OBS and recorder plates in the strip area, the setup screen as a
    full page, and the states board.
 
