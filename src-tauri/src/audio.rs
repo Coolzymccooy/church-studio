@@ -7,7 +7,7 @@
 /// profile capture from recent input audio.
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{
-    BufferSize, Device, SampleFormat, SampleRate, StreamConfig, SupportedStreamConfig,
+    BufferSize, Device, SampleFormat, StreamConfig, SupportedStreamConfig,
     SupportedStreamConfigRange,
 };
 use parking_lot::Mutex;
@@ -282,8 +282,7 @@ impl AudioEngine {
             || host.default_output_device(),
             "monitor output",
         )?;
-        let monitor_output_name = monitor_out_dev
-            .name()
+        let monitor_output_name = device_name(&monitor_out_dev)
             .unwrap_or_else(|_| "Unknown output".to_string());
 
         // Each device is opened once, for the first bus that claims it, in
@@ -327,11 +326,10 @@ impl AudioEngine {
 
         let (in_cfg, out_cfgs) = negotiate_stream_configs(&in_dev, &output_devices)?;
 
-        let sr = in_cfg.sample_rate().0;
-        let out_sr = out_cfgs[0].sample_rate().0;
+        let sr = in_cfg.sample_rate();
+        let out_sr = out_cfgs[0].sample_rate();
         let in_channels = (in_cfg.channels() as usize).max(1);
-        let input_device_name = in_dev
-            .name()
+        let input_device_name = device_name(&in_dev)
             .unwrap_or_else(|_| "Unknown input".to_string());
 
         let buf_frames = 256u32;
@@ -454,7 +452,7 @@ impl AudioEngine {
         let in_stream = match in_cfg.sample_format() {
             SampleFormat::F32 => in_dev
                 .build_input_stream(
-                    &in_stream_cfg,
+                    in_stream_cfg,
                     move |data: &[f32], _| processor.process(data, |sample| sample),
                     |e| log::error!("Input stream error: {e}"),
                     None,
@@ -462,7 +460,7 @@ impl AudioEngine {
                 .map_err(|e| e.to_string())?,
             SampleFormat::I16 => in_dev
                 .build_input_stream(
-                    &in_stream_cfg,
+                    in_stream_cfg,
                     move |data: &[i16], _| processor.process(data, i16_to_f32),
                     |e| log::error!("Input stream error: {e}"),
                     None,
@@ -470,7 +468,7 @@ impl AudioEngine {
                 .map_err(|e| e.to_string())?,
             SampleFormat::U16 => in_dev
                 .build_input_stream(
-                    &in_stream_cfg,
+                    in_stream_cfg,
                     move |data: &[u16], _| processor.process(data, u16_to_f32),
                     |e| log::error!("Input stream error: {e}"),
                     None,
@@ -494,7 +492,7 @@ impl AudioEngine {
             let out_stream = match out_cfg.sample_format() {
                 SampleFormat::F32 => out_dev
                     .build_output_stream(
-                        &out_stream_cfg,
+                        out_stream_cfg,
                         move |data: &mut [f32], _| {
                             write_output_data(data, &mut ring_cons, |sample| sample);
                         },
@@ -504,7 +502,7 @@ impl AudioEngine {
                     .map_err(|e| e.to_string())?,
                 SampleFormat::I16 => out_dev
                     .build_output_stream(
-                        &out_stream_cfg,
+                        out_stream_cfg,
                         move |data: &mut [i16], _| {
                             write_output_data(data, &mut ring_cons, f32_to_i16);
                         },
@@ -514,7 +512,7 @@ impl AudioEngine {
                     .map_err(|e| e.to_string())?,
                 SampleFormat::U16 => out_dev
                     .build_output_stream(
-                        &out_stream_cfg,
+                        out_stream_cfg,
                         move |data: &mut [u16], _| {
                             write_output_data(data, &mut ring_cons, f32_to_u16);
                         },
@@ -655,7 +653,7 @@ fn pick_extra_output(
         .map_err(|e| e.to_string())?
         .collect();
     let device = pick_device(devices, selection, || host.default_output_device(), kind)?;
-    let Ok(name) = device.name() else {
+    let Ok(name) = device_name(&device) else {
         return Ok(Some((device, format!("Unknown {kind}"))));
     };
     if taken_names.iter().any(|taken| *taken == name) {
@@ -885,7 +883,7 @@ pub fn list_devices(input: bool) -> Vec<AudioDeviceInfo> {
     } else {
         host.default_output_device()
     }
-    .and_then(|d| d.name().ok())
+    .and_then(|d| device_name(&d).ok())
     .unwrap_or_default();
 
     let devices = if input {
@@ -898,7 +896,7 @@ pub fn list_devices(input: bool) -> Vec<AudioDeviceInfo> {
         .map(|iter| {
             iter.enumerate()
                 .filter_map(|(index, device)| {
-                    device.name().ok().map(|name| AudioDeviceInfo {
+                    device_name(&device).ok().map(|name| AudioDeviceInfo {
                         id: format_device_id(index, &name),
                         is_default: name == default_name,
                         name,
@@ -920,7 +918,7 @@ fn pick_device(
             .into_iter()
             .enumerate()
             .find_map(|(index, device)| {
-                let name = device.name().ok()?;
+                let name = device_name(&device).ok()?;
                 let id = format_device_id(index, &name);
                 if selection == &id || selection == &name {
                     Some(device)
@@ -969,8 +967,8 @@ fn negotiate_stream_configs(
         return Err("Selected input and output devices do not expose any supported audio stream configuration".to_string());
     }
 
-    let mut preferred_rates = vec![in_default.sample_rate().0, 48_000, 44_100];
-    preferred_rates.extend(out_defaults.iter().map(|cfg| cfg.sample_rate().0));
+    let mut preferred_rates = vec![in_default.sample_rate(), 48_000, 44_100];
+    preferred_rates.extend(out_defaults.iter().map(|cfg| cfg.sample_rate()));
     preferred_rates.sort_unstable();
     preferred_rates.dedup();
 
@@ -994,22 +992,22 @@ fn negotiate_stream_configs(
     }
 
     for input_cfg in &in_ranges {
-        let min_rate = out_ranges_sets.iter().fold(input_cfg.min_sample_rate().0, |current, ranges| {
+        let min_rate = out_ranges_sets.iter().fold(input_cfg.min_sample_rate(), |current, ranges| {
             max(
                 current,
                 ranges
                     .iter()
-                    .map(|cfg| cfg.min_sample_rate().0)
+                    .map(|cfg| cfg.min_sample_rate())
                     .min()
                     .unwrap_or(current),
             )
         });
-        let max_rate = out_ranges_sets.iter().fold(input_cfg.max_sample_rate().0, |current, ranges| {
+        let max_rate = out_ranges_sets.iter().fold(input_cfg.max_sample_rate(), |current, ranges| {
             min(
                 current,
                 ranges
                     .iter()
-                    .map(|cfg| cfg.max_sample_rate().0)
+                    .map(|cfg| cfg.max_sample_rate())
                     .max()
                     .unwrap_or(current),
             )
@@ -1028,7 +1026,7 @@ fn negotiate_stream_configs(
             }
 
             if all_match {
-                return Ok((input_cfg.with_sample_rate(SampleRate(target_rate)), output_cfgs));
+                return Ok((input_cfg.with_sample_rate(target_rate), output_cfgs));
             }
         }
     }
@@ -1045,8 +1043,8 @@ fn find_config_for_rate(
 ) -> Option<SupportedStreamConfig> {
     ranges
         .iter()
-        .find(|cfg| rate >= cfg.min_sample_rate().0 && rate <= cfg.max_sample_rate().0)
-        .map(|cfg| cfg.with_sample_rate(SampleRate(rate)))
+        .find(|cfg| rate >= cfg.min_sample_rate() && rate <= cfg.max_sample_rate())
+        .map(|cfg| cfg.with_sample_rate(rate))
 }
 
 fn preferred_rate_in_range(min_rate: u32, max_rate: u32) -> u32 {
@@ -1057,6 +1055,14 @@ fn preferred_rate_in_range(min_rate: u32, max_rate: u32) -> u32 {
     } else {
         max_rate
     }
+}
+
+/// A device's display name (cpal 0.18 moved it into `description()`).
+fn device_name(device: &Device) -> Result<String, String> {
+    device
+        .description()
+        .map(|description| description.name().to_string())
+        .map_err(|e| e.to_string())
 }
 
 fn format_device_id(index: usize, name: &str) -> String {
@@ -1097,4 +1103,26 @@ fn f32_to_i16(sample: f32) -> i16 {
 #[inline]
 fn f32_to_u16(sample: f32) -> u16 {
     (((sample.clamp(-1.0, 1.0) + 1.0) * 0.5) * u16::MAX as f32).round() as u16
+}
+
+#[cfg(test)]
+mod device_probe {
+    //! Manual check of the real device lists (issue #25: a USB headset whose
+    //! mic and speaker are separate CoreAudio devices must appear in both).
+    //! Needs audio hardware, so it is ignored by default:
+    //! `cargo test print_devices -- --ignored --nocapture`.
+    use super::list_devices;
+
+    #[test]
+    #[ignore = "needs audio hardware; run manually"]
+    fn print_devices() {
+        for (label, input) in [("input", true), ("output", false)] {
+            let devices = list_devices(input);
+            println!("{label} devices ({}):", devices.len());
+            for device in &devices {
+                println!("  {}{}", device.name, if device.is_default { " (default)" } else { "" });
+            }
+            assert!(!devices.is_empty(), "no {label} devices found");
+        }
+    }
 }
