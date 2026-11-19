@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  isStopArmed,
+  stopArmKey,
   EMPTY_RECORDER_STATUS,
   RECORDER_STATUS_EVENT,
   armedIndices,
@@ -214,4 +216,27 @@ test('quickRecordView: after a recording offers the folder; errors win', () => {
   const failed = quickRecordView(done, 'disk full', false);
   assert.equal(failed.messageLevel, 'error');
   assert.equal(failed.message, 'disk full');
+});
+
+test('stop confirmation is keyed to the recording it was armed for', () => {
+  const first = normalizeRecorderStatus({ state: 'recording', engineRunning: true, folder: 'D:/Rec/2026-11-23 1030' });
+  const armed = stopArmKey(first);
+  assert.equal(armed, 'D:/Rec/2026-11-23 1030');
+  assert.equal(isStopArmed(first, armed), true);
+  assert.equal(isStopArmed(first, null), false, 'nothing armed yet');
+  // The recording ends (any route): the armed key lapses.
+  const idle = normalizeRecorderStatus({ state: 'idle', engineRunning: true });
+  assert.equal(stopArmKey(idle), null);
+  assert.equal(isStopArmed(idle, armed), false);
+  // A later recording has its own folder and starts unarmed.
+  const second = normalizeRecorderStatus({ state: 'recording', engineRunning: true, folder: 'D:/Rec/2026-11-23 1900' });
+  assert.equal(isStopArmed(second, armed), false);
+  assert.equal(isStopArmed(second, stopArmKey(second)), true);
+});
+
+test('stop confirmation still works when a recording reports no folder', () => {
+  const status = normalizeRecorderStatus({ state: 'recording', engineRunning: true });
+  const armed = stopArmKey(status);
+  assert.notEqual(armed, null);
+  assert.equal(isStopArmed(status, armed), true);
 });

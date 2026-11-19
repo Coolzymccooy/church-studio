@@ -5,7 +5,9 @@ import { isTauri } from '../../lib/platform';
 import {
   formatElapsed,
   getDesktopRecorderController,
+  isStopArmed,
   recorderHealth,
+  stopArmKey,
   toggleArmedStrip,
 } from '../../lib/recorder.js';
 import { useRecorder } from './useRecorder.js';
@@ -42,7 +44,12 @@ function RecordSection({ strips, engineRunning }) {
   const { status, config, busy } = rec;
   const [title, setTitle] = useState('');
   const [markerLabel, setMarkerLabel] = useState('');
-  const [confirmStop, setConfirmStop] = useState(false);
+  // The "Stop recording?" prompt is armed for one recording (its
+  // `stopArmKey`). If that recording ends from the centre-bar button, an
+  // engine stop or a disk error, the next one must not open with the prompt
+  // up and its Stop button focused.
+  const [armedKey, setArmedKey] = useState(null);
+  const confirmStop = isStopArmed(status, armedKey);
 
   const recording = status.recording;
   // The mixer's `running` can lag an engine start; the recorder polls it.
@@ -64,13 +71,16 @@ function RecordSection({ strips, engineRunning }) {
   };
 
   const handleStop = async () => {
-    setConfirmStop(false);
+    setArmedKey(null);
     await rec.stop();
   };
 
   const handleMarker = async () => {
-    await rec.addMarker(markerLabel);
-    setMarkerLabel('');
+    // Enter and the button share this path; one marker per press, and the
+    // typed label survives a failed add (`addMarker` returns null then).
+    if (busy) return;
+    const added = await rec.addMarker(markerLabel);
+    if (added) setMarkerLabel('');
   };
 
   return (
@@ -80,7 +90,7 @@ function RecordSection({ strips, engineRunning }) {
         {!recording && (
           <button
             type="button"
-            onClick={() => { setConfirmStop(false); rec.start(title); }}
+            onClick={() => { setArmedKey(null); rec.start(title); }}
             disabled={!canStart}
             title={engineOn ? 'Start a multitrack recording' : 'Start the engine to record'}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-full font-bold text-[10px] text-white bg-red-600 hover:bg-red-500 disabled:opacity-40"
@@ -91,7 +101,7 @@ function RecordSection({ strips, engineRunning }) {
         {recording && !confirmStop && (
           <button
             type="button"
-            onClick={() => setConfirmStop(true)}
+            onClick={() => setArmedKey(stopArmKey(status))}
             disabled={busy}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-full font-bold text-[10px] text-white bg-slate-700 hover:bg-slate-600"
           >
@@ -102,7 +112,7 @@ function RecordSection({ strips, engineRunning }) {
           <span className="flex items-center gap-1" role="alertdialog" aria-label="Confirm stop recording">
             <span className="text-amber-400 font-semibold">Stop recording?</span>
             <button type="button" onClick={handleStop} autoFocus className="px-2 py-1 rounded bg-red-600 text-white font-bold">Stop</button>
-            <button type="button" onClick={() => setConfirmStop(false)} className="px-2 py-1 rounded bg-slate-800 text-slate-300">Keep recording</button>
+            <button type="button" onClick={() => setArmedKey(null)} className="px-2 py-1 rounded bg-slate-800 text-slate-300">Keep recording</button>
           </span>
         )}
         <span

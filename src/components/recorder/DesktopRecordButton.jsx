@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Circle, FolderOpen, Square } from 'lucide-react';
 
-import { getDesktopRecorderController, quickRecordView } from '../../lib/recorder.js';
+import { getDesktopRecorderController, isStopArmed, quickRecordView, stopArmKey } from '../../lib/recorder.js';
 import { useRecorder } from './useRecorder.js';
 
 /**
@@ -11,20 +11,23 @@ import { useRecorder } from './useRecorder.js';
  */
 export default function DesktopRecordButton() {
   const recorder = useRecorder(getDesktopRecorderController());
-  const [confirmStop, setConfirmStop] = useState(false);
+  // Armed for one recording only (its `stopArmKey`): if that recording ends
+  // by another route, the next one must not stop on a single click.
+  const [armedKey, setArmedKey] = useState(null);
+  const confirmStop = isStopArmed(recorder.status, armedKey);
   const view = quickRecordView(recorder.status, recorder.error, confirmStop);
 
   const onPrimary = async () => {
     if (view.mode === 'recording') {
       if (!confirmStop) {
-        setConfirmStop(true);
+        setArmedKey(stopArmKey(recorder.status));
         return;
       }
-      setConfirmStop(false);
+      setArmedKey(null);
       await recorder.stop();
       return;
     }
-    setConfirmStop(false);
+    setArmedKey(null);
     await recorder.start(null);
   };
 

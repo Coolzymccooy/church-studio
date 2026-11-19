@@ -209,6 +209,23 @@ export function describeRecorderError(err) {
 }
 
 /**
+ * The key a first click on Stop arms the confirmation for: the running
+ * recording's folder (unique per recording), so the confirmation lapses
+ * when that recording ends by any route and a later recording starts
+ * unarmed. `null` while not recording. A recording with no folder in its
+ * status (never expected) arms on an empty key, so Stop still works.
+ */
+export function stopArmKey(status) {
+  const s = status ?? EMPTY_RECORDER_STATUS;
+  return s.recording ? (s.folder ?? '') : null;
+}
+
+/** True when `armedKey` (from `stopArmKey`) still names the running recording. */
+export function isStopArmed(status, armedKey) {
+  return armedKey != null && stopArmKey(status) === armedKey;
+}
+
+/**
  * What the centre-bar record button shows. `error` is the last command
  * error; `confirmStop` is true after a first click on Stop.
  */
