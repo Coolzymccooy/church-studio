@@ -2,21 +2,36 @@
 export const BANK_SIZE = 8;
 
 /**
- * Banks for `stripCount` strips of which the last `ndiCount` are NDI. Only "all" when everything
- * fits in one bank. Each bank is { id, label, from, to } over strip indices (to exclusive).
+ * Strip counts from a mixer state. The engine serialises the top level in camelCase
+ * (`ndiStrips`, `computerStrips`); snake_case is accepted too for older or demo states.
  */
-export function stripBanks(stripCount, ndiCount = 0) {
-  const total = Math.max(0, stripCount | 0);
-  const ndi = Math.min(total, Math.max(0, ndiCount | 0));
-  const inputs = total - ndi;
-  const all = { id: 'all', label: 'all', from: 0, to: total };
-  if (total <= BANK_SIZE) return [all];
-  const banks = [all];
+export function stripCounts(state) {
+  const n = (v) => (Number.isFinite(v) && v > 0 ? Math.floor(v) : 0);
+  return {
+    total: Array.isArray(state?.strips) ? state.strips.length : 0,
+    ndi: n(state?.ndiStrips ?? state?.ndi_strips),
+    computer: n(state?.computerStrips ?? state?.computer_strips),
+  };
+}
+
+/**
+ * Banks for `total` strips: hardware inputs first, then the computer-audio pair, then NDI (the
+ * engine's strip order). Only "all" when everything fits in one bank. Each bank is
+ * { id, label, from, to } over strip indices (to exclusive).
+ */
+export function stripBanks(total, ndiCount = 0, computerCount = 0) {
+  const all = Math.max(0, total | 0);
+  const ndi = Math.min(all, Math.max(0, ndiCount | 0));
+  const pc = Math.min(all - ndi, Math.max(0, computerCount | 0));
+  const inputs = all - ndi - pc;
+  const banks = [{ id: 'all', label: 'all', from: 0, to: all }];
+  if (all <= BANK_SIZE) return banks;
   for (let from = 0; from < inputs; from += BANK_SIZE) {
     const to = Math.min(inputs, from + BANK_SIZE);
     banks.push({ id: `in-${from}`, label: `${from + 1}–${to}`, from, to });
   }
-  if (ndi > 0) banks.push({ id: 'ndi', label: 'ndi', from: inputs, to: total });
+  if (pc > 0) banks.push({ id: 'pc', label: 'computer', from: inputs, to: inputs + pc });
+  if (ndi > 0) banks.push({ id: 'ndi', label: 'ndi', from: all - ndi, to: all });
   return banks;
 }
 
