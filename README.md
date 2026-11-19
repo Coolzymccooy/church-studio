@@ -26,6 +26,33 @@ voice out of a mixed recording.
 
 ## Two builds
 
+### Mac package checks
+
+The universal DMG supports Apple Silicon and Intel Macs on macOS 11 or later.
+Open it and drag **TIWATON AI Studio** into **Applications**. Mac test builds
+include microphone and local-network privacy descriptions. Real audio devices,
+microphone permission approval and NDI/OBS network devices require operator testing.
+The signed hardened-runtime app also declares audio-input access and the targeted
+library-validation exception needed to load a separately installed NDI runtime.
+The microphone entitlement does not grant permission on the user's behalf.
+
+On a Mac with Node.js and Rust, build with:
+
+```sh
+npm ci
+rustup target add aarch64-apple-darwin x86_64-apple-darwin
+npm run tauri:build -- --target universal-apple-darwin
+```
+
+Updater artifacts require the project's signing key (kept in GitHub Secrets
+for CI). Updater signatures are separate from Apple Developer ID signing and
+notarization; a test package is not certified for public distribution without
+the Apple release setup. Never commit keys or credentials.
+
+CI checks native Rust tests, packaged privacy descriptions, both architectures,
+code-signature integrity and a ten-second native launch. The workflow attaches
+the installer and a verification receipt for download.
+
 - **Web** — a browser build (this repo's Vite/React app), deployed at
   <https://church-studio-v56w.vercel.app/?app>. Runs entirely client-side using the Web
   Audio API and AudioWorklets; no audio leaves the browser.
