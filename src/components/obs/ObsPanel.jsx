@@ -27,7 +27,7 @@ function Shell({ onClose, children }) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="obs-panel-title"
-        className="relative w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-6 space-y-5 shadow-2xl"
+        className="relative w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 text-slate-200 p-6 space-y-5 shadow-2xl"
       >
         <div className="flex items-center justify-between">
           <h2 id="obs-panel-title" className="flex items-center gap-2 text-lg font-bold text-white">

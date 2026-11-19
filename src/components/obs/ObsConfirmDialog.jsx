@@ -11,7 +11,7 @@ export default function ObsConfirmDialog({ request, onConfirm, onCancel }) {
       aria-modal="true"
       aria-labelledby="obs-confirm-title"
     >
-      <div className="w-full max-w-sm rounded-xl border border-slate-700 bg-slate-900 p-5 space-y-3 shadow-2xl">
+      <div className="w-full max-w-sm rounded-xl border border-slate-700 bg-slate-900 text-slate-200 p-5 space-y-3 shadow-2xl">
         <div className="flex items-center gap-2">
           <AlertTriangle size={16} className="text-amber-400 shrink-0" />
           <h3 id="obs-confirm-title" className="text-sm font-bold text-white">{request.title}</h3>
