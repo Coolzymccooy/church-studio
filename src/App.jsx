@@ -13,7 +13,7 @@ import ThemeSelector from './components/ThemeSelector';
 import AnalyticsDashboard from './components/AnalyticsDashboard';
 import HelpCorner from './components/HelpCorner';
 import LandingPage from './components/LandingPage';
-import StudioStatusBar from './components/StudioStatusBar';
+import DeskHeader from './components/faceplate/DeskHeader.jsx';
 import DeviceSettingsModal from './components/DeviceSettingsModal';
 import LinkPanel from './components/link/LinkPanel.jsx';
 import ObsPanel from './components/obs/ObsPanel.jsx';
@@ -3350,14 +3350,14 @@ const AudioProcessor = ({ goHome }) => {
         setFeatures={setFeatures}
       />
 
-      {/* ─── ENGINE STATUS BAR ─── */}
-      <StudioStatusBar
+      {/* ─── DESK HEADER (faceplate) ─── */}
+      <DeskHeader
         isLive={isLive}
         isPlayingFile={isPlayingFile}
         audioStats={audioStats}
-        features={features}
-        voiceActive={voiceActive}
-        visualizerGateStatus={visualizerGateStatus}
+        gateClosed={visualizerGateStatus}
+        onToggleEngine={toggleLive}
+        onShowSettings={() => setShowSettings(true)}
       />
 
       <LinkPanel open={showLink} onClose={() => setShowLink(false)} />

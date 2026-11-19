@@ -1,10 +1,12 @@
 /* Tell Tailwind to generate all utilities (v4 style) */
 @import "tailwindcss";
-/* The design docs name class-like words; keep them out of utility generation. */
-@source not "../docs/DESIGN_QUALITY_STANDARD.md";
-@source not "../docs/PRODUCT_DESIGN_SYSTEM.md";
 @import "./styles/faceplate-tokens.css";
 @import "./styles/faceplate-parts.css";
+
+/* Every @import must stay above this line: CSS drops an @import that follows any other statement.
+   The design docs name class-like words; keep them out of utility generation. */
+@source not "../docs/DESIGN_QUALITY_STANDARD.md";
+@source not "../docs/PRODUCT_DESIGN_SYSTEM.md";
 
 /* ---- GLOBAL RESET FOR FULL-SCREEN APP ---- */
 
