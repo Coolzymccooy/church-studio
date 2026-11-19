@@ -3374,6 +3374,13 @@ const AudioProcessor = ({ goHome }) => {
         </main>{/* end center */}
 
         <OutputRouter r={{
+          engineError: audioEngineError,
+          broadcastSet: selectedDevices.broadcastBus !== 'Not set',
+          droppedSamples: audioStats.droppedOutputSamples ?? 0,
+          cpuPct: audioStats.cpuLoadPct,
+          lufsST,
+          target: loudnessTarget,
+          onShowSettings: () => setShowSettings(true),
           isLive,
           isPlayingFile,
           monitoring: isMonitoring,

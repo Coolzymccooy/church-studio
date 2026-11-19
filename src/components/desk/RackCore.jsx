@@ -1,5 +1,6 @@
 import InfoTip from '../faceplate/InfoTip.jsx';
 import Key from '../faceplate/Key.jsx';
+import Knob from '../faceplate/Knob.jsx';
 import Lamp from '../faceplate/Lamp.jsx';
 import ToggleRow from './ToggleRow.jsx';
 
@@ -19,17 +20,16 @@ export default function RackCore({ core }) {
     <>
       <section className="fp-mod">
         <div className="fp-mod-hd">
-          <span>Input</span>
+          <span>Level</span>
           <Lamp tone={signal ? 'g' : 'off'}>{signal ? 'signal' : 'idle'}</Lamp>
         </div>
         <div className="fp-mod-bd">
-          <label className="fp-row" htmlFor="rack-input-level">
-            <span>Level</span>
-            <span className="fp-num">{dbText(gainDb(core.inputGain))}</span>
-          </label>
-          <input id="rack-input-level" type="range" className="fp-range" min="0" max="4" step="0.1"
-            value={core.inputGain} onChange={core.onInputGainChange} />
-          <div className="fp-row fp-sub"><span>Device</span><span>{core.deviceLabel}</span></div>
+          <div className="fp-knobrow">
+            <Knob label="level" job="trim" min={0} max={4} step={0.1} defaultValue={1} value={core.inputGain}
+              valueText={dbText(gainDb(core.inputGain))}
+              onChange={(v) => core.onInputGainChange({ target: { value: String(v) } })} />
+            <div className="fp-row fp-sub" style={{ flex: 1 }}><span>Device</span><span>{core.deviceLabel}</span></div>
+          </div>
         </div>
       </section>
 
@@ -47,12 +47,10 @@ export default function RackCore({ core }) {
             onToggle={() => core.setFeatures((f) => ({ ...f, denoise: !f.denoise }))} />
           {core.features.denoise && (
             <>
-              <label className="fp-row" htmlFor="rack-gate-threshold">
-                <span>Threshold</span>
-                <span className="fp-num">{core.threshold} dB</span>
-              </label>
-              <input id="rack-gate-threshold" type="range" className="fp-range" min="-100" max="-20" step="1"
-                value={core.threshold} onChange={(e) => core.setThreshold(parseFloat(e.target.value))} />
+              <div className="fp-knobrow">
+                <Knob label="threshold" job="dyn" min={-100} max={-20} step={1} defaultValue={-50} value={core.threshold}
+                  valueText={`${core.threshold} dB`} onChange={(v) => core.setThreshold(v)} />
+              </div>
               <div className="fp-keys fp-keys-fill">
                 <Key onClick={core.onCalibrate} disabled={core.calibrating} lit={core.calibrating ? 'amber' : null}>
                   {core.calibrating ? 'calibrating' : 'auto-calibrate'}
