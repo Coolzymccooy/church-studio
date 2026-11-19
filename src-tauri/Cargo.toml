@@ -6,7 +6,7 @@ authors = ["TIWATON"]
 license = "MIT"
 repository = "https://github.com/Coolzymccooy/church-studio"
 edition = "2021"
-rust-version = "1.77.2"
+rust-version = "1.85"
 
 [lib]
 name = "app_lib"
@@ -26,7 +26,7 @@ tauri-plugin-dialog = "2"
 tauri-plugin-os = "2"
 
 # ── Native audio I/O ─────────────────────────────────────────────────────────
-cpal = "0.15"
+cpal = "0.18"
 
 # ── DSP ──────────────────────────────────────────────────────────────────────
 rustfft = "6"          # FFT for spectral processing
