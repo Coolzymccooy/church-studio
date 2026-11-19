@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { paramRange } from './mixerEngine.js';
 import {
   STRIP_KNOBS, STRIP_ROWS, STRIP_COLOURS, stripColour, stripGateTone, grText, panText, sendText, compactDb,
+  BUS_LIMITER, busLabel,
 } from './faceplateStrip.js';
 
 test('every strip knob uses the contract range for its engine parameter', () => {
@@ -79,4 +80,18 @@ test('knob values never exceed four characters, so they fit under a small knob',
   assert.equal(compactDb(-9.96), '-10');
   assert.equal(compactDb(9.94), '+9.9');
   assert.equal(compactDb(0), '0.0');
+});
+
+test('bus limiter knob uses the contract range and the engine default of -1 dB', () => {
+  assert.deepEqual([BUS_LIMITER.min, BUS_LIMITER.max], paramRange('limiter_ceiling_db'));
+  assert.equal(BUS_LIMITER.defaultValue, -1);
+  assert.equal(BUS_LIMITER.fmt(-1), '-1.0');
+  assert.equal(BUS_LIMITER.fmt(-12), '-12');
+});
+
+test('bus labels are short and lower case', () => {
+  assert.equal(busLabel('main'), 'main');
+  assert.equal(busLabel('stream'), 'stream');
+  assert.equal(busLabel('monitor'), 'mon');
+  assert.equal(busLabel('aux9'), 'aux9');
 });

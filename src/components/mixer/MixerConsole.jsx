@@ -7,8 +7,6 @@ import ChannelStrip from './ChannelStrip.jsx';
 import BusStrip from './BusStrip.jsx';
 import RecordPanel from '../recorder/RecordPanel.jsx';
 
-const BUS_LABELS = { main: 'Main', stream: 'Stream', monitor: 'Monitor' };
-
 /**
  * MixerConsole — scene bar, a horizontally scrolling row of channel strips,
  * and the Main/Stream/Monitor bus strips pinned on the right. Driven by
@@ -159,12 +157,11 @@ export default function MixerConsole({ controller, demoBanner }) {
             />
           ))}
         </div>
-        <div className="flex gap-2 p-2 border-l border-slate-800 shrink-0 overflow-y-auto" style={{ background: '#080E1F' }}>
+        <div className="fp-buses" role="group" aria-label="Buses">
           {state.buses.map((bus) => (
             <BusStrip
               key={bus.id}
               bus={bus}
-              label={BUS_LABELS[bus.id] || bus.id}
               metersRef={metersRef}
               onSetParam={(key, value) => setBusParam(bus.id, key, value)}
               onSetBool={(key, value) => setBusBool(bus.id, key, value)}
