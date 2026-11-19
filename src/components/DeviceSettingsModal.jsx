@@ -53,7 +53,7 @@ function DeviceRow({ id, label, tip, status, value, onChange, getDb, children })
       <select id={id} className="fp-field" value={value} onChange={(event) => onChange(event.target.value)}>
         {children}
       </select>
-      <LevelBar getDb={status === 'on' ? getDb : () => -96} label={`${label} level`} />
+      {isTauri && <LevelBar getDb={status === 'on' ? getDb : () => -96} label={`${label} level`} />}
     </div>
   );
 }
@@ -112,7 +112,9 @@ function SetupPanel({
   const { pos, handlers, nudge } = useDragPanel(panelRef);
   const [draft, setDraft] = useState(() => draftFrom(selectedDevices));
   const [savedWhileLive, setSavedWhileLive] = useState(false);
-  const feed = useMeterFeed(mixerController, true);
+  // Only the desktop engine has real meters; the browser's demo mixer simulates levels, which
+  // must never pass for a working device.
+  const feed = useMeterFeed(isTauri ? mixerController : null, isTauri);
   const dirty = isDirty(selectedDevices, draft);
 
   const set = (key) => (value) => setDraft((d) => ({ ...d, [key]: value }));

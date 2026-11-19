@@ -28,7 +28,7 @@ import { loadRnnoiseAssets } from './lib/rnnoise';
 import { pickVideoMimeType } from './lib/mediaFormats';
 import { readVisualiserPalette } from './lib/visualiserPalette.js';
 import {
-  bandEdges, bandLevels, createScope, createWaterfall, dbFraction, drawScope, fitCanvas, gateState, stepScope,
+  analyserRange, bandEdges, bandLevels, createScope, createWaterfall, dbFraction, drawScope, fitCanvas, gateState, stepScope,
 } from './lib/liveScope.js';
 import {
   describeBroadcastRoute,
@@ -1261,6 +1261,9 @@ const AudioProcessor = ({ goHome }) => {
         // Spectrum data is injected from 'audio-meters' Tauri events into tauriSpectrumRef.
         processingRefs.current.analyser = {
           frequencyBinCount: 128,
+          // Native bins are normalised over -90..0 dB (Spectrum::take_bins).
+          minDecibels: -90,
+          maxDecibels: 0,
           getByteFrequencyData(arr) {
             const spec = tauriSpectrumRef.current;
             for (let i = 0; i < arr.length && i < spec.length; i++) {
@@ -2326,6 +2329,7 @@ const AudioProcessor = ({ goHome }) => {
     const rootStyle = getComputedStyle(document.documentElement);
     const palette = readVisualiserPalette((name) => rootStyle.getPropertyValue(name));
     const scopeBands = bandEdges(audioContext?.sampleRate || 48000, bufferLength);
+    const scopeRange = analyserRange(analyser);
     let scope = createScope(scopeBands.length);
     const waterfall = createWaterfall();
     let lastFrameAt = 0;
@@ -2812,6 +2816,7 @@ const AudioProcessor = ({ goHome }) => {
           confidence: Math.min(100, Math.max(0, (voiceRatio - 1) * 50)),
           riderDb: 20 * Math.log10(autoGainVal || 0.00001),
           thresholdDb: settingsRef.current.denoise && !settingsRef.current.isBypassed ? settingsRef.current.threshold : null,
+          range: scopeRange,
         }, scopeBands, waterfall, scope.history !== prevHistory);
       }
 

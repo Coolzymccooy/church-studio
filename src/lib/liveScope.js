@@ -114,7 +114,19 @@ function stateColour(p, state) {
 
 const STATE_WORD = { voice: 'gate open · voice', open: 'gate open', held: 'gate closed', off: 'gate off', bypass: 'bypass · raw' };
 const FREQ_LABELS = [[50, '50'], [100, '100'], [200, '200'], [500, '500'], [1000, '1k'], [2000, '2k'], [5000, '5k'], [10000, '10k']];
-const DB_LINES = [-40, -50, -60, -70, -80, -90];
+/** dB grid lines every 10 dB strictly inside the analyser range. */
+export function gridLines(range) {
+  const lines = [];
+  for (let db = Math.ceil((range.min + 1) / 10) * 10; db < range.max; db += 10) lines.push(db);
+  return lines;
+}
+
+/** The analyser's byte range in dB: the Web Audio node's, or the native engine's. */
+export function analyserRange(analyser) {
+  const min = Number.isFinite(analyser?.minDecibels) ? analyser.minDecibels : SCOPE.dbMin;
+  const max = Number.isFinite(analyser?.maxDecibels) ? analyser.maxDecibels : SCOPE.dbMax;
+  return max > min ? { min, max } : { min: SCOPE.dbMin, max: SCOPE.dbMax };
+}
 
 function label(ctx, p, text, x, y, align = 'left', colour = p.dim, size = 11) {
   ctx.font = `400 ${size}px ${p.mono}`;
@@ -142,11 +154,11 @@ function drawHeader(ctx, p, f, x0, w) {
   }
 }
 
-function drawGrid(ctx, p, box) {
+function drawGrid(ctx, p, box, range) {
   const { x, y, w, h } = box;
   ctx.fillStyle = p.grid;
-  DB_LINES.forEach((db) => {
-    const yy = Math.round(y + h - dbFraction(db) * h) + 0.5;
+  gridLines(range).forEach((db) => {
+    const yy = Math.round(y + h - dbFraction(db, range.min, range.max) * h) + 0.5;
     ctx.fillRect(x, yy, w, 1);
     label(ctx, p, `${db}`, x - 6, yy + 4, 'right', p.dim, 10);
   });
@@ -248,9 +260,9 @@ function drawWaterfall(ctx, p, box, wf) {
   label(ctx, p, `-${SCOPE.historyS} s`, x - 6, y + h, 'right', p.dim, 10);
 }
 
-function drawThreshold(ctx, p, box, thresholdDb) {
+function drawThreshold(ctx, p, box, thresholdDb, range) {
   const { x, y, w, h } = box;
-  const yy = Math.round(y + h - dbFraction(thresholdDb) * h) + 0.5;
+  const yy = Math.round(y + h - dbFraction(thresholdDb, range.min, range.max) * h) + 0.5;
   ctx.strokeStyle = p.a;
   ctx.setLineDash([6, 6]);
   ctx.lineWidth = 1;
@@ -264,7 +276,8 @@ function drawThreshold(ctx, p, box, thresholdDb) {
 
 /**
  * Draws one frame. `size` is { w, h } in CSS px (the context is already scaled for the device
- * pixel ratio). `f` = { levels, peaks, history, state, confidence, riderDb, thresholdDb|null };
+ * pixel ratio). `f` = { levels, peaks, history, state, confidence, riderDb, thresholdDb|null,
+ * range: { min, max } dB of the analyser bytes };
  * `wf` is the waterfall from createWaterfall() and `newRow` says a timeline sample was added.
  */
 export function drawScope(ctx, p, size, f, bands, wf = null, newRow = false) {
@@ -277,10 +290,11 @@ export function drawScope(ctx, p, size, f, bands, wf = null, newRow = false) {
   const avail = Math.max(120, h - 52 - 30 - 12);
   const spec = { x: left, y: 52, w: specW, h: Math.round(avail * 0.6) };
   const fall = { x: left, y: spec.y + spec.h + 30, w: specW, h: Math.max(40, avail - spec.h) };
+  const range = f.range || { min: SCOPE.dbMin, max: SCOPE.dbMax };
   drawHeader(ctx, p, f, pad, w - pad * 2);
-  drawGrid(ctx, p, spec);
+  drawGrid(ctx, p, spec, range);
   drawSpectrum(ctx, p, spec, f, bands);
-  if (f.thresholdDb !== null && f.thresholdDb !== undefined) drawThreshold(ctx, p, spec, f.thresholdDb);
+  if (f.thresholdDb !== null && f.thresholdDb !== undefined) drawThreshold(ctx, p, spec, f.thresholdDb, range);
   if (wf && newRow) addWaterfallRow(wf, p, Math.max(1, Math.round(fall.w)), Math.max(1, Math.round(fall.h)), f, bands);
   drawWaterfall(ctx, p, fall, wf);
 }

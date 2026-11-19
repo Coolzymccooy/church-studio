@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  SCOPE, bandEdges, bandLevels, createScope, dbFraction, freqFraction, gateState, stepScope,
+  SCOPE, analyserRange, bandEdges, bandLevels, createScope, dbFraction, freqFraction, gateState, gridLines, stepScope,
 } from './liveScope.js';
 
 test('freqFraction is logarithmic and clamped', () => {
@@ -65,4 +65,15 @@ test('gateState words', () => {
   assert.equal(gateState({ denoise: true, gateClosed: true }), 'held');
   assert.equal(gateState({ denoise: true, gateClosed: false, voiceActive: true }), 'voice');
   assert.equal(gateState({ denoise: true, gateClosed: false, voiceActive: false }), 'open');
+});
+
+test('gridLines: every 10 dB inside the range, for both backends', () => {
+  assert.deepEqual(gridLines({ min: -100, max: -30 }), [-90, -80, -70, -60, -50, -40]);
+  assert.deepEqual(gridLines({ min: -90, max: 0 }), [-80, -70, -60, -50, -40, -30, -20, -10]);
+});
+
+test('analyserRange reads the node, else the Web Audio default', () => {
+  assert.deepEqual(analyserRange({ minDecibels: -90, maxDecibels: 0 }), { min: -90, max: 0 });
+  assert.deepEqual(analyserRange({}), { min: SCOPE.dbMin, max: SCOPE.dbMax });
+  assert.deepEqual(analyserRange({ minDecibels: 0, maxDecibels: -10 }), { min: SCOPE.dbMin, max: SCOPE.dbMax });
 });
