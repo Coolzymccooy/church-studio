@@ -1,42 +1,40 @@
-import { useState } from 'react';
+import { AudioLines, Gauge, Mic, UserRound } from 'lucide-react';
+
 import InputRackAiTab from '../InputRackAiTab.jsx';
 import Key from '../faceplate/Key.jsx';
+import DeskRail from './DeskRail.jsx';
 import RackCore from './RackCore.jsx';
 import RackProfiles from './RackProfiles.jsx';
 import RackSession from './RackSession.jsx';
 
-const TABS = [
-  { id: 'core', label: 'core' },
-  { id: 'voice', label: 'voice' },
-  { id: 'profiles', label: 'profiles' },
-  { id: 'session', label: 'session' },
-];
+const VOICE_KEYS = ['lookaheadGate', 'dynamicDeEsser', 'multibandComp', 'dereverb', 'voicePattern', 'musicDucking', 'pastorIsolation', 'sermonWarmth', 'smartMixing', 'mastering'];
 
-/** The left panel: live or file source, then the core, voice, profiles and session tabs. */
+/**
+ * The input rack as a rail of faceplate icon keys: live or file source at the top, then input
+ * (level and Hyper gate), voice, profiles and session. LEDs show signal, processing and health.
+ */
 export default function InputRack({ mode, onModeSwitch, core, voice, profiles, session }) {
-  const [tab, setTab] = useState('core');
-  return (
-    <aside className="fp-panel fp-panel-l" aria-label="Input rack">
-      <div className="fp-panel-hd">
-        <span>Input rack</span>
-        <div className="fp-keys" role="group" aria-label="Source">
-          <Key lit={mode === 'live' ? 'sel' : null} pressed={mode === 'live'} onClick={() => onModeSwitch('live')}>live</Key>
-          <Key lit={mode === 'file' ? 'sel' : null} pressed={mode === 'file'} onClick={() => onModeSwitch('file')}>file</Key>
-        </div>
+  const signal = core.isLive || core.isPlayingFile;
+  const voiceOn = VOICE_KEYS.some((k) => voice.features[k]);
+  const stats = session.stats || {};
+  const sessionWarn = session.isLive && ((stats.droppedOutputSamples ?? 0) > 0 || (stats.cpuLoadPct ?? 0) > 90);
+
+  const items = [
+    { id: 'input', icon: Mic, label: 'input', title: 'Input', led: signal ? 'g' : 'off', render: () => <RackCore core={core} /> },
+    { id: 'voice', icon: AudioLines, label: 'voice', title: 'Voice', led: voiceOn ? 'o' : 'off', render: () => <InputRackAiTab {...voice} /> },
+    { id: 'profiles', icon: UserRound, label: 'profiles', title: 'Profiles', led: profiles.streamSafe ? 'g' : 'off', render: () => <RackProfiles p={profiles} /> },
+    { id: 'session', icon: Gauge, label: 'session', title: 'Session', led: sessionWarn ? 'a' : 'off', render: () => <RackSession s={session} /> },
+  ];
+
+  const top = (
+    <>
+      <div className="fp-mode-keys" role="group" aria-label="Source">
+        <Key lit={mode === 'live' ? 'sel' : null} pressed={mode === 'live'} onClick={() => onModeSwitch('live')}>live</Key>
+        <Key lit={mode === 'file' ? 'sel' : null} pressed={mode === 'file'} onClick={() => onModeSwitch('file')}>file</Key>
       </div>
-      <div className="fp-bar fp-keys-fill" role="tablist" aria-label="Rack sections" style={{ gap: 4 }}>
-        {TABS.map((t) => (
-          <Key key={t.id} role="tab" aria-selected={tab === t.id} lit={tab === t.id ? 'sel' : null} onClick={() => setTab(t.id)}>
-            {t.label}
-          </Key>
-        ))}
-      </div>
-      <div className="fp-panel-bd">
-        {tab === 'core' && <RackCore core={core} />}
-        {tab === 'voice' && <InputRackAiTab {...voice} />}
-        {tab === 'profiles' && <RackProfiles p={profiles} />}
-        {tab === 'session' && <RackSession s={session} />}
-      </div>
-    </aside>
+      <span className="fp-rail-sep" aria-hidden="true" />
+    </>
   );
+
+  return <DeskRail side="left" label="Input rack" items={items} top={top} />;
 }

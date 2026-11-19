@@ -20,7 +20,7 @@
 .fp-key:active { transform: translateY(1px); }
 .fp-key:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
 .fp-key:focus-visible { outline: 2px solid var(--fp-focus); outline-offset: 2px; }
-.fp-key.fp-on-green { background: var(--fp-led-g); border-color: var(--fp-led-g); color: var(--fp-on-green); }
+.fp-key.fp-on-green { background: var(--fp-lit-g); border-color: var(--fp-lit-g); color: var(--fp-on-green); }
 .fp-key.fp-on-amber { background: var(--fp-led-a); border-color: var(--fp-led-a); color: var(--fp-ink); }
 .fp-key.fp-on-orange { background: var(--fp-orange); border-color: var(--fp-orange); color: var(--fp-ink); }
 .fp-key.fp-on-sel { background: var(--fp-sel); border-color: var(--fp-sel); color: var(--fp-sel-ink); }
