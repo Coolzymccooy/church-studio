@@ -47,7 +47,7 @@ export default function OutputRouter({ r }) {
             </Key>
           </div>
           <div className="fp-mod-bd">
-            <div className="fp-row"><span>{r.monitorLabel}</span></div>
+            <div className="fp-row"><span className="fp-ellipsis" title={r.monitorLabel}>{r.monitorLabel}</span></div>
           </div>
         </section>
 
@@ -57,7 +57,7 @@ export default function OutputRouter({ r }) {
             <Lamp tone={r.isLive ? 'g' : 'off'}>{r.isLive ? 'live' : 'idle'}</Lamp>
           </div>
           <div className="fp-mod-bd">
-            <div className="fp-row"><span>{r.broadcastLabel}</span></div>
+            <div className="fp-row"><span className="fp-ellipsis" title={r.broadcastLabel}>{r.broadcastLabel}</span></div>
             <div className="fp-row">
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 For <InfoTip label="Broadcast app">The app that takes the broadcast output. Press to change.</InfoTip>

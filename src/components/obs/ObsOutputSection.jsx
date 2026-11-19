@@ -1,64 +1,68 @@
-import React from 'react';
-import { Circle, Radio } from 'lucide-react';
+import React, { useId } from 'react';
 
-function OutputButton({ active, icon, idleLabel, activeLabel, timecode, disabled, onClick }) {
+import Key from '../faceplate/Key.jsx';
+import Lamp from '../faceplate/Lamp.jsx';
+
+function OutputRow({ label, active, lit, onWord, idleLegend, activeLegend, timecode, disabled, onClick }) {
   return (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={onClick}
-      aria-pressed={active}
-      className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-bold border transition-colors disabled:opacity-40 ${
-        active
-          ? 'bg-red-600/20 border-red-500/60 text-red-300 hover:bg-red-600/30'
-          : 'bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-700'
-      }`}
-    >
-      {icon}
-      {active ? activeLabel : idleLabel}
-      {active && timecode && <span className="font-mono text-[10px] opacity-80">{timecode}</span>}
-    </button>
+    <div className="fp-row">
+      <span>{label}</span>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+        <Lamp tone={active ? (lit === 'red' ? 'r' : 'g') : 'off'}>{active ? onWord : 'off'}</Lamp>
+        {active && timecode && <span className="fp-num fp-sub">{timecode}</span>}
+        <Key lit={active ? lit : null} pressed={active} disabled={disabled} onClick={onClick}>
+          {active ? activeLegend : idleLegend}
+        </Key>
+      </span>
+    </div>
   );
 }
 
-/** OBS scene picker plus Stream / Record buttons (each behind a confirm). */
+/** OBS scene picker plus Stream / Record keys (each behind a confirm). */
 export default function ObsOutputSection({ status, busy, onSetScene, onRequestAction }) {
+  const id = useId();
   const connected = Boolean(status?.connected);
   const scenes = status?.scenes || [];
   const current = status?.currentScene || '';
 
   return (
-    <section className="space-y-3">
-      <label className="block text-[10px] uppercase font-bold text-slate-500">
-        OBS scene (program)
-        <select
-          className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200"
-          value={current}
-          disabled={!connected || busy || scenes.length === 0}
-          onChange={(e) => e.target.value && onSetScene(e.target.value)}
-        >
-          {!current && <option value="">—</option>}
-          {scenes.map((scene) => (
-            <option key={scene} value={scene}>{scene}</option>
-          ))}
-        </select>
-      </label>
+    <section className="fp-mod" aria-label="OBS output">
+      <div className="fp-mod-hd"><span>Output</span></div>
+      <div className="fp-mod-bd">
+        <div>
+          <label className="fp-label" htmlFor={`${id}-scene`}>OBS scene (program)</label>
+          <select
+            id={`${id}-scene`}
+            className="fp-field"
+            value={current}
+            disabled={!connected || busy || scenes.length === 0}
+            onChange={(e) => e.target.value && onSetScene(e.target.value)}
+          >
+            {!current && <option value="">—</option>}
+            {scenes.map((scene) => (
+              <option key={scene} value={scene}>{scene}</option>
+            ))}
+          </select>
+        </div>
 
-      <div className="flex gap-2">
-        <OutputButton
+        <OutputRow
+          label="Stream"
           active={Boolean(status?.streaming)}
-          icon={<Radio size={13} />}
-          idleLabel="Start stream"
-          activeLabel="LIVE · Stop"
+          lit="green"
+          onWord="live"
+          idleLegend="start stream"
+          activeLegend="stop stream"
           timecode={status?.streamTimecode}
           disabled={!connected || busy}
           onClick={() => onRequestAction(status?.streaming ? 'stopStream' : 'startStream')}
         />
-        <OutputButton
+        <OutputRow
+          label="Record"
           active={Boolean(status?.recording)}
-          icon={<Circle size={12} />}
-          idleLabel="Start recording"
-          activeLabel="REC · Stop"
+          lit="red"
+          onWord="rec"
+          idleLegend="start recording"
+          activeLegend="stop recording"
           timecode={status?.recordTimecode}
           disabled={!connected || busy}
           onClick={() => onRequestAction(status?.recording ? 'stopRecord' : 'startRecord')}

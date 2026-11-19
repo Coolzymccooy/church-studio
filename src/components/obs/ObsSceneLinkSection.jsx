@@ -1,8 +1,10 @@
-import React from 'react';
+import React, { useId } from 'react';
 
 import { buildLinkRows, setLinkEntry } from '../../lib/obsControl.js';
+import InfoTip from '../faceplate/InfoTip.jsx';
 
-const selectCls = 'w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-[11px] text-slate-200';
+const TABLE_STYLE = { width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', fontSize: 'var(--fp-text-sm)' };
+const CELL_STYLE = { padding: '2px 0', textAlign: 'left', verticalAlign: 'middle' };
 
 /** The option in `targets` matching `name` case-insensitively, or ''. */
 function matchScene(targets, name) {
@@ -14,31 +16,36 @@ function matchScene(targets, name) {
 function LinkTable({ title, fromLabel, toLabel, sources, targets, map, onChange, disabled }) {
   const rows = buildLinkRows(sources, map);
   return (
-    <div className="space-y-1.5">
-      <h4 className="text-[10px] uppercase font-bold text-slate-500">{title}</h4>
+    <div>
+      <h4 className="fp-label" style={{ margin: '0 0 4px' }}>{title}</h4>
       {rows.length === 0 ? (
-        <p className="text-[11px] text-slate-600">No {fromLabel} scenes yet.</p>
+        <p className="fp-sub" style={{ margin: 0 }}>no {fromLabel} scenes</p>
       ) : (
-        <table className="w-full text-[11px]">
+        <table style={TABLE_STYLE}>
           <thead>
-            <tr className="text-slate-500 text-left">
-              <th className="font-medium pb-1 w-1/2">{fromLabel}</th>
-              <th className="font-medium pb-1">{toLabel}</th>
+            <tr className="fp-sub">
+              <th style={{ ...CELL_STYLE, width: '50%', fontWeight: 'inherit' }}>{fromLabel}</th>
+              <th style={{ ...CELL_STYLE, fontWeight: 'inherit' }}>{toLabel}</th>
             </tr>
           </thead>
           <tbody>
             {rows.map(({ scene, target }) => (
               <tr key={scene}>
-                <td className="py-0.5 pr-2 text-slate-300 truncate max-w-0">{scene}</td>
-                <td className="py-0.5">
+                <td
+                  style={{ ...CELL_STYLE, paddingRight: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  title={scene}
+                >
+                  {scene}
+                </td>
+                <td style={CELL_STYLE}>
                   <select
                     aria-label={`${toLabel} scene for ${scene}`}
-                    className={selectCls}
+                    className="fp-field"
                     value={matchScene(targets, target)}
                     disabled={disabled}
                     onChange={(e) => onChange(setLinkEntry(map, scene, e.target.value))}
                   >
-                    <option value="">— no link —</option>
+                    <option value="">no link</option>
                     {targets.map((t) => (
                       <option key={t} value={t}>{t}</option>
                     ))}
@@ -55,18 +62,34 @@ function LinkTable({ title, fromLabel, toLabel, sources, targets, map, onChange,
 
 /** Enable toggle plus Studio → OBS and OBS → Studio mapping tables. */
 export default function ObsSceneLinkSection({ link, studioScenes, obsScenes, busy, onChange }) {
+  const id = useId();
   return (
-    <section className="space-y-3">
-      <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
-        <input
-          type="checkbox"
-          checked={link.enabled}
-          disabled={busy}
-          onChange={(e) => onChange({ ...link, enabled: e.target.checked })}
-        />
-        Scene link: keep Studio scenes and OBS scenes in step
-      </label>
-      <div className={`grid gap-4 sm:grid-cols-2 ${link.enabled ? '' : 'opacity-60'}`}>
+    <section className="fp-mod" aria-label="Scene link">
+      <div className="fp-mod-hd">
+        <span>
+          <input
+            id={`${id}-enabled`}
+            type="checkbox"
+            className="fp-check"
+            checked={link.enabled}
+            disabled={busy}
+            onChange={(e) => onChange({ ...link, enabled: e.target.checked })}
+          />
+          <label htmlFor={`${id}-enabled`}>Scene link</label>
+          <InfoTip label="Scene link">
+            Keeps Studio scenes and OBS scenes in step. Connect to OBS to see its scenes.
+          </InfoTip>
+        </span>
+      </div>
+      <div
+        className="fp-mod-bd"
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+          gap: 16,
+          opacity: link.enabled ? 1 : 0.6,
+        }}
+      >
         <LinkTable
           title="Studio → OBS"
           fromLabel="Studio"
@@ -88,9 +111,6 @@ export default function ObsSceneLinkSection({ link, studioScenes, obsScenes, bus
           onChange={(obsToStudio) => onChange({ ...link, obsToStudio })}
         />
       </div>
-      {obsScenes.length === 0 && (
-        <p className="text-[10px] text-slate-600">Connect to OBS to see its scenes.</p>
-      )}
     </section>
   );
 }

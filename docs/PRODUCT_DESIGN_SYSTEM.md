@@ -181,8 +181,18 @@ Order of work:
 3. Header and engine control (done: `DeskHeader` replaced the old status bar), then the strip (done: `ChannelStrip` rebuilt on the primitives, no taller than before), then buses (done: `BusStrip`; the loudness window waits for Stream-bus loudness metering in the engine, F-076), then the voice module, then
    scenes, OBS and the recorder, then the setup screen, the editor and the states. Each plate ships
    as its own PR, with before and after screenshots from the running app.
-4. Retire the old `[data-theme]` accent system and the amber overrides in `index.css` once no
-   screen uses them, and switch `ThemeContext` to finishes.
+4. The whole desk (done, 19 Nov 2026, after the operator saw old screens around the new strips):
+   the header keys replace the in-app menu bar on desktop and the bottom console; the Input
+   Rack, Output Router, live view and visualiser, mixer scenes and record plate, help drawer,
+   setup dialog, OBS and Link panels, editor, browser menu bar and error screen all use the
+   faceplate parts. Desk-level classes are in `src/styles/faceplate-desk.css`. The strips scale
+   to fill the height (`size fit`) or to 1×, 1.25× or 1.5× (`src/lib/stripScale.js`).
+5. The `[data-theme]` accent system is retired: `ThemeContext` holds the finish and the header
+   finish key cycles graphite, bone and auto. `--accent` stays at one fixed value only for the
+   two browser landing pages, which the desktop app never shows; remove it when they move.
+6. Still to build from the canvas: bank keys, the voice module knobs that need engine work
+   (warmth, clarity, hum), the OBS and recorder plates in the strip area, the setup screen as a
+   full page, and the states board.
 
 Each PR runs the delivery gate in section 11 of the standard, and reports any item it could not
 verify as unverified.
