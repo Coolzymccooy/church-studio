@@ -76,6 +76,8 @@ The canvas failed four of these checks, and the token file fixes them:
 | graphite `arm-r` | lamp red `#F0533F` | `#FF7A66` | a red legend on a graphite key read at 3.58:1 (now 4.90:1) |
 | bone `arm`, `arm-r` | lamp amber and red | `#8A5A00`, `#B0281A` | on a bone key they read at 1.68:1 and 3.18:1 |
 
+In bone, an armed key also gets a pale tinted fill (`arm-bg` `#F6E7C4`, `arm-r-bg` `#F8DDD8`). Without it, the darker legend colour sat too close to an ordinary key outline to read as armed.
+
 The record key's red fill stays the same. Only its legend changes.
 
 ## Type
@@ -124,6 +126,23 @@ labels with wide tracking.
 | Meter ladder | Green, amber and red zones with segment gaps and a peak hold |
 | Info tip | Round 16px ⓘ key. Hover or focus shows the tip; click pins it. Carries every explanation |
 
+### Where the parts live
+
+The primitives are React components in `src/components/faceplate/`:
+
+- `Key` and `TwoPressKey` (with its `useTwoPress` hook);
+- `Lamp` and `Glass`;
+- `Knob` and `Fader`;
+- `MeterLadder`;
+- `InfoTip`.
+
+Their styles are in `src/styles/faceplate-parts.css`, scoped to `fp-` classes. The maths behind
+them is in `src/lib/faceplateControls.js` and `src/lib/faceplateMeter.js`, both unit-tested: the
+two-press timing, the knob arc and keyboard steps, and the meter scale, zones and ballistics.
+
+To see every part in both finishes, run `npm run dev` and open `/?kit`. The kit page exists only
+in development builds.
+
 ## Text restraint
 
 A control shows its label and its state in one to three words. Explanations and how-tos go in an
@@ -157,8 +176,8 @@ The app today predates this system. A measured baseline from 19 Nov 2026, across
 
 Order of work:
 
-1. Tokens and fonts (this step). This adds rules and changes nothing on screen.
-2. Primitives: key, lamp, glass, knob, fader, meter, info tip. Built on tokens, with tests.
+1. Tokens and fonts (done). This added rules and changed nothing on screen.
+2. Primitives: key, lamp, glass, knob, fader, meter, info tip. Built on tokens, with tests (done).
 3. Header and engine control, then the strip, then buses and loudness, then the voice module, then
    scenes, OBS and the recorder, then the setup screen, the editor and the states. Each plate ships
    as its own PR, with before and after screenshots from the running app.
