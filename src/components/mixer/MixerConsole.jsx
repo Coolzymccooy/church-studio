@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { bankStrips, pickBank, stripBanks } from '../../lib/mixerBanks.js';
-import { nextStripSize, readStripSize, stripScale, stripSizeLabel } from '../../lib/stripScale.js';
+import { nextStripSize, readStripSize, stripRowPx, stripScale, stripSizeLabel } from '../../lib/stripScale.js';
 import InfoTip from '../faceplate/InfoTip.jsx';
 import Key from '../faceplate/Key.jsx';
 import Lamp from '../faceplate/Lamp.jsx';
@@ -24,7 +24,7 @@ function loadSize() {
 }
 
 /** Strip size setting plus the height of the strip area, for "fit". */
-function useStripSize() {
+function useStripSize(rowPx) {
   const [size, setSize] = useState(loadSize);
   const [height, setHeight] = useState(0);
   // A callback ref: the strip area mounts only after the mixer has loaded.
@@ -47,7 +47,7 @@ function useStripSize() {
     return next;
   });
 
-  return { size, scale: stripScale(size, height), areaRef, cycle };
+  return { size, scale: stripScale(size, height, rowPx), areaRef, cycle };
 }
 
 function BankRow({ banks, bank, onBank, stripCount, demoBanner, sizeLabel, onCycleSize }) {
@@ -89,7 +89,7 @@ export default function MixerConsole({ controller, demoBanner, onOpenObs }) {
     setBusParam, setBusBool,
     saveScene, loadScene, deleteScene,
   } = useMixer(controller);
-  const { size, scale, areaRef, cycle } = useStripSize();
+  const { size, scale, areaRef, cycle } = useStripSize(stripRowPx(state?.strips));
   const [bankId, setBankId] = useState('all');
 
   if (loading || !state) {
