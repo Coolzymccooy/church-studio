@@ -8,6 +8,7 @@ import {
   formatTimeAgo,
   ITEM_TYPE_OPTIONS,
   itemTypeOptions,
+  sceneSelectValue,
   moveRule,
   newRule,
   updateRule,
@@ -158,4 +159,11 @@ test('itemTypeOptions offers Lumina item types and keeps an unknown saved value'
   const [rule] = updateRule([{ id: 'r1', when: { event: 'lumina.item.started', contentKind: null, itemType: null }, then: { loadScene: 'Worship' } }], 0, { when: { itemType: 'SONG' } });
   assert.equal(rule.when.itemType, 'SONG');
   assert.equal(rule.when.event, 'lumina.item.started');
+});
+
+test('sceneSelectValue shows the saved spelling of a case-insensitive match', () => {
+  assert.equal(sceneSelectValue(['worship', 'Sermon'], 'Worship'), 'worship');
+  assert.equal(sceneSelectValue(['worship'], 'Walk-in'), 'Walk-in');
+  assert.equal(sceneSelectValue(['worship'], ''), '');
+  assert.equal(sceneSelectValue(null, 'Sermon'), 'Sermon');
 });

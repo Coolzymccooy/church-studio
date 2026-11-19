@@ -229,6 +229,8 @@ pub fn load_scene_into_mixer(
     } else {
         scene.name.clone()
     };
+    // A recording gets a marker at every scene load, by any route.
+    crate::recorder_commands::mark_scene_loaded(engine, &loaded);
     current.set(Some(loaded));
     Ok(build_state(app, mixer, engine))
 }

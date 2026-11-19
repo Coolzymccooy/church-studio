@@ -177,3 +177,14 @@ export function describeLinkError(err, fallback = 'Tiwaton Link command failed.'
   if (typeof err.message === 'string' && err.message) return err.message;
   return fallback;
 }
+
+/**
+ * The scene-select value for a rule: the saved scene's own spelling when it
+ * matches case-insensitively (as the rule engine does), else the rule's text.
+ */
+export function sceneSelectValue(scenes, current) {
+  if (!current) return '';
+  const wanted = String(current).trim().toLowerCase();
+  const match = (scenes ?? []).find((s) => String(s).trim().toLowerCase() === wanted);
+  return match ?? current;
+}

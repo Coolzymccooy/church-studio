@@ -17,12 +17,16 @@
 //!    Monitor bus is still scaled by `monitor_gain_db`.
 //! 5. Each NDI output gets its bus as interleaved stereo at unity gain, in
 //!    its own ring; the NDI sender thread does the rest (`crate::ndi`).
+//! 6. While a recording is active, the raw strips (copied before the voice
+//!    chain works on its strip) plus Stream and Main go to the record ring
+//!    as whole frames (`crate::recorder::tap`).
 use super::{db_to_lin, EngineShared, MAX_CALLBACK_FRAMES};
-use crate::dsp::mixer::{Mixer, BUS_MONITOR};
+use crate::dsp::mixer::{Mixer, BUS_MAIN, BUS_MONITOR, BUS_STREAM};
 use crate::dsp::{DspChain, DspParams, MetersPayload};
 use crate::mixer_control::{MixerLink, MAX_STRIPS};
 use crate::mixer_meters::MixerMeterSlots;
 use crate::ndi::receive::NdiInputFeed;
+use crate::recorder::tap::RecordTap;
 use crate::routing::{deinterleave, push_stereo};
 use ringbuf::traits::Producer;
 use ringbuf::HeapCons;
@@ -122,6 +126,8 @@ pub(super) struct InputProcessor<P> {
     outputs: Vec<OutputRoute<P>>,
     /// NDI rings (2 channels each), read by the NDI sender threads.
     ndi_outputs: Vec<OutputRoute<P>>,
+    /// Multitrack recording tap (idle unless a recording is active).
+    recorder: RecordTap<P>,
     spectrum: Spectrum,
     meters_tx: mpsc::SyncSender<MetersPayload>,
     meter_interval_samples: usize,
@@ -141,6 +147,7 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
         outputs: Vec<OutputRoute<P>>,
         ndi_outputs: Vec<OutputRoute<P>>,
         mut ndi_inputs: Vec<NdiInputFeed<HeapCons<f32>>>,
+        recorder: RecordTap<P>,
         meters_tx: mpsc::SyncSender<MetersPayload>,
     ) -> Self {
         let stride = stride.max(1);
@@ -169,6 +176,7 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
             meter_slots,
             outputs,
             ndi_outputs,
+            recorder,
             spectrum: Spectrum::new(),
             meters_tx,
             // Meters are sent ~50 times per second, as before.
@@ -198,6 +206,9 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
     fn process_frames(&mut self, n: usize) {
         let monitor_gain = db_to_lin(self.params.monitor_gain_db.load(Ordering::Relaxed));
         self.pull_ndi_inputs(n);
+        // Raw strips are recorded before the voice chain works in place.
+        let voice = self.voice_strip.load(Ordering::Relaxed);
+        self.recorder.capture_raw(&self.chan_bufs, voice, n);
         self.run_voice_chain(n, monitor_gain);
 
         // Mixer: strip i reads input channel i.
@@ -227,6 +238,7 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
                 .fetch_add(dropped, Ordering::Relaxed);
         }
         self.push_ndi();
+        self.push_record(n);
 
         self.send_voice_meters(n);
     }
@@ -253,6 +265,13 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
                 .ndi_dropped_samples
                 .fetch_add(dropped, Ordering::Relaxed);
         }
+    }
+
+    /// Push this block to the record ring (a no-op unless recording).
+    fn push_record(&mut self, n: usize) {
+        let stream = self.mixer.output(BUS_STREAM);
+        let main = self.mixer.output(BUS_MAIN);
+        self.recorder.push(&self.chan_bufs, stream, main, n);
     }
 
     /// Publish the latency of what is active now (see

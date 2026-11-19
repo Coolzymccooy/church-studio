@@ -31,6 +31,8 @@ use crate::ndi::receive::receiver::NdiReceivers;
 use crate::ndi::receive::{NdiInputHandle, NdiInputs};
 use crate::ndi::sender::NdiBusSender;
 use crate::ndi::{NdiEngineConfig, NdiOutputs};
+use crate::recorder::engine::EngineRecorder;
+use crate::recorder::RecordPort;
 
 mod input_proc;
 use input_proc::{InputProcessor, OutputRoute};
@@ -72,6 +74,8 @@ pub struct AudioEngine {
     _ndi_receivers: NdiReceivers,
     ndi_inputs: Vec<NdiInputHandle>,
     ndi_inputs_applied: NdiInputs,
+    /// Control side of the record ring; handed to `RunningEngine`.
+    record_port: Option<RecordPort>,
     pub sample_rate: u32,
     pub buffer_frames: u32,
     pub latency_ms: f32,
@@ -113,6 +117,8 @@ pub struct RunningEngine {
     pub ndi_inputs: Vec<NdiInputHandle>,
     /// The NDI input settings this engine was started with.
     pub ndi_inputs_applied: NdiInputs,
+    /// Multitrack recording; stopped (and finalized) before the engine.
+    pub recorder: EngineRecorder,
 }
 
 enum EngineCommand {
@@ -427,6 +433,9 @@ impl AudioEngine {
         };
 
         let meter_slots = Arc::new(MixerMeterSlots::new(layout.total()));
+        // Record ring: every strip + Stream + Main, preallocated here.
+        let (record_tap, record_port) =
+            crate::recorder::record_ring(layout.total(), sr, MAX_CALLBACK_FRAMES);
         let mut processor = InputProcessor::new(
             sr,
             in_channels,
@@ -438,6 +447,7 @@ impl AudioEngine {
             routes,
             ndi_routes,
             ndi_in.feeds,
+            record_tap,
             meters_tx,
         );
 
@@ -531,6 +541,7 @@ impl AudioEngine {
             _ndi_receivers: NdiReceivers(ndi_in.receivers),
             ndi_inputs: ndi_in.handles,
             ndi_inputs_applied: ndi.inputs,
+            record_port: Some(record_port),
             sample_rate: sr,
             buffer_frames: buf_frames,
             latency_ms,
@@ -661,7 +672,8 @@ impl RunningEngine {
         devices: DeviceSelection,
         ndi: NdiEngineConfig,
     ) -> Result<Self, String> {
-        let (ready_tx, ready_rx) = mpsc::sync_channel::<Result<EngineInfo, String>>(1);
+        let (ready_tx, ready_rx) =
+            mpsc::sync_channel::<Result<(EngineInfo, RecordPort), String>>(1);
         let (stop_tx, stop_rx) = mpsc::channel::<EngineCommand>();
         let shared = Arc::new(EngineShared::new(48_000 * 2));
         let thread_shared = shared.clone();
@@ -674,9 +686,13 @@ impl RunningEngine {
             devices,
             ndi,
         ) {
-            Ok(engine) => {
+            Ok(mut engine) => {
                 let info = engine.info();
-                if ready_tx.send(Ok(info)).is_err() {
+                let Some(port) = engine.record_port.take() else {
+                    let _ = ready_tx.send(Err("The record ring was not created".to_string()));
+                    return;
+                };
+                if ready_tx.send(Ok((info, port))).is_err() {
                     return;
                 }
 
@@ -692,7 +708,7 @@ impl RunningEngine {
             }
         });
 
-        let info = ready_rx
+        let (info, record_port) = ready_rx
             .recv()
             .map_err(|_| "Audio thread exited before initialization completed".to_string())??;
 
@@ -713,10 +729,13 @@ impl RunningEngine {
             ndi_applied: info.ndi_applied,
             ndi_inputs: info.ndi_inputs,
             ndi_inputs_applied: info.ndi_inputs_applied,
+            recorder: EngineRecorder::new(record_port),
         })
     }
 
     pub fn stop(mut self) {
+        // A recording is finalized before the streams stop.
+        let _ = self.recorder.stop();
         let _ = self.stop_tx.send(EngineCommand::Stop);
         if let Some(join_handle) = self.join_handle.take() {
             let _ = join_handle.join();
@@ -851,6 +870,7 @@ impl RunningEngine {
 
 impl Drop for RunningEngine {
     fn drop(&mut self) {
+        let _ = self.recorder.stop();
         let _ = self.stop_tx.send(EngineCommand::Stop);
         if let Some(join_handle) = self.join_handle.take() {
             let _ = join_handle.join();
