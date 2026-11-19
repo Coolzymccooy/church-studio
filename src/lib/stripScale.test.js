@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { FIT_MAX, FIT_MIN, STRIP_ROW_PX, fitScale, nextStripSize, readStripSize, stripScale, stripSizeLabel } from './stripScale.js';
+import { EXTRA_ROW_PX, FIT_MAX, FIT_MIN, STRIP_ROW_PX, stripRowPx, fitScale, nextStripSize, readStripSize, stripScale, stripSizeLabel } from './stripScale.js';
 
 test('readStripSize falls back to fit', () => {
   assert.equal(readStripSize('1.25'), '1.25');
@@ -34,4 +34,18 @@ test('stripScale uses the fixed size or fits', () => {
   assert.equal(stripScale('fit', 885), 1.5);
   assert.equal(stripSizeLabel('fit'), 'size fit');
   assert.equal(stripSizeLabel('1.25'), 'size 1.25×');
+});
+
+test('stripRowPx adds the optional rows any strip shows', () => {
+  assert.equal(stripRowPx([]), STRIP_ROW_PX);
+  assert.equal(stripRowPx([{}]), STRIP_ROW_PX);
+  const base = { automix: false, duck: false };
+  assert.equal(stripRowPx([base]), STRIP_ROW_PX + EXTRA_ROW_PX.keys);
+  assert.equal(stripRowPx([base, { ...base, automix: true }]), STRIP_ROW_PX + EXTRA_ROW_PX.keys + EXTRA_ROW_PX.readout);
+  assert.equal(stripRowPx([{ ...base, duck: true }]), STRIP_ROW_PX + EXTRA_ROW_PX.keys + EXTRA_ROW_PX.knob + EXTRA_ROW_PX.readout);
+});
+
+test('fitScale uses the given row height', () => {
+  assert.equal(fitScale(694, 694), 1);
+  assert.ok(fitScale(600, 694) * 694 <= 600);
 });

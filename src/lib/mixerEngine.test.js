@@ -412,3 +412,20 @@ test('createMixerController.subscribeStateChanges listens on mixer-state-changed
   sub.dispose();
   assert.equal(unlistened, 1);
 });
+
+test('applyStripChange keeps auto-mix and duck exclusive on a strip', () => {
+  const state = { strips: [{ index: 0, automix: false, duck: true }], buses: [] };
+  const a = applyStripChange(state, 0, 'automix', true);
+  assert.deepEqual(a.strips[0], { index: 0, automix: true, duck: false });
+  const b = applyStripChange(a, 0, 'duck', true);
+  assert.deepEqual(b.strips[0], { index: 0, automix: false, duck: true });
+  const c = applyStripChange(b, 0, 'duck', false);
+  assert.deepEqual(c.strips[0], { index: 0, automix: false, duck: false });
+  assert.equal(state.strips[0].duck, true);
+});
+
+test('applyStripChange clamps duck depth to 0..40 dB', () => {
+  const state = { strips: [{ index: 0, duck_depth_db: 12 }], buses: [] };
+  assert.equal(applyStripChange(state, 0, 'duck_depth_db', 99).strips[0].duck_depth_db, 40);
+  assert.equal(applyStripChange(state, 0, 'duck_depth_db', -5).strips[0].duck_depth_db, 0);
+});
