@@ -1,30 +1,32 @@
-import React, { useState } from 'react';
+import React, { useId, useState } from 'react';
 
 import { OBS_DEFAULT_HOST, OBS_DEFAULT_PORT, connectionState, parsePort } from '../../lib/obsControl.js';
+import InfoTip from '../faceplate/InfoTip.jsx';
+import Key from '../faceplate/Key.jsx';
+import Lamp from '../faceplate/Lamp.jsx';
 
-const DOT = {
-  connected: { cls: 'bg-[#00E676]', label: 'Connected' },
-  connecting: { cls: 'bg-amber-400 animate-pulse', label: 'Connecting…' },
-  disconnected: { cls: 'bg-slate-600', label: 'Disconnected' },
+const LAMP = {
+  connected: { tone: 'g', label: 'connected' },
+  connecting: { tone: 'a', label: 'connecting' },
+  disconnected: { tone: 'off', label: 'disconnected' },
 };
 
-const inputCls = 'w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200';
-
 /**
- * Host / port / password, Connect-Disconnect, status dot and OBS version.
+ * Host / port / password, Connect-Disconnect, status lamp and OBS version.
  * Fields are seeded from `config`; the parent remounts this (via `key`) when
  * the saved address changes.
  */
 export default function ObsConnectionSection({
   config, status, busy, onConnect, onDisconnect, onClearPassword,
 }) {
+  const id = useId();
   const [host, setHost] = useState(() => config?.host || OBS_DEFAULT_HOST);
   const [portText, setPortText] = useState(() => String(config?.port || OBS_DEFAULT_PORT));
   const [password, setPassword] = useState('');
   const [fieldError, setFieldError] = useState(null);
 
   const state = connectionState(status);
-  const dot = DOT[state];
+  const lamp = LAMP[state];
   const enabled = Boolean(config?.enabled);
 
   const connect = () => {
@@ -37,85 +39,96 @@ export default function ObsConnectionSection({
     setPassword('');
   };
 
+  const message = fieldError || status?.lastError;
+
   return (
-    <section className="space-y-3">
-      <div className="flex items-center justify-between">
-        <span className="flex items-center gap-2 text-xs text-slate-300" aria-live="polite">
-          <span className={`w-2.5 h-2.5 rounded-full ${dot.cls}`} />
-          {dot.label}
-          {status?.obsVersion && (
-            <span className="text-slate-500">· OBS {status.obsVersion}</span>
-          )}
+    <section className="fp-mod" aria-label="OBS connection">
+      <div className="fp-mod-hd">
+        <span>
+          Connection
+          <InfoTip label="OBS connection">
+            In OBS: Tools → WebSocket Server Settings → Enable WebSocket server. “Show Connect Info” shows the password.
+          </InfoTip>
         </span>
-        {enabled ? (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={onDisconnect}
-            className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-slate-200 hover:bg-slate-700 disabled:opacity-50"
-          >
-            Disconnect
-          </button>
-        ) : (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={connect}
-            className="px-3 py-1.5 rounded-lg text-xs font-bold text-black disabled:opacity-50"
-            style={{ background: 'var(--accent)' }}
-          >
-            Connect
-          </button>
-        )}
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }} aria-live="polite">
+          <Lamp tone={lamp.tone}>{lamp.label}</Lamp>
+          {status?.obsVersion && <span className="fp-sub fp-num">OBS {status.obsVersion}</span>}
+        </span>
       </div>
+      <div className="fp-mod-bd">
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px', gap: 8 }}>
+          <div>
+            <label className="fp-label" htmlFor={`${id}-host`}>Address</label>
+            <input
+              id={`${id}-host`}
+              className="fp-field"
+              value={host}
+              disabled={enabled}
+              onChange={(e) => setHost(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="fp-label" htmlFor={`${id}-port`}>Port</label>
+            <input
+              id={`${id}-port`}
+              className="fp-field"
+              value={portText}
+              inputMode="numeric"
+              disabled={enabled}
+              onChange={(e) => setPortText(e.target.value)}
+            />
+          </div>
+        </div>
 
-      <div className="grid grid-cols-[1fr_90px] gap-2">
-        <label className="text-[10px] uppercase font-bold text-slate-500">
-          Address
-          <input className={inputCls} value={host} disabled={enabled} onChange={(e) => setHost(e.target.value)} />
-        </label>
-        <label className="text-[10px] uppercase font-bold text-slate-500">
-          Port
+        <div>
+          <div className="fp-label" style={{ justifyContent: 'space-between' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <label htmlFor={`${id}-password`}>Password</label>
+              {config?.hasPassword && (
+                <InfoTip label="OBS password">Leave blank to keep the saved password.</InfoTip>
+              )}
+            </span>
+            {config?.hasPassword && !enabled && onClearPassword && (
+              <Key
+                disabled={busy}
+                onClick={() => { setPassword(''); onClearPassword(); }}
+                aria-label="clear saved password"
+              >
+                clear saved
+              </Key>
+            )}
+          </div>
           <input
-            className={inputCls}
-            value={portText}
-            inputMode="numeric"
+            id={`${id}-password`}
+            className="fp-field"
+            type="password"
+            autoComplete="off"
+            value={password}
             disabled={enabled}
-            onChange={(e) => setPortText(e.target.value)}
+            placeholder={config?.hasPassword ? 'saved' : 'none'}
+            onChange={(e) => setPassword(e.target.value)}
           />
-        </label>
-      </div>
-      <label className="block text-[10px] uppercase font-bold text-slate-500">
-        <span className="flex items-center justify-between">
-          Password
-          {config?.hasPassword && !enabled && onClearPassword && (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => { setPassword(''); onClearPassword(); }}
-              className="normal-case font-semibold text-slate-400 hover:text-white disabled:opacity-50"
-            >
-              Clear saved password
-            </button>
-          )}
-        </span>
-        <input
-          className={inputCls}
-          type="password"
-          autoComplete="off"
-          value={password}
-          disabled={enabled}
-          placeholder={config?.hasPassword ? 'Saved (leave blank to keep)' : 'None'}
-          onChange={(e) => setPassword(e.target.value)}
-        />
-      </label>
-      <p className="text-[10px] text-slate-600">
-        In OBS: Tools → WebSocket Server Settings → Enable WebSocket server. “Show Connect Info” shows the password.
-      </p>
+        </div>
 
-      {(fieldError || status?.lastError) && (
-        <p className="text-[11px] text-amber-400" role="status">{fieldError || status.lastError}</p>
-      )}
+        <div className="fp-row">
+          {message ? (
+            <span
+              className={fieldError ? 'fp-sub fp-caution' : 'fp-sub fp-fault'}
+              style={{ whiteSpace: 'normal' }}
+              role="status"
+            >
+              {message}
+            </span>
+          ) : (
+            <span />
+          )}
+          {enabled ? (
+            <Key disabled={busy} onClick={onDisconnect}>disconnect</Key>
+          ) : (
+            <Key disabled={busy} onClick={connect}>connect</Key>
+          )}
+        </div>
+      </div>
     </section>
   );
 }

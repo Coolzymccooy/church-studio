@@ -1,214 +1,247 @@
-import React from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+
 import {
-  AlertTriangle,
-  ArrowRight,
-  CheckCircle2,
-  RefreshCw,
-  Settings,
-  X,
-} from 'lucide-react';
-
+  clampPanel, draftChanges, draftFrom, isDirty, readPanelPos, rowStatus,
+} from '../lib/setupDraft.js';
+import { isTauri } from '../lib/platform';
 import ComputerAudioToggle from './ComputerAudioToggle';
-import MainOutputSelect from './MainOutputSelect';
+import InfoTip from './faceplate/InfoTip.jsx';
+import Key from './faceplate/Key.jsx';
+import Lamp from './faceplate/Lamp.jsx';
+import LevelBar from './faceplate/LevelBar.jsx';
+import TwoPressKey from './faceplate/TwoPressKey.jsx';
+import useMeterFeed, { busPeakDb, inputPeakDb } from './desk/useMeterFeed.js';
 
-function VirtualCableHint({ outputs }) {
-  const vcKeywords = ['vb-cable', 'vb cable', 'blackhole', 'black hole', 'loopback', 'virtual'];
-  const detected = outputs.filter((device) =>
-    vcKeywords.some((keyword) => (device.label || '').toLowerCase().includes(keyword)),
-  );
-  const isWindows = navigator.userAgent.toLowerCase().includes('win');
-  const isMac = navigator.userAgent.toLowerCase().includes('mac');
+const POS_KEY = 'tiwaton_setup_pos';
+const PANEL_W = 360;
+const VIRTUAL_KEYWORDS = ['vb-cable', 'vb cable', 'blackhole', 'black hole', 'loopback', 'virtual'];
+const STATUS_LAMP = { on: ['g', 'on'], idle: ['off', 'idle'], 'not set': ['off', 'not set'], unsaved: ['a', 'unsaved'] };
 
-  if (detected.length > 0) {
-    return (
-      <div className="mb-2 flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-emerald-700/40 bg-emerald-900/10">
-        <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />
-        <span className="text-[10px] text-emerald-400 font-semibold">
-          Virtual cable detected: {detected.map((device) => device.label).join(', ')}
-        </span>
-      </div>
-    );
+const deviceOptions = (devices, prefix) => devices.map((device) => (
+  <option key={device.deviceId} value={device.deviceId}>
+    {device.label || `${prefix} ${device.deviceId.slice(0, 5)}`}
+  </option>
+));
+
+function loadPos() {
+  try {
+    return readPanelPos(window.localStorage.getItem(POS_KEY));
+  } catch {
+    return null;
   }
+}
 
+function savePos(pos) {
+  try {
+    window.localStorage.setItem(POS_KEY, JSON.stringify(pos));
+  } catch {
+    // Storage can be blocked; the position still holds for this session.
+  }
+}
+
+/** One device: label, ⓘ, status lamp, the select, and a live level bar while it is on. */
+function DeviceRow({ id, label, tip, status, value, onChange, getDb, children }) {
+  const [tone, word] = STATUS_LAMP[status];
   return (
-    <div
-      className="mb-2 rounded-lg border border-amber-700/30 px-3 py-2.5 space-y-1.5"
-      style={{ background: 'rgba(var(--accent-rgb),0.05)' }}
-    >
-      <div className="flex items-start gap-2">
-        <AlertTriangle size={12} className="text-amber-500 shrink-0 mt-0.5" />
-        <p className="text-[10px] text-amber-400 font-semibold">No virtual cable detected</p>
+    <div className="fp-setup-row">
+      <div className="fp-row">
+        <label className="fp-label" htmlFor={id} style={{ margin: 0 }}>
+          {label}
+          {tip && <InfoTip label={label}>{tip}</InfoTip>}
+        </label>
+        <Lamp tone={tone}>{word}</Lamp>
       </div>
-      <p className="text-[9px] text-slate-500 leading-relaxed">
-        A virtual cable routes TIWATON audio into OBS. Install one, then refresh devices.
-      </p>
-      <div className="flex gap-2">
-        {(isWindows || (!isWindows && !isMac)) && (
-          <a
-            href="https://vb-audio.com/Cable/"
-            target="_blank"
-            rel="noreferrer"
-            className="flex items-center gap-1 px-2 py-1 rounded-md text-[9px] font-bold text-black"
-            style={{ background: 'var(--accent)' }}
-          >
-            <ArrowRight size={9} />
-            VB-CABLE (Windows)
-          </a>
-        )}
-        {(isMac || (!isWindows && !isMac)) && (
-          <a
-            href="https://existential.audio/blackhole/"
-            target="_blank"
-            rel="noreferrer"
-            className="flex items-center gap-1 px-2 py-1 rounded-md text-[9px] font-bold text-black"
-            style={{ background: 'var(--accent)' }}
-          >
-            <ArrowRight size={9} />
-            BlackHole (Mac)
-          </a>
-        )}
-      </div>
-      <p className="text-[9px] text-slate-600">After installing, click the refresh button above.</p>
+      <select id={id} className="fp-field" value={value} onChange={(event) => onChange(event.target.value)}>
+        {children}
+      </select>
+      {isTauri && <LevelBar getDb={status === 'on' ? getDb : () => -96} label={`${label} level`} />}
     </div>
   );
 }
 
-export default function DeviceSettingsModal({
-  open,
-  onClose,
-  onRefresh,
-  selectedDevices,
-  onSelectedDevicesChange,
-  availableDevices,
-  audioStats,
+/** Drag by the header; the panel stays inside the window and remembers where it was left. */
+function useDragPanel(panelRef) {
+  const [pos, setPos] = useState(() => loadPos() ?? { x: window.innerWidth - PANEL_W - 16, y: 64 });
+  const drag = useRef(null);
+
+  const size = () => {
+    const el = panelRef.current;
+    return { w: el?.offsetWidth ?? PANEL_W, h: el?.offsetHeight ?? 400 };
+  };
+  const viewport = () => ({ w: window.innerWidth, h: window.innerHeight });
+
+  useEffect(() => {
+    const keepInside = () => setPos((p) => clampPanel(p, size(), viewport()));
+    keepInside();
+    window.addEventListener('resize', keepInside);
+    return () => window.removeEventListener('resize', keepInside);
+    // size() reads the ref at call time; the listener is set once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const onPointerDown = (e) => {
+    if (e.button !== 0 || e.target.closest('button, select, input')) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    drag.current = { px: e.clientX, py: e.clientY, x: pos.x, y: pos.y };
+  };
+  const onPointerMove = (e) => {
+    const d = drag.current;
+    if (!d) return;
+    setPos(clampPanel({ x: d.x + e.clientX - d.px, y: d.y + e.clientY - d.py }, size(), viewport()));
+  };
+  const onPointerUp = () => {
+    if (!drag.current) return;
+    drag.current = null;
+    setPos((p) => {
+      savePos(p);
+      return p;
+    });
+  };
+  const nudge = (dx, dy) => setPos((p) => {
+    const next = clampPanel({ x: p.x + dx, y: p.y + dy }, size(), viewport());
+    savePos(next);
+    return next;
+  });
+
+  return { pos, handlers: { onPointerDown, onPointerMove, onPointerUp, onPointerCancel: onPointerUp }, nudge };
+}
+
+function SetupPanel({
+  onClose, onRefresh, selectedDevices, onSelectedDevicesChange, availableDevices, audioStats, mixerController, isLive,
 }) {
-  if (!open) {
-    return null;
-  }
+  const panelRef = useRef(null);
+  const { pos, handlers, nudge } = useDragPanel(panelRef);
+  const [draft, setDraft] = useState(() => draftFrom(selectedDevices));
+  const [savedWhileLive, setSavedWhileLive] = useState(false);
+  // Only the desktop engine has real meters; the browser's demo mixer simulates levels, which
+  // must never pass for a working device.
+  const feed = useMeterFeed(isTauri ? mixerController : null, isTauri);
+  const dirty = isDirty(selectedDevices, draft);
+
+  const set = (key) => (value) => setDraft((d) => ({ ...d, [key]: value }));
+  const status = (key) => rowStatus({ saved: selectedDevices, draft, key, running: isLive });
+  const save = () => {
+    onSelectedDevicesChange(draftChanges(selectedDevices, draft));
+    setSavedWhileLive(isLive);
+  };
+  const revert = () => setDraft(draftFrom(selectedDevices));
+
+  const onKeyDown = useCallback((e) => {
+    if (e.key === 'Escape' && !dirty) onClose();
+  }, [dirty, onClose]);
+  useEffect(() => {
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [onKeyDown]);
+
+  const onHeaderKey = (e) => {
+    const step = e.shiftKey ? 40 : 10;
+    const moves = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
+    if (moves[e.key]) {
+      e.preventDefault();
+      nudge(...moves[e.key]);
+    }
+  };
+
+  const cables = availableDevices.outputs.filter((device) =>
+    VIRTUAL_KEYWORDS.some((keyword) => (device.label || '').toLowerCase().includes(keyword)));
+  const lowRate = audioStats.sampleRate > 0 && audioStats.sampleRate < 44100;
 
   return (
-    <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center backdrop-blur-sm p-4">
-      <div className="bg-slate-900 w-full max-w-lg rounded-2xl border border-slate-700 shadow-2xl p-6 space-y-6">
-        <div className="flex justify-between items-center border-b border-slate-800 pb-4">
-          <h2 className="text-xl font-bold flex items-center gap-2">
-            <Settings size={20} className="text-amber-400" />
-            Device Settings
-          </h2>
-          <div className="flex gap-2">
-            <button
-              onClick={onRefresh}
-              className="p-1.5 rounded-full bg-slate-800 text-slate-400 hover:text-white transition-colors"
-              title="Refresh Device List"
-            >
-              <RefreshCw size={18} />
-            </button>
-            <button onClick={onClose} className="text-slate-400 hover:text-white">
-              <X size={24} />
-            </button>
-          </div>
-        </div>
+    <section
+      ref={panelRef}
+      className="fp-setup"
+      style={{ left: pos.x, top: pos.y }}
+      role="dialog"
+      aria-modal="false"
+      aria-labelledby="setup-title"
+    >
+      <div className="fp-setup-hd" {...handlers}>
+        <span
+          id="setup-title"
+          className="fp-setup-grip"
+          tabIndex={0}
+          role="button"
+          aria-label="Setup panel: drag, or use the arrow keys, to move it"
+          onKeyDown={onHeaderKey}
+        >
+          <span aria-hidden="true" className="fp-grip" />
+          Setup
+        </span>
+        <span className="fp-keys">
+          <Key onClick={onRefresh} aria-label="refresh device list">refresh</Key>
+          {dirty
+            ? <TwoPressKey label="close and discard changes" onConfirm={onClose}>close</TwoPressKey>
+            : <Key onClick={onClose} aria-label="close setup">close</Key>}
+        </span>
+      </div>
 
-        <div>
-          <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">
-            Input Source (Mic / Mixer)
-          </label>
-          <select
-            className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3"
-            value={selectedDevices.inputId}
-            onChange={(event) => onSelectedDevicesChange({ inputId: event.target.value })}
-          >
-            <option value="default">Default System Microphone</option>
-            {availableDevices.inputs.map((device) => (
-              <option key={device.deviceId} value={device.deviceId}>
-                {device.label || `Mic ${device.deviceId.slice(0, 5)}...`}
-              </option>
-            ))}
-          </select>
-          <div className="mt-2"><ComputerAudioToggle /></div>
-        </div>
+      <div className="fp-setup-bd">
+        <DeviceRow id="dev-input" label="Input" tip="The mic or mixer the engine listens to."
+          status={status('inputId')} value={draft.inputId ?? 'default'} onChange={set('inputId')}
+          getDb={() => inputPeakDb(feed.current)}>
+          <option value="default">System default</option>
+          {deviceOptions(availableDevices.inputs, 'Mic')}
+        </DeviceRow>
+        <ComputerAudioToggle />
 
-        <div>
-          <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">
-            Monitoring Output (what you hear)
-          </label>
-          <select
-            className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3"
-            value={selectedDevices.outputId}
-            onChange={(event) => onSelectedDevicesChange({ outputId: event.target.value })}
-          >
-            <option value="default">Default System Output</option>
-            {availableDevices.outputs.map((device) => (
-              <option key={device.deviceId} value={device.deviceId}>
-                {device.label || `Speaker ${device.deviceId.slice(0, 5)}...`}
-              </option>
-            ))}
-          </select>
-          <p className="mt-1 text-[10px] text-slate-500">
-            Choose AirPods, headphones, or speakers the sound engineer will monitor on.
-          </p>
-        </div>
+        <DeviceRow id="dev-monitor" label="Monitor" tip="What you hear: headphones or speakers for the sound engineer."
+          status={status('outputId')} value={draft.outputId ?? 'default'} onChange={set('outputId')}
+          getDb={() => busPeakDb(feed.current, 'monitor')}>
+          <option value="default">System default</option>
+          {deviceOptions(availableDevices.outputs, 'Speaker')}
+        </DeviceRow>
 
-        <div>
-          <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">
-            Broadcast Output (what OBS / YouTube hears)
-          </label>
+        <DeviceRow id="dev-broadcast" label="Broadcast"
+          tip="What the stream hears. For OBS or another app on this computer, NDI in the output router needs no extra device."
+          status={status('broadcastBus')} value={draft.broadcastBus ?? 'Not set'} onChange={set('broadcastBus')}
+          getDb={() => busPeakDb(feed.current, 'stream')}>
+          <option value="Not set">Not set</option>
+          <option value="Same as monitor">Same as monitor</option>
+          {deviceOptions(availableDevices.outputs, 'Bus')}
+        </DeviceRow>
+        {cables.length > 0 && <Lamp tone="g">virtual device: {cables.map((device) => device.label).join(', ')}</Lamp>}
 
-          <VirtualCableHint outputs={availableDevices.outputs} />
+        {isTauri && (
+          <DeviceRow id="dev-main" label="Main" tip="The PA or room. Use a different device from monitor and broadcast."
+            status={status('mainOutputId')} value={draft.mainOutputId || 'Not set'} onChange={set('mainOutputId')}
+            getDb={() => busPeakDb(feed.current, 'main')}>
+            <option value="Not set">Not set</option>
+            {deviceOptions(availableDevices.outputs, 'Output')}
+          </DeviceRow>
+        )}
 
-          <select
-            className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3"
-            value={selectedDevices.broadcastBus}
-            onChange={(event) => onSelectedDevicesChange({ broadcastBus: event.target.value })}
-          >
-            <option value="Not set">Not set yet</option>
-            <option value="Same as monitor">Same as monitor output</option>
-            {availableDevices.outputs.map((device) => (
-              <option key={device.deviceId} value={device.deviceId}>
-                {device.label || `Bus ${device.deviceId.slice(0, 5)}...`}
-              </option>
-            ))}
-          </select>
-          <p className="mt-1.5 text-[10px] text-slate-600 leading-snug">
-            Set this to VB-CABLE Input (Windows) or BlackHole 2ch (Mac). Then in OBS, choose the same device as your Audio Input Capture source.
-          </p>
-        </div>
-
-        <MainOutputSelect
-          selectedDevices={selectedDevices}
-          outputs={availableDevices.outputs}
-          onChange={(mainOutputId) => onSelectedDevicesChange({ mainOutputId })}
-        />
-
-        <div className="grid grid-cols-2 gap-4">
-          <div
-            className={`p-4 rounded-xl border ${
-              audioStats.sampleRate > 0 && audioStats.sampleRate < 44100
-                ? 'bg-amber-900/20 border-amber-600/50'
-                : 'bg-slate-800 border-slate-700'
-            }`}
-          >
-            <div className="text-xs font-bold mb-1">SAMPLE RATE</div>
-            <div
-              className={`text-lg font-mono flex items-center gap-2 ${
-                audioStats.sampleRate > 0 && audioStats.sampleRate < 44100
-                  ? 'text-amber-500'
-                  : 'text-amber-400'
-              }`}
-            >
-              {audioStats.sampleRate > 0 ? `${(audioStats.sampleRate / 1000).toFixed(1)} kHz` : '--'}
-              {audioStats.sampleRate > 0 && audioStats.sampleRate < 44100 && (
-                <AlertTriangle size={16} />
-              )}
-            </div>
-          </div>
-          <div className="bg-slate-800 p-4 rounded-xl border border-slate-700">
-            <div className="text-xs font-bold mb-1">BUFFER SIZE</div>
-            <div className="text-lg font-mono text-amber-400">
-              {audioStats.bufferSize || '--'} smp
-            </div>
-          </div>
+        <div className="fp-glass fp-setup-fmt">
+          <Lamp tone={isLive ? 'g' : 'off'}>{isLive ? 'engine on' : 'engine off'}</Lamp>
+          <span className={`fp-num ${lowRate ? 'fp-caution' : ''}`}>
+            {audioStats.sampleRate > 0 ? `${(audioStats.sampleRate / 1000).toFixed(1)} kHz` : '-- kHz'}
+          </span>
+          <span className="fp-num">{audioStats.bufferSize || '--'} smp</span>
         </div>
       </div>
-    </div>
+
+      <div className="fp-setup-ft">
+        {dirty && <Lamp tone="a">unsaved</Lamp>}
+        {!dirty && savedWhileLive && (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <Lamp tone="a">applies on next start</Lamp>
+            <InfoTip label="Applying devices">The engine opens devices when it starts. Stop and start it to use the new ones.</InfoTip>
+          </span>
+        )}
+        <span className="fp-bar-end">
+          <Key onClick={revert} disabled={!dirty}>revert</Key>
+          <Key lit={dirty ? 'sel' : null} onClick={save} disabled={!dirty}>save</Key>
+        </span>
+      </div>
+    </section>
   );
+}
+
+/**
+ * The setup panel: a floating, draggable, non-modal plate, so the desk stays usable while it is
+ * open. Device choices are a draft until "save"; each device shows its state and a live level.
+ */
+export default function DeviceSettingsModal(props) {
+  if (!props.open) return null;
+  return <SetupPanel {...props} />;
 }

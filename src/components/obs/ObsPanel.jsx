@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { MonitorPlay, X } from 'lucide-react';
 
 import { isTauri } from '../../lib/platform';
 import {
@@ -8,6 +7,8 @@ import {
   getDesktopObsController,
   normalizeSceneLink,
 } from '../../lib/obsControl.js';
+import InfoTip from '../faceplate/InfoTip.jsx';
+import Key from '../faceplate/Key.jsx';
 import ObsConfirmDialog from './ObsConfirmDialog.jsx';
 import ObsConnectionSection from './ObsConnectionSection.jsx';
 import ObsOutputSection from './ObsOutputSection.jsx';
@@ -22,35 +23,39 @@ function Shell({ onClose, children }) {
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center backdrop-blur-sm p-4">
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="obs-panel-title"
-        className="relative w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-6 space-y-5 shadow-2xl"
-      >
-        <div className="flex items-center justify-between">
-          <h2 id="obs-panel-title" className="flex items-center gap-2 text-lg font-bold text-white">
-            <MonitorPlay size={20} className="text-[var(--accent)]" />
-            OBS Studio
-          </h2>
-          <button type="button" onClick={onClose} className="text-slate-400 hover:text-white" aria-label="Close">
-            <X size={22} />
-          </button>
+    <>
+      <div className="fp-scrim" aria-hidden="true" />
+      <div className="fp-dialog-wrap">
+        <div
+          className="fp-dialog"
+          style={{ width: 'min(576px, 100%)' }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="obs-panel-title"
+        >
+          <div className="fp-dialog-hd">
+            <span id="obs-panel-title">OBS Studio</span>
+            <Key onClick={onClose} aria-label="close OBS Studio">close</Key>
+          </div>
+          <div className="fp-dialog-bd">{children}</div>
         </div>
-        {children}
       </div>
-    </div>
+    </>
   );
 }
 
 function DesktopOnly({ onClose }) {
   return (
     <Shell onClose={onClose}>
-      <p className="text-sm text-slate-300 leading-relaxed">
-        OBS control needs the TIWATON AI Studio desktop app. It connects to OBS on this computer or your
-        network through OBS&apos;s WebSocket server, which a browser tab can&apos;t do.
-      </p>
+      <div className="fp-row">
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, overflow: 'visible' }}>
+          Desktop app only
+          <InfoTip label="OBS control">
+            OBS control needs the TIWATON AI Studio desktop app. It connects to OBS on this computer or
+            your network through OBS&apos;s WebSocket server, which a browser tab can&apos;t do.
+          </InfoTip>
+        </span>
+      </div>
     </Shell>
   );
 }
@@ -125,14 +130,12 @@ function DesktopPanel({ onClose, mixerController }) {
         onDisconnect={() => saveConfig({ enabled: false })}
         onClearPassword={() => saveConfig({ password: '' })}
       />
-      <div className="border-t border-slate-800" />
       <ObsOutputSection
         status={status}
         busy={busy}
         onSetScene={(name) => run(() => controller.setScene(name))}
         onRequestAction={setConfirmKind}
       />
-      <div className="border-t border-slate-800" />
       <ObsSceneLinkSection
         link={link}
         studioScenes={studioScenes}
@@ -140,7 +143,7 @@ function DesktopPanel({ onClose, mixerController }) {
         busy={busy || !config}
         onChange={onLinkChange}
       />
-      {error && <p className="text-[11px] text-red-400" role="alert">{error}</p>}
+      {error && <p className="fp-sub fp-fault" style={{ margin: 0 }} role="alert">{error}</p>}
       <ObsConfirmDialog
         request={confirmKind ? OBS_OUTPUT_ACTIONS[confirmKind] : null}
         onConfirm={confirmAction}

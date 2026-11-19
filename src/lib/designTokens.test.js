@@ -75,7 +75,7 @@ test('finish tokens never redefine shared tokens', () => {
 test('every colour token is a six-digit hex', () => {
   for (const name of ['graphite', 'bone']) {
     for (const [k, v] of Object.entries(finish(name))) {
-      if (/^--fp-(font|text|weight|radius|inset|glow|motion|arm-timeout)/.test(k)) continue;
+      if (/^--fp-(font|text|weight|radius|inset|elev|glow|motion|arm-timeout)/.test(k)) continue;
       assert.match(v, /^#[0-9A-F]{6}$/i, `${name} ${k} = ${v}`);
     }
   }

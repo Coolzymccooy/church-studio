@@ -1,5 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Waves } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
 import { dragRegionProps, isTauri } from '../lib/platform';
 
 /**
@@ -21,29 +20,21 @@ function DropdownMenu({ label, items, isOpen, onToggle, onClose }) {
 
   return (
     <div ref={menuRef} className="relative">
-      <button
-        onClick={onToggle}
-        className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors ${
-          isOpen
-            ? 'bg-[var(--accent)]/20 text-white'
-            : 'text-slate-400 hover:text-white hover:bg-white/5'
-        }`}
-      >
+      <button type="button" onClick={onToggle} className="fp-menu-btn" aria-expanded={isOpen} aria-haspopup="menu">
         {label}
       </button>
 
       {isOpen && (
-        <div
-          className="absolute left-0 top-full mt-0.5 min-w-[200px] rounded-lg border border-slate-700 shadow-2xl z-50 overflow-hidden py-1"
-          style={{ background: '#0D1428' }}
-        >
+        <div className="fp-menu" role="menu" aria-label={label}>
           {items.map((item, i) => {
             if (item.separator) {
-              return <div key={i} className="my-1 border-t border-slate-800" />;
+              return <div key={i} className="fp-menu-sep" role="separator" />;
             }
             return (
               <button
                 key={i}
+                type="button"
+                role="menuitem"
                 disabled={item.disabled}
                 onClick={() => {
                   if (item.action && !item.disabled) {
@@ -51,19 +42,10 @@ function DropdownMenu({ label, items, isOpen, onToggle, onClose }) {
                     onClose();
                   }
                 }}
-                className={`w-full flex items-center justify-between px-4 py-1.5 text-[11px] transition-colors text-left ${
-                  item.disabled
-                    ? 'text-slate-600 cursor-not-allowed'
-                    : 'text-slate-300 hover:bg-[var(--accent)]/15 hover:text-white cursor-pointer'
-                }`}
+                className="fp-menu-item"
               >
-                <span className="flex items-center gap-2">
-                  {item.icon && <span className="opacity-60">{item.icon}</span>}
-                  {item.label}
-                </span>
-                {item.shortcut && (
-                  <span className="text-[10px] text-slate-600 font-mono ml-6">{item.shortcut}</span>
-                )}
+                <span>{item.label}</span>
+                {item.shortcut && <span className="fp-num fp-sub">{item.shortcut}</span>}
               </button>
             );
           })}
@@ -78,7 +60,7 @@ export default function MenuBar({
   onGoHome,
   onShowSettings,
   onShowObs,
-  themeSelector,
+  onShowHelp,
   onToggleLive,
   onHardReset,
   onStartAutoCalibrate,
@@ -129,7 +111,7 @@ export default function MenuBar({
       id: 'engine',
       label: 'Engine',
       items: [
-        { label: isLive ? '⏹ Stop Engine' : '▶ Start Engine', shortcut: 'Space', action: onToggleLive },
+        { label: isLive ? 'Stop engine' : 'Start engine', shortcut: 'Space', action: onToggleLive },
         { separator: true },
         { label: 'Restart / Hard Reset', action: onHardReset },
         { label: 'Audio Device Settings', action: onShowSettings },
@@ -142,15 +124,15 @@ export default function MenuBar({
       id: 'view',
       label: 'View',
       items: [
-        { label: '● Live Visualizer', action: () => onSetMainTab?.('live'), disabled: mainTab === 'live' },
-        { label: '◈ Audio Editor', action: () => onSetMainTab?.('editor'), disabled: mainTab === 'editor' },
+        { label: 'Live view', action: () => onSetMainTab?.('live'), disabled: mainTab === 'live' },
+        { label: 'Editor', action: () => onSetMainTab?.('editor'), disabled: mainTab === 'editor' },
         { separator: true },
         { label: isBypassed ? 'Disable Bypass (B)' : 'Enable Bypass (B)', action: () => setIsBypassed?.(!isBypassed) },
       ],
     },
     {
       id: 'ai',
-      label: 'AI Stack',
+      label: 'Voice',
       items: [
         {
           label: 'Church Beta — All ON',
@@ -186,34 +168,15 @@ export default function MenuBar({
       id: 'help',
       label: 'Help',
       items: [
-        { label: 'TIWATON Setup Guide', action: () => document.querySelector('[data-help-button]')?.click() },
-        { label: 'Routing: OBS + Virtual Cable', action: () => document.querySelector('[data-help-button]')?.click() },
+        { label: 'TIWATON Setup Guide', action: onShowHelp },
+        { label: 'Routing: OBS + Virtual Cable', action: onShowHelp },
       ],
     },
   ];
 
   return (
-    <div
-      className="h-9 shrink-0 flex items-center px-2 gap-1 z-30 border-b border-slate-800/60"
-      style={{ background: '#030710', fontFamily: 'Inter, system-ui, sans-serif' }}
-      {...dragRegionProps}
-    >
-      {/* Logo */}
-      <div
-        className={`flex items-center gap-2 px-2 mr-3 group ${onGoHome ? 'cursor-pointer' : 'cursor-default'}`}
-        onClick={onGoHome || undefined}
-        title={onGoHome ? 'Back to Home' : 'TIWATON AI Studio'}
-      >
-        <div className="w-5 h-5 bg-amber-600 rounded flex items-center justify-center shadow-[0_0_8px_rgba(var(--accent-rgb),0.5)] group-hover:scale-105 transition-transform">
-          <Waves size={11} className="text-white" />
-        </div>
-        <span className="text-slate-200 font-bold text-[11px] tracking-[0.2em]">TIWATON</span>
-        <span className="text-slate-600 text-[10px] hidden sm:inline">AI STUDIO</span>
-      </div>
-
-      <div className="h-4 w-px bg-slate-800 mr-1" />
-
-      {/* Menu items */}
+    <nav className="fp-menubar" aria-label="Menu" {...dragRegionProps}>
+      {onGoHome && <button type="button" className="fp-menu-btn" onClick={onGoHome}>home</button>}
       {menus.map(menu => (
         <DropdownMenu
           key={menu.id}
@@ -224,32 +187,6 @@ export default function MenuBar({
           onClose={close}
         />
       ))}
-
-      {/* Right side — theme selector + mode switcher */}
-      <div className="ml-auto flex items-center gap-2">
-        {themeSelector}
-        <div
-          className="flex items-center rounded p-0.5 border border-slate-800 gap-0.5"
-          style={{ background: '#050A1C' }}
-        >
-          <button
-            onClick={() => onHandleModeSwitch?.('live')}
-            className={`px-2.5 py-0.5 rounded text-[10px] font-semibold transition-all ${
-              mode === 'live' ? 'bg-[var(--accent)] text-white' : 'text-slate-500 hover:text-white'
-            }`}
-          >
-            Live
-          </button>
-          <button
-            onClick={() => onHandleModeSwitch?.('file')}
-            className={`px-2.5 py-0.5 rounded text-[10px] font-semibold transition-all ${
-              mode === 'file' ? 'bg-[var(--accent)] text-white' : 'text-slate-500 hover:text-white'
-            }`}
-          >
-            File
-          </button>
-        </div>
-      </div>
-    </div>
+    </nav>
   );
 }

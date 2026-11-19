@@ -1,0 +1,232 @@
+/* Faceplate desk frame: side panels, modules, rows, fields, tabs, drawers and dialogs.
+   Scoped to fp- classes and read only --fp-* tokens. The primitives are in faceplate-parts.css. */
+
+/* ---------- desk body ---------- */
+.fp-desk { background: var(--fp-chassis); color: var(--fp-legend); font-family: var(--fp-font-legend); }
+.fp-centre { background: var(--fp-chassis); }
+
+/* ---------- side panel ---------- */
+.fp-panel {
+  display: flex; flex-direction: column; flex: none; min-height: 0; overflow: hidden;
+  background: var(--fp-plate); color: var(--fp-legend); font-family: var(--fp-font-legend);
+}
+.fp-panel-l { width: 272px; border-right: 1px solid var(--fp-seam); }
+.fp-panel-r { width: 248px; border-left: 1px solid var(--fp-seam); }
+.fp-panel-hd {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; flex: none;
+  min-height: 36px; padding: 6px 10px; border-bottom: 1px solid var(--fp-seam);
+  font: var(--fp-weight-semibold) var(--fp-text-sm)/1 var(--fp-font-legend);
+}
+.fp-panel-bd { flex: 1; min-height: 0; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+
+/* ---------- module (a plate inside a panel) ---------- */
+.fp-mod { background: var(--fp-raised); border: 1px solid var(--fp-seam); border-radius: var(--fp-radius-plate); }
+.fp-mod-hd {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 6px 8px; border-bottom: 1px solid var(--fp-seam);
+  font: var(--fp-weight-semibold) var(--fp-text-sm)/1.2 var(--fp-font-legend);
+}
+.fp-mod-hd > span:first-child { display: inline-flex; align-items: center; gap: 6px; }
+.fp-mod-bd { display: flex; flex-direction: column; gap: 8px; padding: 8px; }
+
+/* ---------- rows, values, fields ---------- */
+.fp-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0;
+  font: var(--fp-weight-regular) var(--fp-text-sm)/1.3 var(--fp-font-legend);
+}
+.fp-row > :first-child { min-width: 0; }
+/* Long values (device names) cut with an ellipsis. Not on anything that holds an info tip. */
+.fp-ellipsis { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fp-num { font-family: var(--fp-font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fp-sub { color: var(--fp-muted); font-size: var(--fp-text-xs); }
+.fp-good { color: var(--fp-led-g); }
+.fp-caution { color: var(--fp-led-a); }
+.fp-fault { color: var(--fp-led-r); }
+.fp-field {
+  width: 100%; min-width: 0; height: 28px; padding: 0 8px;
+  border-radius: var(--fp-radius-key); border: 1px solid var(--fp-glass-edge);
+  background: var(--fp-glass); color: var(--fp-glass-text);
+  font: var(--fp-weight-regular) var(--fp-text-sm)/1 var(--fp-font-mono);
+}
+.fp-field::placeholder { color: var(--fp-glass-dim); }
+.fp-field:focus-visible { outline: 2px solid var(--fp-focus); outline-offset: 1px; }
+.fp-field:disabled { opacity: 0.5; }
+.fp-check { width: 16px; height: 16px; accent-color: var(--fp-led-g); }
+
+/* ---------- range (plain slider for rack settings) ---------- */
+.fp-range { width: 100%; height: 20px; margin: 0; background: none; cursor: pointer; appearance: none; -webkit-appearance: none; }
+.fp-range::-webkit-slider-runnable-track { height: 4px; border-radius: var(--fp-radius-led); background: var(--fp-slot); box-shadow: 0 0 0 1px var(--fp-slot-edge); }
+.fp-range::-moz-range-track { height: 4px; border-radius: var(--fp-radius-led); background: var(--fp-slot); }
+.fp-range::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 14px; height: 18px; margin-top: -7px;
+  border-radius: var(--fp-radius-key); border: 1px solid var(--fp-cap-rim); background: var(--fp-ch-stone);
+}
+.fp-range::-moz-range-thumb { width: 14px; height: 18px; border-radius: var(--fp-radius-key); border: 1px solid var(--fp-cap-rim); background: var(--fp-ch-stone); }
+.fp-range:focus-visible { outline: 2px solid var(--fp-focus); outline-offset: 2px; }
+.fp-range:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ---------- key groups and tabs ---------- */
+.fp-keys { display: flex; gap: 4px; flex-wrap: wrap; }
+.fp-keys-fill > .fp-key { flex: 1 1 0; }
+.fp-key-wide { width: 100%; }
+.fp-key-tall { height: 32px; font-size: var(--fp-text-sm); }
+
+/* ---------- centre bar ---------- */
+.fp-bar {
+  display: flex; align-items: center; gap: 8px; flex: none; min-height: 40px; padding: 6px 10px;
+  background: var(--fp-plate); border-bottom: 1px solid var(--fp-seam);
+}
+.fp-bar-end { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+
+/* ---------- drawer, dialog, scrim ---------- */
+.fp-scrim { position: fixed; inset: 0; z-index: 50; background: rgb(0 0 0 / 0.55); }
+.fp-drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 51; width: min(420px, 100%);
+  display: flex; flex-direction: column; background: var(--fp-plate); color: var(--fp-legend);
+  border-left: 1px solid var(--fp-seam); font-family: var(--fp-font-legend);
+}
+.fp-dialog-wrap { position: fixed; inset: 0; z-index: 51; display: grid; place-items: center; padding: 16px; pointer-events: none; }
+.fp-dialog {
+  pointer-events: auto; width: min(520px, 100%); max-height: calc(100dvh - 32px); overflow-y: auto;
+  display: flex; flex-direction: column; background: var(--fp-plate); color: var(--fp-legend);
+  border: 1px solid var(--fp-seam); border-radius: var(--fp-radius-plate); font-family: var(--fp-font-legend);
+}
+.fp-dialog-hd, .fp-drawer-hd {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; flex: none;
+  padding: 10px 12px; border-bottom: 1px solid var(--fp-seam);
+  font: var(--fp-weight-semibold) var(--fp-text-lg)/1.2 var(--fp-font-legend);
+}
+.fp-dialog-bd { display: flex; flex-direction: column; gap: 14px; padding: 12px; }
+.fp-drawer-bd { flex: 1; min-height: 0; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.fp-label { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; font: var(--fp-weight-medium) var(--fp-text-sm)/1.2 var(--fp-font-legend); }
+
+/* ---------- reading surface (help) ---------- */
+.fp-read-text { font: var(--fp-weight-regular) var(--fp-text-xl)/1.5 var(--fp-font-legend); color: var(--fp-legend); }
+.fp-read-text ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+.fp-read-text details > summary { cursor: pointer; padding: 6px 0; font-weight: var(--fp-weight-medium); }
+.fp-read-text details > summary:focus-visible { outline: 2px solid var(--fp-focus); outline-offset: 2px; }
+.fp-read-text details > p { margin: 0 0 8px; color: var(--fp-legend); }
+
+/* ---------- overlay card (live view) ---------- */
+.fp-overlay { position: absolute; inset: 0; z-index: 30; display: grid; place-items: center; background: rgb(0 0 0 / 0.6); }
+.fp-card {
+  display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 20px 24px; max-width: 360px;
+  background: var(--fp-plate); color: var(--fp-legend); text-align: center;
+  border: 1px solid var(--fp-seam); border-radius: var(--fp-radius-plate);
+}
+.fp-card h3 { margin: 0; font: var(--fp-weight-semibold) var(--fp-text-xl)/1.2 var(--fp-font-legend); }
+.fp-chip {
+  position: absolute; z-index: 20; display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px;
+  background: var(--fp-plate); border: 1px solid var(--fp-seam); border-radius: var(--fp-radius-key);
+  font: var(--fp-weight-medium) var(--fp-text-xs)/1.2 var(--fp-font-legend); color: var(--fp-legend);
+}
+
+/* ---------- mixer size ---------- */
+.fp-desk-scale { display: flex; flex: 1; min-width: 0; min-height: 0; }
+
+/* An inline link inside legends: underlined so it is not told apart by colour alone. */
+.fp-link {
+  padding: 0; border: 0; background: none; cursor: pointer; color: inherit;
+  font: inherit; text-decoration: underline; text-underline-offset: 2px;
+}
+.fp-link:focus-visible { outline: 2px solid var(--fp-focus); outline-offset: 2px; }
+
+/* ---------- mixer: record plate and scenes bar ---------- */
+.fp-recplate {
+  display: flex; flex-direction: column; gap: 6px; flex: none; padding: 8px 10px;
+  background: var(--fp-plate); border-bottom: 1px solid var(--fp-seam);
+  color: var(--fp-legend); font: var(--fp-weight-regular) var(--fp-text-sm)/1.2 var(--fp-font-legend);
+}
+.fp-recrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fp-scenes { overflow-x: auto; scrollbar-width: none; flex: 1; min-width: 0; }
+.fp-banner {
+  display: flex; align-items: center; justify-content: center; gap: 8px; flex: none; padding: 4px 10px;
+  background: var(--fp-plate); border-bottom: 1px solid var(--fp-seam);
+}
+.fp-toast {
+  position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 30;
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+  background: var(--fp-plate); border: 1px solid var(--fp-led-r); border-radius: var(--fp-radius-plate);
+  color: var(--fp-legend); font: var(--fp-weight-medium) var(--fp-text-sm)/1.3 var(--fp-font-legend);
+}
+
+/* Narrow key groups: keep the legend inside the key. */
+.fp-keys-fill > .fp-key, .fp-strip .fp-key { padding: 0 2px; overflow: hidden; text-overflow: clip; }
+
+/* ---------- browser menu bar ---------- */
+.fp-menubar {
+  position: relative; display: flex; align-items: center; gap: 2px; flex: none; height: 30px; padding: 0 6px; z-index: 45;
+  background: var(--fp-chassis); border-bottom: 1px solid var(--fp-seam); font-family: var(--fp-font-legend);
+}
+.fp-menu-btn {
+  height: 24px; padding: 0 8px; border: 0; border-radius: var(--fp-radius-key); background: none; cursor: pointer;
+  color: var(--fp-legend); font: var(--fp-weight-medium) var(--fp-text-sm)/1 var(--fp-font-legend);
+}
+.fp-menu-btn:hover, .fp-menu-btn[aria-expanded="true"] { background: var(--fp-key); }
+.fp-menu-btn:focus-visible, .fp-menu-item:focus-visible { outline: 2px solid var(--fp-focus); outline-offset: -2px; }
+.fp-menu {
+  position: absolute; left: 0; top: calc(100% + 2px); z-index: 50; min-width: 220px; padding: 4px 0;
+  background: var(--fp-plate); border: 1px solid var(--fp-seam); border-radius: var(--fp-radius-plate);
+}
+.fp-menu-item {
+  display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 24px; padding: 6px 12px;
+  border: 0; background: none; cursor: pointer; text-align: left;
+  color: var(--fp-legend); font: var(--fp-weight-regular) var(--fp-text-sm)/1.2 var(--fp-font-legend);
+}
+.fp-menu-item:hover:not(:disabled) { background: var(--fp-key); }
+.fp-menu-item:disabled { color: var(--fp-muted); cursor: not-allowed; }
+.fp-menu-sep { margin: 4px 0; border-top: 1px solid var(--fp-seam); }
+
+/* ---------- loudness module (live view) ---------- */
+.fp-loud {
+  width: 264px; flex: none; display: flex; flex-direction: column; gap: 10px; padding: 12px;
+  background: var(--fp-plate); border-left: 1px solid var(--fp-seam); color: var(--fp-legend);
+  font-family: var(--fp-font-legend); overflow-y: auto;
+}
+.fp-loud-read { padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.fp-loud-big { display: flex; align-items: baseline; gap: 6px; }
+.fp-loud-big .fp-num { font-size: var(--fp-text-3xl); line-height: 1; color: var(--fp-glass-text); }
+.fp-loud-big small { font: var(--fp-weight-medium) var(--fp-text-xs)/1 var(--fp-font-mono); color: var(--fp-glass-dim); }
+.fp-gauge { position: relative; height: 14px; border-radius: var(--fp-radius-meter); background: var(--fp-meter-bg); overflow: hidden; }
+.fp-gauge-zone { position: absolute; top: 0; bottom: 0; background: var(--fp-led-g-dim); }
+.fp-gauge-fill { position: absolute; left: 0; top: 4px; bottom: 4px; transition: width 240ms linear; background: var(--fp-glass-text); }
+.fp-gauge-fill.fp-tone-good { background: var(--fp-led-g); }
+.fp-gauge-fill.fp-tone-caution { background: var(--fp-led-a); }
+.fp-gauge-fill.fp-tone-fault { background: var(--fp-led-r); }
+.fp-gauge-fill.fp-tone-idle { background: var(--fp-glass-dim); }
+.fp-gauge-tick { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--fp-glass-text); transition: left 120ms linear; }
+.fp-gauge-int { position: absolute; bottom: 0; width: 0; height: 0; margin-left: -4px; border: 4px solid transparent; border-bottom-color: var(--fp-sel); }
+.fp-gauge-scale { position: relative; height: 14px; font: var(--fp-weight-regular) var(--fp-text-xs)/14px var(--fp-font-mono); color: var(--fp-muted); }
+.fp-gauge-scale span { position: absolute; transform: translateX(-50%); }
+.fp-gauge-scale span:first-child { transform: none; }
+.fp-gauge-scale span:last-child { transform: translateX(-100%); }
+.fp-loud-hist { display: block; width: 100%; height: 140px; flex: 1 1 140px; min-height: 100px; border-radius: var(--fp-radius-meter); }
+@media (prefers-reduced-motion: reduce) { .fp-gauge-fill, .fp-gauge-tick { transition: none; } }
+.fp-minigauge { position: relative; align-self: center; width: 56px; height: 6px; border-radius: 2px; background: var(--fp-meter-bg); overflow: hidden; }
+.fp-minigauge-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--fp-glass-dim); transition: width 240ms linear; }
+.fp-minigauge-fill.fp-tone-good { background: var(--fp-led-g); }
+.fp-minigauge-fill.fp-tone-caution { background: var(--fp-led-a); }
+.fp-minigauge-fill.fp-tone-fault { background: var(--fp-led-r); }
+.fp-minigauge-target { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--fp-glass-text); }
+@media (prefers-reduced-motion: reduce) { .fp-minigauge-fill { transition: none; } }
+
+/* ---------- floating setup panel ---------- */
+.fp-setup {
+  position: fixed; z-index: 40; width: 360px; max-height: calc(100dvh - 16px); display: flex; flex-direction: column;
+  background: var(--fp-plate); color: var(--fp-legend); font-family: var(--fp-font-legend);
+  border: 1px solid var(--fp-seam); border-radius: var(--fp-radius-plate);
+  box-shadow: var(--fp-elev-float);
+}
+.fp-setup-hd {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px;
+  border-bottom: 1px solid var(--fp-seam); cursor: grab; touch-action: none; user-select: none;
+}
+.fp-setup-hd:active { cursor: grabbing; }
+.fp-setup-grip { display: inline-flex; align-items: center; gap: 8px; font: var(--fp-weight-semibold) var(--fp-text-lg)/1 var(--fp-font-legend); border-radius: var(--fp-radius-key); }
+.fp-setup-grip:focus-visible { outline: 2px solid var(--fp-focus); outline-offset: 3px; }
+.fp-grip { width: 8px; height: 14px; background-image: radial-gradient(var(--fp-muted) 1px, transparent 1.5px); background-size: 4px 4px; }
+.fp-setup-bd { display: flex; flex-direction: column; gap: 12px; padding: 10px; overflow-y: auto; }
+.fp-setup-row { display: flex; flex-direction: column; gap: 6px; }
+.fp-setup-fmt { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; font-size: var(--fp-text-sm); }
+.fp-setup-fmt .fp-lamp { color: var(--fp-glass-dim); }
+.fp-setup-ft { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-top: 1px solid var(--fp-seam); min-height: 41px; }

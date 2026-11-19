@@ -1,4 +1,5 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { tipPosition } from '../../lib/tipPosition.js';
 
 /**
  * The ⓘ key that carries every explanation, so the faceplate itself shows only labels and state.
@@ -10,6 +11,16 @@ export default function InfoTip({ label, children }) {
   const [hover, setHover] = useState(false);
   const [pinned, setPinned] = useState(false);
   const open = hover || pinned;
+  const box = useRef(null);
+
+  // Fixed placement measured from the key and the box itself, written straight to the box before
+  // paint, so a panel's scroll area or edge cannot clip the tip.
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!open || !el || !wrap.current) return;
+    const { top, left } = tipPosition(wrap.current.getBoundingClientRect(), window.innerWidth, el.offsetWidth);
+    Object.assign(el.style, { position: 'fixed', top: `${top}px`, left: `${left}px`, transform: 'none' });
+  }, [open]);
 
   useEffect(() => {
     if (!pinned) return undefined;
@@ -56,7 +67,11 @@ export default function InfoTip({ label, children }) {
       >
         i
       </button>
-      {open && <span role="tooltip" id={id} className="fp-tipbox">{children}</span>}
+      {open && (
+        <span role="tooltip" id={id} className="fp-tipbox" ref={box}>
+          {children}
+        </span>
+      )}
     </span>
   );
 }

@@ -1,5 +1,7 @@
-import React, { useMemo, useState } from 'react';
-import { Circle, Flag, FolderOpen, Square } from 'lucide-react';
+import { useMemo, useState } from 'react';
+
+import InfoTip from '../faceplate/InfoTip.jsx';
+import Key from '../faceplate/Key.jsx';
 
 import { isTauri } from '../../lib/platform';
 import {
@@ -13,7 +15,7 @@ import {
 import { useRecorder } from './useRecorder.js';
 import RecordTrackChips from './RecordTrackChips.jsx';
 
-const HEALTH_COLORS = { ok: 'text-slate-500', warn: 'text-amber-400', error: 'text-[#FF5252]' };
+const HEALTH_CLASS = { ok: '', warn: 'fp-caution', error: 'fp-fault' };
 
 async function pickFolder(defaultPath) {
   const { open } = await import('@tauri-apps/plugin-dialog');
@@ -29,10 +31,12 @@ async function pickFolder(defaultPath) {
 export default function RecordPanel({ strips, engineRunning }) {
   if (!isTauri) {
     return (
-      <div className="px-3 py-1.5 border-b border-slate-800 text-[9px] text-slate-500" style={{ background: '#0A1124' }}>
-        <span className="font-bold uppercase tracking-wider text-slate-400 mr-2">Record</span>
-        Multitrack service recording (one WAV per channel) runs in the TIWATON AI Studio desktop app.
-      </div>
+      <section className="fp-recplate" aria-label="Record">
+        <div className="fp-recrow">
+          <span className="fp-label" style={{ margin: 0 }}>Record</span>
+          <span className="fp-sub">desktop app only</span>
+        </div>
+      </section>
     );
   }
   return <RecordSection strips={strips} engineRunning={engineRunning} />;
@@ -84,76 +88,45 @@ function RecordSection({ strips, engineRunning }) {
   };
 
   return (
-    <div className="shrink-0 border-b border-slate-800 px-3 py-2 space-y-1.5 text-[9px]" style={{ background: '#0A1124' }}>
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="font-bold uppercase tracking-wider text-slate-400">Record</span>
+    <section className="fp-recplate" aria-label="Record">
+      <div className="fp-recrow">
+        <span className="fp-label" style={{ margin: 0 }}>
+          Record
+          <InfoTip label="Record">One WAV per armed channel, raw, plus the Stream mix as it went to broadcast.</InfoTip>
+        </span>
         {!recording && (
-          <button
-            type="button"
-            onClick={() => { setArmedKey(null); rec.start(title); }}
-            disabled={!canStart}
-            title={engineOn ? 'Start a multitrack recording' : 'Start the engine to record'}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full font-bold text-[10px] text-white bg-red-600 hover:bg-red-500 disabled:opacity-40"
-          >
-            <Circle size={10} fill="currentColor" /> REC
-          </button>
+          <Key onClick={() => { setArmedKey(null); rec.start(title); }} disabled={!canStart}
+            title={engineOn ? 'Start a multitrack recording' : 'Start the engine to record'}>
+            rec
+          </Key>
         )}
         {recording && !confirmStop && (
-          <button
-            type="button"
-            onClick={() => setArmedKey(stopArmKey(status))}
-            disabled={busy}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full font-bold text-[10px] text-white bg-slate-700 hover:bg-slate-600"
-          >
-            <Square size={10} fill="currentColor" /> STOP
-          </button>
+          <Key lit="red" onClick={() => setArmedKey(stopArmKey(status))} disabled={busy}>stop</Key>
         )}
         {recording && confirmStop && (
-          <span className="flex items-center gap-1" role="alertdialog" aria-label="Confirm stop recording">
-            <span className="text-amber-400 font-semibold">Stop recording?</span>
-            <button type="button" onClick={handleStop} autoFocus className="px-2 py-1 rounded bg-red-600 text-white font-bold">Stop</button>
-            <button type="button" onClick={() => setArmedKey(null)} className="px-2 py-1 rounded bg-slate-800 text-slate-300">Keep recording</button>
+          <span className="fp-keys" role="alertdialog" aria-label="Confirm stop recording">
+            <Key className="fp-arm-r" onClick={handleStop} autoFocus>stop now</Key>
+            <Key onClick={() => setArmedKey(null)}>keep recording</Key>
           </span>
         )}
-        <span
-          className={`font-mono text-[12px] font-bold ${recording ? 'text-[#FF5252]' : 'text-slate-600'}`}
-          aria-label="Elapsed recording time"
-        >
+        <span className={`fp-glass fp-num ${recording ? 'fp-fault' : 'fp-glass-dim'}`} style={{ padding: '4px 8px' }}
+          aria-label="Elapsed recording time">
           {formatElapsed(recording ? status.elapsedSeconds : 0)}
         </span>
         {!recording && (
-          <input
-            value={title}
-            onChange={(event) => setTitle(event.target.value)}
-            placeholder="Title (optional)"
-            maxLength={60}
-            aria-label="Recording title"
-            className="w-36 px-2 py-1 rounded border border-slate-700 bg-[#050A1C] text-white outline-none focus:border-[var(--accent)]"
-          />
+          <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Title" maxLength={60}
+            aria-label="Recording title" className="fp-field" style={{ width: 160 }} />
         )}
         {recording && (
-          <span className="flex items-center gap-1">
-            <input
-              value={markerLabel}
-              onChange={(event) => setMarkerLabel(event.target.value)}
+          <span className="fp-keys" style={{ alignItems: 'center' }}>
+            <input value={markerLabel} onChange={(event) => setMarkerLabel(event.target.value)}
               onKeyDown={(event) => { if (event.key === 'Enter') handleMarker(); }}
-              placeholder="Marker label"
-              maxLength={80}
-              aria-label="Marker label"
-              className="w-28 px-2 py-1 rounded border border-slate-700 bg-[#050A1C] text-white outline-none focus:border-[var(--accent)]"
-            />
-            <button
-              type="button"
-              onClick={handleMarker}
-              disabled={busy}
-              className="flex items-center gap-1 px-2 py-1 rounded border border-slate-700 text-slate-300 hover:text-white"
-            >
-              <Flag size={10} /> Add marker
-            </button>
-            <span className="text-slate-500">{status.markers} marker{status.markers === 1 ? '' : 's'}</span>
+              placeholder="Marker" maxLength={80} aria-label="Marker label" className="fp-field" style={{ width: 140 }} />
+            <Key onClick={handleMarker} disabled={busy}>marker</Key>
+            <span className="fp-sub fp-num">{status.markers}</span>
           </span>
         )}
-        {!engineOn && !recording && <span className="text-slate-500">Start the engine to record.</span>}
+        {!engineOn && !recording && <span className="fp-sub">engine off</span>}
       </div>
 
       <RecordTrackChips
@@ -164,47 +137,38 @@ function RecordSection({ strips, engineRunning }) {
         onToggle={toggleStrip}
       />
 
-      <div className="flex items-center gap-3 flex-wrap text-slate-400">
-        <label className="flex items-center gap-1 cursor-pointer">
-          <input
-            type="checkbox"
-            className="accent-[var(--accent)]"
-            checked={Boolean(config?.includeMain)}
-            disabled={!config || busy || recording}
-            onChange={(event) => rec.saveConfig({ ...config, includeMain: event.target.checked })}
-          />
-          Include Main mix
-        </label>
-        <span className="truncate max-w-[320px]" title={folder}>Folder: <span className="text-slate-300">{folder || '—'}</span></span>
-        <button type="button" onClick={chooseFolder} disabled={!config || busy || recording} className="text-[var(--accent)] hover:underline disabled:opacity-40">
-          Change…
-        </button>
+      <div className="fp-recrow">
+        <Key lit={config?.includeMain ? 'sel' : null} pressed={Boolean(config?.includeMain)}
+          disabled={!config || busy || recording}
+          onClick={() => rec.saveConfig({ ...config, includeMain: !config.includeMain })}>
+          main mix
+        </Key>
+        <span className="fp-sub" style={{ maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={folder}>
+          {folder || 'no folder'}
+        </span>
+        <Key onClick={chooseFolder} disabled={!config || busy || recording}>folder</Key>
         {config?.folder && !recording && (
-          <button type="button" onClick={() => rec.saveConfig({ ...config, folder: null })} className="text-slate-500 hover:underline">
-            Use default
-          </button>
+          <Key onClick={() => rec.saveConfig({ ...config, folder: null })}>default</Key>
         )}
-        <span className={HEALTH_COLORS[health.level]}>{health.text}</span>
+        <span className={`fp-sub ${HEALTH_CLASS[health.level]}`}>{health.text}</span>
       </div>
 
       {summary && (
-        <div className="flex items-center gap-2 flex-wrap text-slate-400">
-          <span>
-            Saved {summary.files?.length ?? 0} files · {formatElapsed(summary.durationSeconds)} · {summary.markers ?? 0} markers
+        <div className="fp-recrow">
+          <span className="fp-sub">
+            saved {summary.files?.length ?? 0} files · {formatElapsed(summary.durationSeconds)} · {summary.markers ?? 0} markers
             {summary.droppedFrames > 0 ? ` · ${summary.droppedFrames} dropped frames` : ''}
           </span>
-          <button type="button" onClick={rec.openFolder} className="flex items-center gap-1 text-[var(--accent)] hover:underline">
-            <FolderOpen size={10} /> Open folder
-          </button>
+          <Key onClick={rec.openFolder}>open folder</Key>
         </div>
       )}
 
       {rec.error && (
-        <div role="alert" className="flex items-center gap-2 text-[#FF5252]">
+        <div role="alert" className="fp-recrow fp-fault">
           {rec.error}
-          <button type="button" onClick={rec.dismissError} aria-label="Dismiss recorder error" className="text-slate-500 hover:text-white">✕</button>
+          <Key onClick={rec.dismissError} aria-label="Dismiss recorder error">dismiss</Key>
         </div>
       )}
-    </div>
+    </section>
   );
 }

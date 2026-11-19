@@ -8,25 +8,28 @@ import {
 } from './lib/platform';
 import WaveformEditor from './components/WaveformEditor';
 import MenuBar from './components/MenuBar';
-import AIAssistant from './components/AIAssistant';
-import ThemeSelector from './components/ThemeSelector';
-import AnalyticsDashboard from './components/AnalyticsDashboard';
 import HelpCorner from './components/HelpCorner';
 import LandingPage from './components/LandingPage';
 import DeskHeader from './components/faceplate/DeskHeader.jsx';
+import Key from './components/faceplate/Key.jsx';
+import Lamp from './components/faceplate/Lamp.jsx';
+import RecordCheckKeys from './components/recorder/RecordCheckKeys.jsx';
 import DeviceSettingsModal from './components/DeviceSettingsModal';
 import LinkPanel from './components/link/LinkPanel.jsx';
 import ObsPanel from './components/obs/ObsPanel.jsx';
-import MainOutputSelect from './components/MainOutputSelect';
-import NdiOutputPanel from './components/NdiOutputPanel';
-import NdiInputPanel from './components/NdiInputPanel';
+import OutputRouter from './components/desk/OutputRouter.jsx';
+import LiveView from './components/desk/LiveView.jsx';
 import DesktopRecordButton from './components/recorder/DesktopRecordButton.jsx';
-import InputRackAiTab from './components/InputRackAiTab';
+import InputRack from './components/desk/InputRack.jsx';
 import MixerConsole from './components/mixer/MixerConsole';
 import { createMixerController, createMockMixerController } from './lib/mixerEngine';
 import { getExportAvailability } from './lib/exportFlow';
 import { loadRnnoiseAssets } from './lib/rnnoise';
 import { pickVideoMimeType } from './lib/mediaFormats';
+import { readVisualiserPalette } from './lib/visualiserPalette.js';
+import {
+  analyserRange, bandEdges, bandLevels, createScope, createWaterfall, dbFraction, drawScope, fitCanvas, gateState, stepScope,
+} from './lib/liveScope.js';
 import {
   describeBroadcastRoute,
   normalizeTauriDevices,
@@ -46,33 +49,12 @@ import {
 import { trackEvent, startSession, endSession } from './utils/analytics';
 import {
   Mic,
-  Settings,
-  Activity,
-  Volume2,
-  Sliders,
-  Play,
-  Square,
   Upload,
-  Zap,
-  Radio,
-  CheckCircle2,
-  AlertCircle,
   Cpu,
-  Pause,
   Monitor,
   Video,
-  X,
-  Headphones,
-  AlertTriangle,
-  Power,
-  Circle,
   Share2,
-  Trash2,
   Check,
-  Waves,
-  RefreshCw,
-  Speaker,
-  Menu,
 } from 'lucide-react';
 
 /**
@@ -107,15 +89,18 @@ const TiwatonApp = () => {
   return (
     <>
       <AudioProcessor goHome={isDesktopApp ? null : () => setView('landing')} />
-      <HelpCorner />
     </>
   );
 };
 
 // --- STUDIO COMPONENT ---
+const MAIN_TABS = [
+  { id: 'live', label: 'live' },
+  { id: 'editor', label: 'editor' },
+  { id: 'mixer', label: 'mixer' },
+];
+
 const AudioProcessor = ({ goHome }) => {
-  const SHOW_LEGACY_SETTINGS_MODAL = false;
-  const SHOW_LEGACY_AI_STACK = false;
   const [isLive, setIsLive] = useState(false);
   const [isPlayingFile, setIsPlayingFile] = useState(false);
   const [audioContext, setAudioContext] = useState(null);
@@ -127,7 +112,7 @@ const AudioProcessor = ({ goHome }) => {
   const [showSettings, setShowSettings] = useState(false);
   const [showLink, setShowLink] = useState(false);
   const [showObs, setShowObs] = useState(false);
-  const [showAI, setShowAI] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const [isMonitoring, setIsMonitoring] = useState(false);
   const [isBypassed, setIsBypassed] = useState(false);
   const [exportStatus, setExportStatus] = useState(null);
@@ -136,7 +121,6 @@ const AudioProcessor = ({ goHome }) => {
   const [isAutoCalibrating, setIsAutoCalibrating] = useState(false);
   const [audioEngineError, setAudioEngineError] = useState(null);
   const [chainReady, setChainReady] = useState(0); // increments when audio chain is fully built
-  const [controlTab, setControlTab] = useState('core');
   const [mainTab, setMainTab] = useState('live'); // 'live' | 'editor' | 'mixer'
   // Mixer console: real Tauri controller (invoke/listen loaded lazily, same
   // pattern as the native engine helpers above) when running under the
@@ -1277,6 +1261,9 @@ const AudioProcessor = ({ goHome }) => {
         // Spectrum data is injected from 'audio-meters' Tauri events into tauriSpectrumRef.
         processingRefs.current.analyser = {
           frequencyBinCount: 128,
+          // Native bins are normalised over -90..0 dB (Spectrum::take_bins).
+          minDecibels: -90,
+          maxDecibels: 0,
           getByteFrequencyData(arr) {
             const spec = tauriSpectrumRef.current;
             for (let i = 0; i < arr.length && i < spec.length; i++) {
@@ -2339,6 +2326,14 @@ const AudioProcessor = ({ goHome }) => {
     const noiseUpdateInterval = 140; // ms
     const loudnessUpdateInterval = 250; // ms
 
+    const rootStyle = getComputedStyle(document.documentElement);
+    const palette = readVisualiserPalette((name) => rootStyle.getPropertyValue(name));
+    const scopeBands = bandEdges(audioContext?.sampleRate || 48000, bufferLength);
+    const scopeRange = analyserRange(analyser);
+    let scope = createScope(scopeBands.length);
+    const waterfall = createWaterfall();
+    let lastFrameAt = 0;
+
     const draw = (timestamp) => {
       animationRef.current = requestAnimationFrame(draw);
 
@@ -2346,44 +2341,22 @@ const AudioProcessor = ({ goHome }) => {
       analyser.getByteTimeDomainData(timeData);
       latestSpectrumRef.current = freqData.slice(0);
 
-      // Resolve theme accent color for canvas (CSS vars don't work in ctx.fillStyle)
-      const accentRgb = getComputedStyle(document.documentElement).getPropertyValue('--accent-rgb').trim() || '245,158,11';
-
-      const w = canvas.width;
-      const h = canvas.height;
-      const cx = w / 2;
-      const cy = h / 2;
-
-      // Background gradient
-      const bgGrad = ctx.createLinearGradient(0, 0, 0, h);
-      bgGrad.addColorStop(0, '#020617');
-      bgGrad.addColorStop(0.5, '#020617');
-      bgGrad.addColorStop(1, '#020617');
-      ctx.fillStyle = bgGrad;
-      ctx.fillRect(0, 0, w, h);
+      const scopeSize = fitCanvas(canvas, ctx, window.devicePixelRatio || 1);
+      const frameDt = lastFrameAt ? Math.min(0.1, Math.max(0, (timestamp - lastFrameAt) / 1000)) : 0;
+      lastFrameAt = timestamp;
 
       // Gate/voice state (declared early so spectrum bars can use them)
       let gateClosed = false;
       let localVoiceActive = false;
       let voiceCandidate = false;
 
-      const barWidth = (w / bufferLength) * 2.5;
-      let x = 0;
-
       // Spectrum + band energies
       let lowEnergy = 0;
       let highEnergy = 0;
       const splitIndex = Math.floor(bufferLength * 0.4);
 
-      // Compute voice band bin range for coloring
-      const sampleRateVal = audioContext?.sampleRate || 48000;
-      const binHzVis = sampleRateVal / 2 / bufferLength;
-      const voiceStartBin = Math.floor(300 / binHzVis);
-      const voiceEndBin = Math.ceil(3400 / binHzVis);
-
       for (let i = 0; i < bufferLength; i++) {
         const v = freqData[i];
-        const barHeight = v * 1.5;
 
         if (i < splitIndex) {
           lowEnergy += v;
@@ -2391,38 +2364,6 @@ const AudioProcessor = ({ goHome }) => {
           highEnergy += v;
         }
 
-        // Color-coded spectrum:
-        // Green = voice band (300-3400 Hz) when voice is active
-        // Cyan = voice band when gate is closed (potential voice)
-        // Red = noise (high freq hiss / low freq rumble) when gate is rejecting
-        // Orange = rejected noise in voice band (baby cry, etc)
-        // Blue = neutral/inactive frequencies
-        let barColor;
-        const inVoiceBand = i >= voiceStartBin && i <= voiceEndBin;
-
-        if (localVoiceActive && !gateClosed && inVoiceBand) {
-          // Voice is active and gate is open - GREEN for confirmed voice
-          barColor = 'rgba(34,197,94,0.85)'; // green-500
-        } else if (localVoiceActive && !gateClosed) {
-          // Voice active but this freq is outside voice band - dimmer green
-          barColor = 'rgba(34,197,94,0.35)';
-        } else if (gateClosed && inVoiceBand && v > 30) {
-          // Gate closed but energy in voice band - ORANGE (rejected, could be baby/noise)
-          barColor = 'rgba(251,146,60,0.7)'; // orange-400
-        } else if (gateClosed && v > 20) {
-          // Gate closed, noise being blocked - RED
-          barColor = 'rgba(239,68,68,0.6)'; // red-500
-        } else if (inVoiceBand) {
-          // Voice band, quiet - theme accent (bright)
-          barColor = `rgba(${accentRgb},0.80)`;
-        } else {
-          // Default - theme accent (dim)
-          barColor = `rgba(${accentRgb},0.40)`;
-        }
-
-        ctx.fillStyle = barColor;
-        ctx.fillRect(x, h - barHeight / 2, barWidth, barHeight / 2);
-        x += barWidth + 1;
       }
 
       const lowAvg = lowEnergy / (splitIndex || 1);
@@ -2854,195 +2795,31 @@ const AudioProcessor = ({ goHome }) => {
         }
       }
 
-      // ===== CORE ORB =====
-      const coreRadius = h * 0.35;
-      const coreGrad = ctx.createRadialGradient(
-        cx, cy, coreRadius * 0.1,
-        cx, cy, coreRadius,
-      );
-
-      if (highOnlyNoise) {
-        // Red pulse - noise detected, gate blocking
-        coreGrad.addColorStop(0, 'rgba(248,113,113,0.55)');
-        coreGrad.addColorStop(0.5, 'rgba(127,29,29,0.3)');
-        coreGrad.addColorStop(1, 'rgba(15,23,42,0.0)');
-      } else if (!gateClosed && localVoiceActive) {
-        // Green/cyan - confirmed voice passing through
-        coreGrad.addColorStop(0, 'rgba(34,197,94,0.65)');
-        coreGrad.addColorStop(0.35, 'rgba(56,189,248,0.4)');
-        coreGrad.addColorStop(1, 'rgba(15,23,42,0.0)');
-      } else if (gateClosed) {
-        // Dim red/purple - gate is closed, blocking noise
-        coreGrad.addColorStop(0, 'rgba(168,85,247,0.3)');
-        coreGrad.addColorStop(0.5, 'rgba(88,28,135,0.15)');
-        coreGrad.addColorStop(1, 'rgba(15,23,42,0.0)');
-      } else {
-        // Idle - theme accent
-        coreGrad.addColorStop(0, `rgba(${accentRgb},0.35)`);
-        coreGrad.addColorStop(0.5, `rgba(${accentRgb},0.15)`);
-        coreGrad.addColorStop(1, 'rgba(15,23,42,0.0)');
-      }
-
-      ctx.fillStyle = coreGrad;
-      ctx.beginPath();
-      ctx.arc(cx, cy, coreRadius, 0, Math.PI * 2);
-      ctx.fill();
-
-      // ===== ON-CANVAS STATUS TEXT =====
-      ctx.textAlign = 'center';
-
-      // Gate status (large, center)
-      if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
-        const gateLabel = gateClosed ? 'GATE CLOSED' : 'GATE OPEN';
-        const gateColor = gateClosed ? 'rgba(239,68,68,0.9)' : 'rgba(34,197,94,0.9)';
-        ctx.font = 'bold 14px monospace';
-        ctx.fillStyle = gateColor;
-        ctx.fillText(gateLabel, cx, cy - 35);
-
-        // Sub-label explaining what's happening
-        ctx.font = '10px sans-serif';
-        ctx.fillStyle = 'rgba(148,163,184,0.8)';
-        if (gateClosed && highOnlyNoise) {
-          ctx.fillText('Blocking hiss / high-freq noise', cx, cy - 20);
-        } else if (gateClosed) {
-          ctx.fillText('Waiting for voice from mic...', cx, cy - 20);
-        } else if (localVoiceActive) {
-          ctx.fillText('Voice detected - passing audio', cx, cy - 20);
-        }
-      }
-
-      // Voice confidence / noise ratio display
+      // ===== LIVE ANALYSER (src/lib/liveScope.js) =====
       ensureBandMetrics();
       {
-        const ratio = voiceRatio;
-        const confidence = Math.min(100, Math.max(0, (ratio - 1) * 50));
-        const barW = 120;
-        const barH = 6;
-        const barX = cx - barW / 2;
-        const barY = cy + 5;
-
-        // Background
-        ctx.fillStyle = 'rgba(30,41,59,0.8)';
-        ctx.beginPath();
-        ctx.roundRect(barX - 2, barY - 2, barW + 4, barH + 4, 4);
-        ctx.fill();
-
-        // Fill - green when voice winning, red when noise winning
-        const fillW = (confidence / 100) * barW;
-        if (confidence > 50) {
-          ctx.fillStyle = 'rgba(34,197,94,0.9)';
-        } else if (confidence > 25) {
-          ctx.fillStyle = 'rgba(250,204,21,0.9)';
-        } else {
-          ctx.fillStyle = 'rgba(239,68,68,0.8)';
-        }
-        ctx.beginPath();
-        ctx.roundRect(barX, barY, Math.max(2, fillW), barH, 3);
-        ctx.fill();
-
-        // Label
-        ctx.font = '9px sans-serif';
-        ctx.fillStyle = 'rgba(148,163,184,0.7)';
-        ctx.fillText(`Voice: ${Math.round(confidence)}%  /  Noise: ${Math.round(100 - confidence)}%`, cx, barY + barH + 14);
-      }
-
-      // Boost indicator (when gain rider is active)
-      {
         const autoGainVal = processingRefs.current.autoGain?.gain?.value || 1;
-        const boostDb = 20 * Math.log10(autoGainVal || 0.00001);
-        if (Math.abs(boostDb) > 0.5) {
-          const boostLabel = boostDb > 0
-            ? `+${boostDb.toFixed(1)} dB BOOST`
-            : `${boostDb.toFixed(1)} dB CUT`;
-          ctx.font = 'bold 10px monospace';
-          ctx.fillStyle = boostDb > 0 ? 'rgba(56,189,248,0.8)' : 'rgba(251,146,60,0.8)';
-          ctx.fillText(boostLabel, cx, cy + 45);
-        }
+        const state = gateState({
+          denoise: settingsRef.current.denoise,
+          bypassed: settingsRef.current.isBypassed,
+          gateClosed,
+          voiceActive: localVoiceActive,
+        });
+        const prevHistory = scope.history;
+        scope = stepScope(scope, bandLevels(freqData, scopeBands), frameDt, {
+          level: dbFraction(db, -70, 0),
+          state,
+        });
+        drawScope(ctx, palette, scopeSize, {
+          ...scope,
+          state,
+          confidence: Math.min(100, Math.max(0, (voiceRatio - 1) * 50)),
+          riderDb: 20 * Math.log10(autoGainVal || 0.00001),
+          thresholdDb: settingsRef.current.denoise && !settingsRef.current.isBypassed ? settingsRef.current.threshold : null,
+          range: scopeRange,
+        }, scopeBands, waterfall, scope.history !== prevHistory);
       }
 
-      // Spectral quality indicators (top-left legend)
-      {
-        ctx.textAlign = 'left';
-        ctx.font = '9px monospace';
-        const legendX = 12;
-        let legendY = 18;
-        const lineH = 14;
-
-        // Legend dots
-        const dot = (color, label) => {
-          ctx.fillStyle = color;
-          ctx.beginPath();
-          ctx.arc(legendX, legendY - 3, 4, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.fillStyle = 'rgba(148,163,184,0.7)';
-          ctx.fillText(label, legendX + 10, legendY);
-          legendY += lineH;
-        };
-
-        dot('rgba(34,197,94,0.85)', 'Voice (passing)');
-        dot('rgba(239,68,68,0.6)', 'Noise (blocked)');
-        dot('rgba(251,146,60,0.7)', 'Rejected (baby/hiss)');
-        dot(`rgba(${accentRgb},0.80)`, 'Voice band (quiet)');
-
-        ctx.textAlign = 'center';
-      }
-
-      // Red veil for harsh highs
-      if (highOnlyNoise) {
-        const noiseGrad = ctx.createLinearGradient(0, 0, 0, h * 0.4);
-        noiseGrad.addColorStop(0, 'rgba(248,113,113,0.4)');
-        noiseGrad.addColorStop(1, 'rgba(15,23,42,0.0)');
-        ctx.fillStyle = noiseGrad;
-        ctx.fillRect(0, 0, w, h * 0.4);
-      }
-
-      // ===== BREATHING RING =====
-      if (!gateClosed && localVoiceActive) {
-        const t = (timestamp % 2000) / 2000;
-        const pulse = 0.85 + 0.15 * Math.sin(t * Math.PI * 2);
-        const ringRadius = coreRadius * pulse;
-
-        ctx.beginPath();
-        ctx.arc(cx, cy, ringRadius, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(34,197,94,0.6)';
-        ctx.lineWidth = 3;
-        ctx.setLineDash([10, 8]);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      } else if (gateClosed && settingsRef.current.denoise) {
-        // Red dashed ring when gate is closed and blocking
-        const ringRadius = coreRadius * 0.85;
-        ctx.beginPath();
-        ctx.arc(cx, cy, ringRadius, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(239,68,68,0.25)';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([4, 8]);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
-
-      // ===== THRESHOLD LINE =====
-      if (settingsRef.current.denoise && !settingsRef.current.isBypassed) {
-        const threshY =
-          canvas.height * (1 - (settingsRef.current.threshold + 100) / 100);
-
-        // Threshold line
-        ctx.strokeStyle = '#6366f1';
-        ctx.setLineDash([5, 5]);
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(0, threshY);
-        ctx.lineTo(canvas.width, threshY);
-        ctx.stroke();
-        ctx.setLineDash([]);
-
-        // Threshold label
-        ctx.textAlign = 'right';
-        ctx.font = '9px monospace';
-        ctx.fillStyle = 'rgba(99,102,241,0.7)';
-        ctx.fillText(`THRESHOLD ${settingsRef.current.threshold} dB`, w - 8, threshY - 4);
-        ctx.textAlign = 'center';
-      }
       // Smart Gain Rider
       const autoGainNode = processingRefs.current.autoGain;
       const gainRiderEnabled =
@@ -3299,7 +3076,7 @@ const AudioProcessor = ({ goHome }) => {
 
   // --- RENDER ---
   return (
-    <div className="flex flex-col h-[100dvh] text-white overflow-hidden select-none" style={{background:'#050A1C', fontFamily:'Inter, system-ui, sans-serif'}}>
+    <div className="fp-desk flex flex-col h-[100dvh] overflow-hidden select-none">
       <audio
         ref={audioElRef}
         crossOrigin="anonymous"
@@ -3321,12 +3098,13 @@ const AudioProcessor = ({ goHome }) => {
         onChange={handleFileUpload}
       />
 
-      {/* ─── MENU BAR ─── */}
+      {/* ─── MENU BAR (browser only: the desktop app has the native menu) ─── */}
+      {!isTauri && (
       <MenuBar
         onGoHome={goHome}
         onShowSettings={() => setShowSettings(true)}
         onShowObs={() => setShowObs(true)}
-        themeSelector={<ThemeSelector />}
+        onShowHelp={() => setShowHelp(true)}
         onToggleLive={toggleLive}
         onHardReset={hardReset}
         onStartAutoCalibrate={startAutoCalibrate}
@@ -3349,6 +3127,7 @@ const AudioProcessor = ({ goHome }) => {
         features={features}
         setFeatures={setFeatures}
       />
+      )}
 
       {/* ─── DESK HEADER (faceplate) ─── */}
       <DeskHeader
@@ -3358,7 +3137,20 @@ const AudioProcessor = ({ goHome }) => {
         gateClosed={visualizerGateStatus}
         onToggleEngine={toggleLive}
         onShowSettings={() => setShowSettings(true)}
+        monitor={{
+          on: isMonitoring && recordingState !== 'review',
+          disabled: recordingState === 'review',
+          onToggle: () => setIsMonitoring((m) => !m),
+        }}
+        bypassed={isBypassed}
+        onToggleBypass={() => setIsBypassed((b) => !b)}
+        onReset={hardReset}
+        onShowObs={isTauri ? () => setShowObs(true) : null}
+        onShowLink={() => setShowLink(true)}
+        onShowHelp={() => setShowHelp(true)}
+        loudness={{ st: lufsST, target: loudnessTarget }}
       />
+      <HelpCorner open={showHelp} onClose={() => setShowHelp(false)} />
 
       <LinkPanel open={showLink} onClose={() => setShowLink(false)} />
       <ObsPanel open={showObs} onClose={() => setShowObs(false)} mixerController={mixerController} />
@@ -3373,753 +3165,136 @@ const AudioProcessor = ({ goHome }) => {
         }}
         availableDevices={availableDevices}
         audioStats={audioStats}
+        mixerController={mixerController}
+        isLive={isLive}
       />
-
-      {SHOW_LEGACY_SETTINGS_MODAL && showSettings && (
-        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center backdrop-blur-sm p-4">
-          <div className="bg-slate-900 w-full max-w-lg rounded-2xl border border-slate-700 shadow-2xl p-6 space-y-6">
-            <div className="flex justify-between items-center border-b border-slate-800 pb-4">
-              <h2 className="text-xl font-bold flex items-center gap-2">
-                <Settings size={20} className="text-amber-400" />
-                Device Settings
-              </h2>
-              <div className="flex gap-2">
-                <button
-                  onClick={getDevices}
-                  className="p-1.5 rounded-full bg-slate-800 text-slate-400 hover:text-white transition-colors"
-                  title="Refresh Device List"
-                >
-                  <RefreshCw size={18} />
-                </button>
-                <button
-                  onClick={() => setShowSettings(false)}
-                  className="text-slate-400 hover:text-white"
-                >
-                  <X size={24} />
-                </button>
-              </div>
-            </div>
-
-            {/* INPUT SOURCE */}
-            <div>
-              <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">
-                Input Source (Mic / Mixer)
-              </label>
-              <select
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3"
-                value={selectedDevices.inputId}
-                onChange={(e) =>
-                  setSelectedDevices({
-                    ...selectedDevices,
-                    inputId: e.target.value,
-                  })
-                }
-              >
-                <option value="default">Default System Microphone</option>
-                {availableDevices.inputs.map((d) => (
-                  <option key={d.deviceId} value={d.deviceId}>
-                    {d.label || `Mic ${d.deviceId.slice(0, 5)}...`}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* OUTPUT: MONITORING */}
-            <div>
-              <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">
-                Monitoring Output (what you hear)
-              </label>
-              <select
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3"
-                value={selectedDevices.outputId}
-                onChange={(e) =>
-                  setSelectedDevices({
-                    ...selectedDevices,
-                    outputId: e.target.value,
-                  })
-                }
-              >
-                <option value="default">Default System Output</option>
-                {availableDevices.outputs.map((d) => (
-                  <option key={d.deviceId} value={d.deviceId}>
-                    {d.label || `Speaker ${d.deviceId.slice(0, 5)}...`}
-                  </option>
-                ))}
-              </select>
-              <p className="mt-1 text-[10px] text-slate-500">
-                Choose AirPods, headphones, or speakers the sound engineer will monitor on.
-              </p>
-            </div>
-
-            {/* OUTPUT: BROADCAST BUS (VIRTUAL CABLE) */}
-            <div>
-              <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">
-                Broadcast Output (what OBS / YouTube hears)
-              </label>
-
-              {/* Auto-detect virtual cable */}
-              {(() => {
-                const vcKeywords = ['vb-cable', 'vb cable', 'blackhole', 'black hole', 'loopback', 'virtual'];
-                const detected = availableDevices.outputs.filter(d =>
-                  vcKeywords.some(kw => (d.label || '').toLowerCase().includes(kw))
-                );
-                const isWindows = navigator.userAgent.toLowerCase().includes('win');
-                const isMac = navigator.userAgent.toLowerCase().includes('mac');
-
-                return detected.length > 0 ? (
-                  <div className="mb-2 flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-emerald-700/40 bg-emerald-900/10">
-                    <CheckCircle2 size={13} className="text-emerald-400 shrink-0" />
-                    <span className="text-[10px] text-emerald-400 font-semibold">
-                      Virtual cable detected: {detected.map(d => d.label).join(', ')}
-                    </span>
-                  </div>
-                ) : (
-                  <div className="mb-2 rounded-lg border border-amber-700/30 px-3 py-2.5 space-y-1.5" style={{ background: 'rgba(var(--accent-rgb),0.05)' }}>
-                    <div className="flex items-start gap-2">
-                      <AlertTriangle size={12} className="text-amber-500 shrink-0 mt-0.5" />
-                      <p className="text-[10px] text-amber-400 font-semibold">No virtual cable detected</p>
-                    </div>
-                    <p className="text-[9px] text-slate-500 leading-relaxed">
-                      A virtual cable routes TIWATON audio into OBS. Install one (free), then refresh devices.
-                    </p>
-                    <div className="flex gap-2">
-                      {(isWindows || (!isWindows && !isMac)) && (
-                        <a
-                          href="https://vb-audio.com/Cable/"
-                          target="_blank"
-                          rel="noreferrer"
-                          className="flex items-center gap-1 px-2 py-1 rounded-md text-[9px] font-bold text-black"
-                          style={{ background: 'var(--accent)' }}
-                        >
-                          <ArrowRight size={9} />
-                          VB-CABLE (Windows)
-                        </a>
-                      )}
-                      {(isMac || (!isWindows && !isMac)) && (
-                        <a
-                          href="https://existential.audio/blackhole/"
-                          target="_blank"
-                          rel="noreferrer"
-                          className="flex items-center gap-1 px-2 py-1 rounded-md text-[9px] font-bold text-black"
-                          style={{ background: 'var(--accent)' }}
-                        >
-                          <ArrowRight size={9} />
-                          BlackHole (Mac)
-                        </a>
-                      )}
-                    </div>
-                    <p className="text-[9px] text-slate-600">After installing, click the ↺ refresh button above.</p>
-                  </div>
-                );
-              })()}
-
-              <select
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3"
-                value={selectedDevices.broadcastBus}
-                onChange={(e) =>
-                  setSelectedDevices({
-                    ...selectedDevices,
-                    broadcastBus: e.target.value,
-                  })
-                }
-              >
-                <option value="Not set">Not set yet</option>
-                <option value="Same as monitor">Same as monitor output</option>
-                {availableDevices.outputs.map((d) => (
-                  <option key={d.deviceId} value={d.deviceId}>
-                    {d.label || `Bus ${d.deviceId.slice(0, 5)}...`}
-                  </option>
-                ))}
-              </select>
-              <p className="mt-1.5 text-[10px] text-slate-600 leading-snug">
-                Set this to VB-CABLE Input (Windows) or BlackHole 2ch (Mac). Then in OBS, choose the same device as your Audio Input Capture source.
-              </p>
-            </div>
-
-            <MainOutputSelect
-              selectedDevices={selectedDevices}
-              outputs={availableDevices.outputs}
-              onChange={(mainOutputId) => setSelectedDevices({ ...selectedDevices, mainOutputId })}
-            />
-
-            <div className="grid grid-cols-2 gap-4">
-              <div
-                className={`p-4 rounded-xl border ${
-                  audioStats.sampleRate > 0 && audioStats.sampleRate < 44100
-                    ? 'bg-amber-900/20 border-amber-600/50'
-                    : 'bg-slate-800 border-slate-700'
-                }`}
-              >
-                <div className="text-xs font-bold mb-1">SAMPLE RATE</div>
-                <div
-                  className={`text-lg font-mono flex items-center gap-2 ${
-                    audioStats.sampleRate > 0 && audioStats.sampleRate < 44100
-                      ? 'text-amber-500'
-                      : 'text-amber-400'
-                  }`}
-                >
-                  {audioStats.sampleRate > 0
-                    ? (audioStats.sampleRate / 1000).toFixed(1) + ' kHz'
-                    : '--'}
-                  {audioStats.sampleRate > 0 &&
-                    audioStats.sampleRate < 44100 && (
-                      <AlertTriangle size={16} />
-                    )}
-                </div>
-              </div>
-              <div className="bg-slate-800 p-4 rounded-xl border border-slate-700">
-                <div className="text-xs font-bold mb-1">BUFFER SIZE</div>
-                <div className="text-lg font-mono text-amber-400">
-                  {audioStats.bufferSize || '--'} smp
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ─── MAIN 3-PANEL WORKSPACE ─── */}
       <div className="flex-1 flex overflow-hidden min-h-0">
 
-        {/* ══════════════════════════════════
-            LEFT — INPUT RACK
-        ══════════════════════════════════ */}
-        <div className="w-[272px] shrink-0 flex flex-col overflow-hidden border-r border-slate-800" style={{background:'#0D1428'}}>
-          {/* Rack header */}
-          <div className="px-3 py-2 border-b border-slate-800 flex items-center justify-between shrink-0">
-            <span className="text-[9px] font-bold tracking-[0.2em] text-slate-500 uppercase">Input Rack</span>
-            <div className="flex rounded p-0.5 border border-slate-800 gap-0.5" style={{background:'#050A1C'}}>
-              <button onClick={() => handleModeSwitch('live')} className={`px-2 py-0.5 rounded text-[9px] font-bold transition-all ${mode === 'live' ? 'bg-[var(--accent)] text-white' : 'text-slate-500 hover:text-white'}`}>Live</button>
-              <button onClick={() => handleModeSwitch('file')} className={`px-2 py-0.5 rounded text-[9px] font-bold transition-all ${mode === 'file' ? 'bg-[var(--accent)] text-white' : 'text-slate-500 hover:text-white'}`}>File</button>
-            </div>
-          </div>
-          {/* Tab nav */}
-          <div className="grid grid-cols-4 gap-0.5 p-2 border-b border-slate-800 shrink-0">
-            {[{id:'core',label:'Core'},{id:'stack',label:'AI'},{id:'profiles',label:'Profiles'},{id:'session',label:'Session'}].map(tab => (
-              <button key={tab.id} onClick={() => setControlTab(tab.id)}
-                className={`py-1.5 rounded text-[9px] font-bold uppercase tracking-wide transition-colors ${controlTab === tab.id ? 'text-[var(--accent)] border border-[var(--accent)]/40' : 'text-slate-500 hover:text-slate-300 border border-transparent'}`}
-                style={controlTab === tab.id ? {background:'rgba(var(--accent-rgb),0.12)'} : {}}>
-                {tab.label}
-              </button>
-            ))}
-          </div>
-          {/* Tab content scrollable */}
-          <div className="flex-1 overflow-y-auto p-3 space-y-3">
-
-            {/* ── CORE TAB ── */}
-            {controlTab === 'core' && (
-              <div className="space-y-3">
-                {/* Mic Input Module */}
-                <div className="rounded-lg border border-slate-800 overflow-hidden" style={{background:'#080E1F'}}>
-                  <div className="px-3 py-1.5 border-b border-slate-800 flex items-center justify-between" style={{background:'rgba(255,255,255,0.03)'}}>
-                    <span className="text-[9px] font-bold tracking-[0.15em] text-slate-500 uppercase flex items-center gap-1"><Mic size={9}/> Mic Input</span>
-                    <span className={`w-2 h-2 rounded-full ${isLive || isPlayingFile ? 'bg-[#00E676] animate-pulse' : 'bg-slate-700'}`}/>
-                  </div>
-                  <div className="p-3 space-y-2">
-                    <div className="flex justify-between items-center">
-                      <span className="text-[10px] font-medium text-slate-300">Level</span>
-                      <span className="text-[10px] text-[var(--accent)] font-mono">{(Math.log10(inputGainValue) * 20).toFixed(1)} dB</span>
-                    </div>
-                    <input type="range" min="0" max="4" step="0.1" value={inputGainValue} onChange={handleInputGainChange}
-                      className="w-full h-1 rounded-lg appearance-none cursor-pointer" style={{background:'#F59E0B40'}} />
-                    <div className="text-[9px] text-slate-600">Device: {selectedDevices.inputId === 'default' ? 'Default Mic' : 'Custom Input'}</div>
-                  </div>
-                </div>
-
-                {/* Hyper Gate Module */}
-                <div className="rounded-lg border border-slate-800 overflow-hidden" style={{background:'#080E1F'}}>
-                  <div className="px-3 py-1.5 border-b border-slate-800 flex items-center justify-between" style={{background:'rgba(255,255,255,0.03)'}}>
-                    <span className="text-[9px] font-bold tracking-[0.15em] text-slate-500 uppercase flex items-center gap-1"><Activity size={9}/> Hyper Gate</span>
-                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${features.denoise && !visualizerGateStatus && isLive ? 'text-[#00E676]' : features.denoise && visualizerGateStatus ? 'text-[#FF5252]' : 'text-slate-700'}`}>
-                      {features.denoise && isLive ? (visualizerGateStatus ? 'CLOSED' : 'OPEN') : 'OFF'}
-                    </span>
-                  </div>
-                  <div className="p-3 space-y-2.5">
-                    <div className="flex items-center gap-1.5">
-                      <button onClick={() => setGateMode('balanced')} className={`flex-1 py-1 rounded text-[9px] font-bold border ${gateMode === 'balanced' ? 'border-[var(--accent)]/50 text-[var(--accent)]' : 'border-slate-700 text-slate-500 hover:text-slate-300'}`} style={gateMode === 'balanced' ? {background:'rgba(var(--accent-rgb),0.12)'} : {}}>Balanced</button>
-                      <button onClick={() => setGateMode('speech')} className={`flex-1 py-1 rounded text-[9px] font-bold border ${gateMode === 'speech' ? 'border-amber-500/50 text-amber-300' : 'border-slate-700 text-slate-500 hover:text-slate-300'}`} style={gateMode === 'speech' ? {background:'rgba(var(--accent-rgb),0.12)'} : {}}>Speech Only</button>
-                    </div>
-                    <div onClick={() => setFeatures({...features, denoise: !features.denoise})} className={`cursor-pointer flex items-center justify-between p-2 rounded border transition-all ${features.denoise ? 'border-[var(--accent)]/40' : 'border-slate-800 hover:border-slate-700'}`} style={features.denoise ? {background:'rgba(var(--accent-rgb),0.08)'} : {}}>
-                      <div className="flex items-center gap-2">
-                        <Activity size={11} className={features.denoise ? 'text-[var(--accent)]' : 'text-slate-600'} />
-                        <span className="text-[10px] font-semibold text-slate-300">Reduction</span>
-                      </div>
-                      <div className={`w-7 h-3.5 rounded-full transition-colors relative ${features.denoise ? 'bg-[var(--accent)]' : 'bg-slate-700'}`}>
-                        <div className={`absolute top-0.5 w-2.5 h-2.5 bg-white rounded-full transition-transform ${features.denoise ? 'translate-x-3.5 left-0.5' : 'left-0.5'}`}/>
-                      </div>
-                    </div>
-                    {features.denoise && (
-                      <div className="space-y-2">
-                        <div className="flex justify-between text-[9px]">
-                          <span className="text-slate-500">Threshold</span>
-                          <span className={`font-mono ${visualizerGateStatus ? 'text-[#FF5252]' : 'text-[#00E676]'}`}>{noiseFloorThreshold} dB</span>
-                        </div>
-                        <input type="range" min="-100" max="-20" step="1" value={noiseFloorThreshold} onChange={(e) => setNoiseFloorThreshold(parseFloat(e.target.value))}
-                          className="w-full h-0.5 rounded-lg appearance-none cursor-pointer" style={{background:'rgba(var(--accent-rgb),0.4)'}} />
-                        <div className="grid grid-cols-2 gap-1.5">
-                          <button onClick={startAutoCalibrate} disabled={isAutoCalibrating} className={`py-1 rounded text-[9px] font-semibold border ${isAutoCalibrating ? 'border-[var(--accent)]/40 text-[var(--accent)] cursor-wait animate-pulse' : 'border-slate-700 text-slate-400 hover:border-slate-600'}`}>
-                            {isAutoCalibrating ? 'Calibrating...' : 'Auto-Calibrate'}
-                          </button>
-                          <button onClick={startMicLearn} disabled={isMicLearning} className={`py-1 rounded text-[9px] font-semibold border ${isMicLearning ? 'border-cyan-500/40 text-cyan-300 cursor-wait animate-pulse' : micLearned ? 'border-emerald-500/40 text-emerald-300' : 'border-slate-700 text-slate-400 hover:border-slate-600'}`}>
-                            {isMicLearning ? 'Learning...' : micLearned ? 'Re-Learn Mic' : 'Learn Mic'}
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* ── AI STACK TAB ── */}
-            {controlTab === 'stack' && (
-              <InputRackAiTab
-                features={features}
-                setFeatures={setFeatures}
-                setGateMode={setGateMode}
-                setSpeakerPreset={setSpeakerPreset}
-              />
-            )}
-            {SHOW_LEGACY_AI_STACK && controlTab === 'stack' && (
-              <div className="space-y-2">
-                <button onClick={() => { setFeatures({denoise:true,dereverb:true,voicePattern:true,musicDucking:true,pastorIsolation:true,sermonWarmth:true,smartMixing:true,mastering:true,streamingSafe:true,lookaheadGate:true,dynamicDeEsser:true,multibandComp:true}); setGateMode('speech'); setSpeakerPreset('pastor'); }}
-                  className="w-full py-2 rounded-lg border border-[#00E676]/30 text-[#00E676] text-[9px] font-bold tracking-[0.15em] hover:opacity-90 transition-opacity" style={{background:'rgba(0,230,118,0.08)'}}>
-                  ✦ CHURCH BETA — ALL ON
-                </button>
-                <p className="text-[9px] text-slate-600 text-center pb-1">All AI features + Speech-Only gate + Pastor preset</p>
-
-                {/* ─ Next-Gen DSP section header ─ */}
-                <div className="flex items-center gap-2 pt-1">
-                  <div className="flex-1 h-px bg-slate-800"/>
-                  <span className="text-[8px] font-bold tracking-[0.15em] text-slate-600 uppercase">Next-Gen DSP</span>
-                  <div className="flex-1 h-px bg-slate-800"/>
-                </div>
-
-                {[
-                  {key:'lookaheadGate',   icon:<Waves size={11}/>,   label:'Lookahead Gate',         desc:'20ms pre-opens gate — no clipped first syllable'},
-                  {key:'dynamicDeEsser',  icon:<Mic size={11}/>,     label:'Dynamic De-esser',       desc:'Sidechain sibilance detector — more transparent than notch'},
-                  {key:'multibandComp',   icon:<Sliders size={11}/>, label:'Multiband Compressor',   desc:'4-band (sub/low/mid/air) independent compression'},
-                  {key:'dereverb',        icon:<Radio size={11}/>,    label:'Spectral Dereverberation', desc:'Overlap-add FFT reverb tail subtraction'},
-                ].map(({key, icon, label, desc}) => (
-                  <div key={key} onClick={() => setFeatures({...features, [key]: !features[key]})}
-                    className={`cursor-pointer p-2.5 rounded-lg border transition-all ${features[key] ? 'border-[var(--accent)]/40' : 'border-slate-800 hover:border-slate-700 opacity-60 hover:opacity-100'}`}
-                    style={features[key] ? {background:'rgba(var(--accent-rgb),0.08)'} : {}}>
-                    <div className="flex items-center justify-between">
-                      <div className={`flex items-center gap-1.5 ${features[key] ? 'text-[var(--accent)]' : 'text-slate-500'}`}>
-                        {icon}
-                        <span className="text-[10px] font-semibold text-slate-300">{label}</span>
-                      </div>
-                      <div className={`w-6 h-3 rounded-full transition-colors relative ${features[key] ? 'bg-[var(--accent)]' : 'bg-slate-700'}`}>
-                        <div className={`absolute top-0.5 w-2 h-2 bg-white rounded-full transition-transform ${features[key] ? 'translate-x-3 left-0.5' : 'left-0.5'}`}/>
-                      </div>
-                    </div>
-                    <p className="text-[9px] text-slate-600 mt-1 pl-4">{desc}</p>
-                  </div>
-                ))}
-
-                {/* ─ Standard AI features ─ */}
-                <div className="flex items-center gap-2 pt-1">
-                  <div className="flex-1 h-px bg-slate-800"/>
-                  <span className="text-[8px] font-bold tracking-[0.15em] text-slate-600 uppercase">AI Processing</span>
-                  <div className="flex-1 h-px bg-slate-800"/>
-                </div>
-
-                {[
-                  {key:'voicePattern', icon:<Waves size={11}/>, label:'Voice Pattern Cleanse', desc:'Removes non-voice spectral content'},
-                  {key:'musicDucking', icon:<Volume2 size={11}/>, label:'Music Ducking', desc:'Drops music when speech detected'},
-                  {key:'pastorIsolation', icon:<Mic size={11}/>, label:'Pastor Voice Isolation', desc:'Prioritises pastor over choir'},
-                  {key:'sermonWarmth', icon:<Speaker size={11}/>, label:'Sermon Warmth', desc:'Low-mid body — podcast feel'},
-                  {key:'smartMixing', icon:<Sliders size={11}/>, label:'Smart Auto-Mixing', desc:'Continuous level riding'},
-                  {key:'mastering', icon:<Volume2 size={11}/>, label:'Voice Polish', desc:'Broadcast loudness + sheen'},
-                ].map(({key, icon, label, desc}) => (
-                  <div key={key} onClick={() => setFeatures({...features, [key]: !features[key]})}
-                    className={`cursor-pointer p-2.5 rounded-lg border transition-all ${features[key] ? 'border-[var(--accent)]/40' : 'border-slate-800 hover:border-slate-700 opacity-60 hover:opacity-100'}`}
-                    style={features[key] ? {background:'rgba(var(--accent-rgb),0.08)'} : {}}>
-                    <div className="flex items-center justify-between">
-                      <div className={`flex items-center gap-1.5 ${features[key] ? 'text-[var(--accent)]' : 'text-slate-500'}`}>
-                        {icon}
-                        <span className="text-[10px] font-semibold text-slate-300">{label}</span>
-                      </div>
-                      <div className={`w-6 h-3 rounded-full transition-colors relative ${features[key] ? 'bg-[var(--accent)]' : 'bg-slate-700'}`}>
-                        <div className={`absolute top-0.5 w-2 h-2 bg-white rounded-full transition-transform ${features[key] ? 'translate-x-3 left-0.5' : 'left-0.5'}`}/>
-                      </div>
-                    </div>
-                    <p className="text-[9px] text-slate-600 mt-1 pl-4">{desc}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* ── PROFILES TAB ── */}
-            {controlTab === 'profiles' && (
-              <div className="space-y-3">
-                <div className="rounded-lg border border-slate-800 overflow-hidden" style={{background:'#080E1F'}}>
-                  <div className="px-3 py-1.5 border-b border-slate-800" style={{background:'rgba(255,255,255,0.03)'}}>
-                    <span className="text-[9px] font-bold tracking-[0.15em] text-slate-500 uppercase">Room Profile</span>
-                  </div>
-                  <div className="p-3 space-y-2">
-                    <input type="text" value={roomName} onChange={(e) => setRoomName(e.target.value)} placeholder="e.g. Main Sanctuary" className="w-full border border-slate-700 rounded p-1.5 text-[10px] text-slate-200 placeholder-slate-600" style={{background:'#050A1C'}} />
-                    <div className="flex items-center justify-between">
-                      <span className="text-[9px] text-slate-500">Noise Profile</span>
-                      <button
-                        onClick={() => { void handleNoiseProfileCapture(); }}
-                        disabled={isTauri ? !isLive : !latestSpectrumRef.current}
-                        className={`px-2 py-0.5 rounded text-[9px] border ${(isTauri ? isLive : latestSpectrumRef.current) ? 'border-[var(--accent)]/40 text-[var(--accent)]' : 'border-slate-700 text-slate-600'}`}
-                        style={(isTauri ? isLive : latestSpectrumRef.current) ? {background:'rgba(var(--accent-rgb),0.1)'} : {}}
-                      >
-                        Capture
-                      </button>
-                    </div>
-                    {isTauri ? (
-                      <div className="rounded border border-slate-700 px-2 py-1.5 text-[10px] text-slate-400" style={{background:'#050A1C'}}>
-                        {nativeNoiseProfileCaptured
-                          ? 'Native live noise profile captured for the current engine session.'
-                          : 'Desktop live mode captures a native noise profile from recent input audio.'}
-                      </div>
-                    ) : (
-                      <select className="w-full border border-slate-700 rounded p-1.5 text-[10px] text-slate-200" style={{background:'#050A1C'}} value={selectedNoiseProfileId} onChange={(e) => setSelectedNoiseProfileId(e.target.value)}>
-                        <option value="">No profile</option>
-                        {noiseProfiles.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
-                      </select>
-                    )}
-                  </div>
-                </div>
-                <div className="rounded-lg border border-slate-800 overflow-hidden" style={{background:'#080E1F'}}>
-                  <div className="px-3 py-1.5 border-b border-slate-800" style={{background:'rgba(255,255,255,0.03)'}}>
-                    <span className="text-[9px] font-bold tracking-[0.15em] text-slate-500 uppercase">Speaker Preset</span>
-                  </div>
-                  <div className="p-2 space-y-1">
-                    {[['balanced','Balanced'],['pastor','Pastor'],['guest','Guest Speaker'],['choir','Choir Lead']].map(([val, label]) => (
-                      <button key={val} onClick={() => setSpeakerPreset(val)} className={`w-full py-1.5 px-2 rounded text-[10px] font-semibold border text-left transition-all ${speakerPreset === val ? 'border-[var(--accent)]/50 text-[var(--accent)]' : 'border-slate-800 text-slate-500 hover:text-slate-300'}`} style={speakerPreset === val ? {background:'rgba(var(--accent-rgb),0.12)'} : {}}>
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="rounded-lg border border-slate-800 overflow-hidden" style={{background:'#080E1F'}}>
-                  <div className="px-3 py-1.5 border-b border-slate-800" style={{background:'rgba(255,255,255,0.03)'}}>
-                    <span className="text-[9px] font-bold tracking-[0.15em] text-slate-500 uppercase">Loudness Target</span>
-                  </div>
-                  <div className="p-3 space-y-2">
-                    <select className="w-full border border-slate-700 rounded p-1.5 text-[10px] text-slate-200" style={{background:'#050A1C'}} value={loudnessTarget} onChange={(e) => setLoudnessTarget(Number(e.target.value))}>
-                      <option value={-14}>YouTube Live (-14 LUFS)</option>
-                      <option value={-16}>Facebook Live (-16 LUFS)</option>
-                      <option value={-20}>Zoom / Teams (-20 LUFS)</option>
-                    </select>
-                    {/* True LUFS meter (ITU-R BS.1770) */}
-                    <div className="rounded border border-slate-700 p-2 space-y-1" style={{background:'#050A1C'}}>
-                      <div className="flex justify-between text-[9px]">
-                        <span className="text-slate-500">Momentary</span>
-                        <span className={`font-mono font-bold ${lufsM !== null && lufsM > loudnessTarget + 3 ? 'text-[#FF5252]' : lufsM !== null && lufsM > loudnessTarget ? 'text-[var(--accent)]' : 'text-[#00E676]'}`}>{lufsM !== null ? `${lufsM} LU` : '--'}</span>
-                      </div>
-                      <div className="flex justify-between text-[9px]">
-                        <span className="text-slate-500">Short-Term</span>
-                        <span className={`font-mono ${lufsST !== null && lufsST > loudnessTarget + 2 ? 'text-[#FF5252]' : 'text-slate-300'}`}>{lufsST !== null ? `${lufsST} LUFS` : '--'}</span>
-                      </div>
-                      <div className="flex justify-between text-[9px]">
-                        <span className="text-slate-500">Integrated</span>
-                        <span className="font-mono text-slate-400">{lufsI !== null ? `${lufsI} LUFS` : '--'}</span>
-                      </div>
-                      <div className="flex justify-between text-[9px] border-t border-slate-700 pt-1">
-                        <span className="text-slate-500">Target</span>
-                        <span className="font-mono text-[var(--accent)]">{loudnessTarget} LUFS</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between text-[9px]">
-                      <span className="text-slate-500 text-[8px]">ITU-R BS.1770-4 K-weighted</span>
-                      <button onClick={() => setFeatures({...features, streamingSafe: !features.streamingSafe})} className={`px-2 py-0.5 rounded border text-[9px] font-bold ${features.streamingSafe ? 'border-[#00E676]/40 text-[#00E676]' : 'border-slate-700 text-slate-500'}`}>
-                        STREAM SAFE {features.streamingSafe ? 'ON' : 'OFF'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* ── SESSION TAB ── */}
-            {controlTab === 'session' && (
-              <div className="space-y-3">
-
-                {/* VB-CABLE Routing Status */}
-                {broadcastRoute.mode !== 'monitor-only' && (
-                  <div className="rounded-lg border overflow-hidden" style={{background:'#080E1F', borderColor: isLive ? 'rgba(0,230,118,0.3)' : 'rgba(255,255,255,0.06)'}}>
-                    <div className="px-3 py-1.5 border-b border-slate-800 flex items-center justify-between" style={{background:'rgba(255,255,255,0.03)'}}>
-                      <span className="text-[9px] font-bold tracking-[0.1em] text-slate-500 uppercase">Broadcast Routing</span>
-                      {isLive && <span className="w-1.5 h-1.5 rounded-full bg-[#00E676] animate-pulse"/>}
-                    </div>
-                    <div className="p-3">
-                      <div className="flex items-center gap-1.5 text-[9px] font-mono flex-wrap">
-                        <span className="px-2 py-1 rounded border border-slate-700 text-slate-400" style={{background:'#0D1428'}}>MIC</span>
-                        <span className="text-slate-700">→</span>
-                        <span className="px-2 py-1 rounded border text-amber-400 font-bold" style={{background:'rgba(var(--accent-rgb),0.08)', borderColor:'rgba(var(--accent-rgb),0.3)'}}>TIWATON DSP</span>
-                        <span className="text-slate-700">→</span>
-                        <span className={`px-2 py-1 rounded border font-bold ${isLive ? 'text-[#00E676] border-[#00E676]/30' : 'text-slate-500 border-slate-700'}`} style={{background: isLive ? 'rgba(0,230,118,0.07)' : 'transparent'}}>
-                          {broadcastLabel}
-                        </span>
-                        <span className="text-slate-700">→</span>
-                        <span className="px-2 py-1 rounded border border-slate-700 text-slate-400" style={{background:'#0D1428'}}>OBS</span>
-                      </div>
-                      <div className="mt-2 grid grid-cols-1 gap-1.5 text-[9px]">
-                        <div className="flex items-center justify-between text-slate-500">
-                          <span>Monitor</span>
-                          <span className="text-slate-300">{nativeRouteStatus?.monitor || monitorLabel}</span>
-                        </div>
-                        <div className="flex items-center justify-between text-slate-500">
-                          <span>Broadcast</span>
-                          <span className="text-slate-300">{nativeRouteStatus?.broadcast || broadcastLabel}</span>
-                        </div>
-                        <div className="flex items-center justify-between text-slate-500">
-                          <span>Input</span>
-                          <span className="text-slate-300">{nativeRouteStatus?.input || 'Waiting for engine'}</span>
-                        </div>
-                      </div>
-                      {isLive
-                        ? <p className="text-[9px] text-[#00E676] mt-2">TIWATON signal active on the native desktop routing graph.</p>
-                        : <p className="text-[9px] text-slate-600 mt-2">Start LIVE to activate the monitor and broadcast outputs.</p>
-                      }
-                    </div>
-                  </div>
-                )}
-
-                <div className="rounded-lg border border-slate-800 overflow-hidden" style={{background:'#080E1F'}}>
-                  <div className="px-3 py-1.5 border-b border-slate-800 flex items-center justify-between" style={{background:'rgba(255,255,255,0.03)'}}>
-                    <span className="text-[9px] font-bold tracking-[0.15em] text-slate-500 uppercase">Engine Telemetry</span>
-                    <span className={`text-[9px] font-bold ${audioStats.cpuLoadPct !== null && audioStats.cpuLoadPct > 70 ? 'text-[#FFB020]' : 'text-slate-400'}`}>
-                      {audioStats.state?.toUpperCase() || 'IDLE'}
-                    </span>
-                  </div>
-                  <div className="p-3 grid grid-cols-2 gap-2 text-[10px]">
-                    <div className="rounded border border-slate-800 p-2" style={{background:'#050A1C'}}>
-                      <div className="text-slate-500">Latency</div>
-                      <div className="text-slate-200 font-mono">{audioStats.latencyMs !== null ? `${audioStats.latencyMs.toFixed(1)} ms` : '--'}</div>
-                    </div>
-                    <div className="rounded border border-slate-800 p-2" style={{background:'#050A1C'}}>
-                      <div className="text-slate-500">CPU Load</div>
-                      <div className="text-slate-200 font-mono">{audioStats.cpuLoadPct !== null ? `${audioStats.cpuLoadPct.toFixed(0)}%` : '--'}</div>
-                    </div>
-                    <div className="rounded border border-slate-800 p-2" style={{background:'#050A1C'}}>
-                      <div className="text-slate-500">Callback Avg</div>
-                      <div className="text-slate-200 font-mono">{audioStats.callbackAvgMs !== null ? `${audioStats.callbackAvgMs.toFixed(2)} ms` : '--'}</div>
-                    </div>
-                    <div className="rounded border border-slate-800 p-2" style={{background:'#050A1C'}}>
-                      <div className="text-slate-500">Callback Peak</div>
-                      <div className="text-slate-200 font-mono">{audioStats.callbackPeakMs !== null ? `${audioStats.callbackPeakMs.toFixed(2)} ms` : '--'}</div>
-                    </div>
-                    <div className="rounded border border-slate-800 p-2 col-span-2" style={{background:'#050A1C'}}>
-                      <div className="flex items-center justify-between">
-                        <div className="text-slate-500">Dropped Output Samples</div>
-                        <div className={`${audioStats.droppedOutputSamples > 0 ? 'text-[#FF5252]' : 'text-[#00E676]'} font-mono`}>
-                          {audioStats.droppedOutputSamples}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Analytics */}
-                <div className="rounded-lg border border-slate-800 overflow-hidden" style={{background:'#080E1F'}}>
-                  <div className="px-3 py-1.5 border-b border-slate-800" style={{background:'rgba(255,255,255,0.03)'}}>
-                    <span className="text-[9px] font-bold tracking-[0.15em] text-slate-500 uppercase">Session Analytics</span>
-                  </div>
-                  <div className="p-2">
-                    <AnalyticsDashboard />
-                  </div>
-                </div>
-
-                <div className="rounded-lg border border-slate-800 overflow-hidden" style={{background:'#080E1F'}}>
-                  <div className="px-3 py-1.5 border-b border-slate-800 flex items-center justify-between" style={{background:'rgba(255,255,255,0.03)'}}>
-                    <span className="text-[9px] font-bold tracking-[0.15em] text-slate-500 uppercase">A/B Compare</span>
-                    <span className="text-[9px] text-[var(--accent)]">{abMode === 'A' ? 'A — Raw' : 'B — AI'}</span>
-                  </div>
-                  <div className="p-2 grid grid-cols-2 gap-1.5">
-                    <button onClick={() => setIsBypassed(true)} className={`py-1.5 rounded border text-[10px] font-bold ${abMode === 'A' ? 'border-amber-500/50 text-amber-300' : 'border-slate-700 text-slate-600 hover:text-slate-400'}`} style={abMode === 'A' ? {background:'rgba(var(--accent-rgb),0.1)'} : {}}>A — Raw</button>
-                    <button onClick={() => setIsBypassed(false)} className={`py-1.5 rounded border text-[10px] font-bold ${abMode === 'B' ? 'border-[var(--accent)]/50 text-[var(--accent)]' : 'border-slate-700 text-slate-600 hover:text-slate-400'}`} style={abMode === 'B' ? {background:'rgba(var(--accent-rgb),0.12)'} : {}}>B — AI</button>
-                  </div>
-                </div>
-                <div className="rounded-lg border border-slate-800 overflow-hidden" style={{background:'#080E1F'}}>
-                  <div className="px-3 py-1.5 border-b border-slate-800 flex items-center justify-between" style={{background:'rgba(255,255,255,0.03)'}}>
-                    <span className="text-[9px] font-bold tracking-[0.15em] text-slate-500 uppercase">Session Snapshots</span>
-                    <button onClick={handleSnapshotSave} className="px-2 py-0.5 rounded border border-[var(--accent)]/40 text-[9px] text-[var(--accent)]" style={{background:'rgba(var(--accent-rgb),0.1)'}}>Save</button>
-                  </div>
-                  <div className="p-2 space-y-1">
-                    {snapshots.length === 0
-                      ? <p className="text-[9px] text-slate-600 p-1">Save a snapshot to recall your full mix.</p>
-                      : snapshots.map(s => (
-                        <button key={s.id} onClick={() => handleSnapshotApply(s)} className="w-full flex items-center justify-between px-2 py-1.5 rounded border border-slate-800 text-[10px] text-slate-300 hover:border-[var(--accent)]/30 hover:text-white">
-                          <span>{s.label}</span>
-                          <span className="text-[9px] text-slate-500">{s.speakerPreset}</span>
-                        </button>
-                      ))}
-                  </div>
-                </div>
-              </div>
-            )}
-
-          </div>{/* end scrollable rack content */}
-        </div>{/* end left rack */}
+        <InputRack
+          mode={mode}
+          onModeSwitch={handleModeSwitch}
+          core={{
+            isLive,
+            isPlayingFile,
+            inputGain: inputGainValue,
+            onInputGainChange: handleInputGainChange,
+            deviceLabel: selectedDevices.inputId === 'default' ? 'default' : 'chosen in setup',
+            features,
+            setFeatures,
+            gateClosed: visualizerGateStatus,
+            gateMode,
+            setGateMode,
+            threshold: noiseFloorThreshold,
+            setThreshold: setNoiseFloorThreshold,
+            onCalibrate: startAutoCalibrate,
+            calibrating: isAutoCalibrating,
+            onLearnMic: startMicLearn,
+            learning: isMicLearning,
+            micLearned,
+          }}
+          voice={{ features, setFeatures, setGateMode, setSpeakerPreset, desserGrDb, gainRiderDb }}
+          profiles={{
+            roomName,
+            setRoomName,
+            isDesktop: isTauri,
+            nativeCaptured: nativeNoiseProfileCaptured,
+            canCapture: isTauri ? isLive : Boolean(latestSpectrumRef.current),
+            onCapture: () => { void handleNoiseProfileCapture(); },
+            selectedProfileId: selectedNoiseProfileId,
+            setSelectedProfileId: setSelectedNoiseProfileId,
+            profiles: noiseProfiles,
+            speakerPreset,
+            setSpeakerPreset,
+            target: loudnessTarget,
+            setTarget: setLoudnessTarget,
+            lufsM,
+            lufsST,
+            lufsI,
+            streamSafe: features.streamingSafe,
+            onToggleStreamSafe: () => setFeatures((f) => ({ ...f, streamingSafe: !f.streamingSafe })),
+          }}
+          session={{
+            showRouting: broadcastRoute.mode !== 'monitor-only',
+            isLive,
+            route: nativeRouteStatus,
+            monitorLabel,
+            broadcastLabel,
+            stats: audioStats,
+            abMode,
+            setBypassed: setIsBypassed,
+            snapshots,
+            onSave: handleSnapshotSave,
+            onApply: handleSnapshotApply,
+          }}
+        />
 
         {/* ══════════════════════════════════
             CENTER — MAIN WORKSPACE
         ══════════════════════════════════ */}
-        <div className="flex-1 flex flex-col min-w-0 overflow-hidden" style={{background:'#050A1C'}}>
+        <main className="fp-centre flex-1 flex flex-col min-w-0 overflow-hidden">
 
-          {/* Center tab bar */}
-          <div className="h-10 border-b border-slate-800 flex items-center px-3 gap-2 shrink-0" style={{background:'#0D1428'}}>
-            <div className="flex rounded p-0.5 border border-slate-800 gap-0.5" style={{background:'#050A1C'}}>
-              <button onClick={() => setMainTab('live')} className={`px-3 py-1 rounded text-[9px] font-bold tracking-wide transition-all ${mainTab === 'live' ? 'bg-[var(--accent)] text-white' : 'text-slate-500 hover:text-white'}`}>LIVE</button>
-              <button onClick={() => setMainTab('editor')} className={`px-3 py-1 rounded text-[9px] font-bold tracking-wide transition-all ${mainTab === 'editor' ? 'bg-[var(--accent)] text-white' : 'text-slate-500 hover:text-white'}`}>EDITOR</button>
-              <button onClick={() => setMainTab('mixer')} className={`px-3 py-1 rounded text-[9px] font-bold tracking-wide transition-all ${mainTab === 'mixer' ? 'bg-[var(--accent)] text-white' : 'text-slate-500 hover:text-white'}`}>MIXER</button>
-            </div>
-            {/* Active feature badges */}
-            <div className="flex items-center gap-1 overflow-x-auto" style={{scrollbarWidth:'none'}}>
-              {features.denoise && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-[#00E676]/30 text-[#00E676] whitespace-nowrap" style={{background:'rgba(0,230,118,0.08)'}}>HYPER-GATE</span>}
-              {features.lookaheadGate && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-[#00E676]/30 text-[#00E676] whitespace-nowrap" style={{background:'rgba(0,230,118,0.08)'}}>LOOKAHEAD</span>}
-              {features.dynamicDeEsser && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-[var(--accent)]/30 text-[var(--accent)] whitespace-nowrap" style={{background:'rgba(var(--accent-rgb),0.08)'}}>DE-ESS{desserGrDb < -0.5 ? ` ${desserGrDb}dB` : ''}</span>}
-              {features.multibandComp && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-[var(--accent)]/30 text-[var(--accent)] whitespace-nowrap" style={{background:'rgba(var(--accent-rgb),0.08)'}}>4-BAND</span>}
-              {features.voicePattern && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-[#00E676]/30 text-[#00E676] whitespace-nowrap" style={{background:'rgba(0,230,118,0.08)'}}>VOICE CLEANSE</span>}
-              {features.pastorIsolation && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-[var(--accent)]/30 text-[var(--accent)] whitespace-nowrap" style={{background:'rgba(var(--accent-rgb),0.08)'}}>ISOLATION</span>}
-              {features.sermonWarmth && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-[var(--accent)]/30 text-[var(--accent)] whitespace-nowrap" style={{background:'rgba(var(--accent-rgb),0.08)'}}>WARMTH</span>}
-              {features.mastering && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-[var(--accent)]/30 text-[var(--accent)] whitespace-nowrap" style={{background:'rgba(var(--accent-rgb),0.08)'}}>POLISH</span>}
-              {features.musicDucking && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-amber-500/30 text-amber-400 whitespace-nowrap" style={{background:'rgba(var(--accent-rgb),0.08)'}}>DUCKING</span>}
-              {features.streamingSafe && !isBypassed && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-amber-500/30 text-amber-400 whitespace-nowrap" style={{background:'rgba(var(--accent-rgb),0.08)'}}>STREAM SAFE</span>}
-              {((isTauri && nativeNoiseProfileCaptured) || (!isTauri && selectedNoiseProfileId)) && !isBypassed && (
-                <span className="px-1.5 py-0.5 rounded text-[8px] font-bold border border-slate-600 text-slate-400 whitespace-nowrap">
-                  NOISE PROFILE
-                </span>
-              )}
+          {/* Centre bar: view keys and the record control */}
+          <div className="fp-bar">
+            <div className="fp-keys" role="tablist" aria-label="Views">
+              {MAIN_TABS.map((tab) => (
+                <Key key={tab.id} role="tab" aria-selected={mainTab === tab.id} lit={mainTab === tab.id ? 'sel' : null} onClick={() => setMainTab(tab.id)}>
+                  {tab.label}
+                </Key>
+              ))}
             </div>
             {/* Desktop: the native multitrack recorder (strips + Stream mix). */}
             {isTauri && isLive && mainTab === 'live' && (
-              <div className="ml-auto flex items-center">
-                <DesktopRecordButton />
-              </div>
+              <div className="fp-bar-end"><DesktopRecordButton /></div>
             )}
             {/* Browser: Web Audio record check of the processed stream. */}
             {!isTauri && isLive && mainTab === 'live' && (
-              <div className="ml-auto flex items-center">
-                <div className={`flex items-center gap-1 p-0.5 pl-1.5 rounded-full border ${recordingState === 'recording' ? 'border-red-500 bg-red-900/60' : 'border-slate-600 bg-slate-800/60'}`}>
-                  {recordingState === 'idle' && (
-                    <button onClick={toggleRecording} className="flex items-center gap-1.5 px-2.5 py-1 bg-red-600 hover:bg-red-500 text-white rounded-full font-bold text-[9px]">
-                      <Circle size={7} fill="currentColor"/> Record Check
-                    </button>
-                  )}
-                  {recordingState === 'recording' && (
-                    <button onClick={toggleRecording} className="flex items-center gap-2 px-2.5 py-1 text-white font-mono text-[9px]">
-                      <span className="w-2 h-2 bg-red-500 rounded-sm animate-pulse"/> {formatTime(recordingDuration)} <span className="font-bold border-l border-red-500 pl-2 ml-1">STOP</span>
-                    </button>
-                  )}
-                  {recordingState === 'review' && (
-                    <div className="flex items-center text-[9px]">
-                      <button onClick={toggleRecording} className="px-2 py-1 hover:bg-slate-700 rounded-l-full text-green-400 font-bold flex items-center gap-1"><Play size={9} fill="currentColor"/> PLAY</button>
-                      <div className="w-px h-3 bg-slate-600"/>
-                      <button onClick={discardRecording} className="px-2 py-1 hover:bg-slate-700 text-slate-400 hover:text-red-400"><Trash2 size={11}/></button>
-                      <div className="w-px h-3 bg-slate-600"/>
-                      <button onClick={() => shareRecording('webm')} className="px-2 py-1 hover:bg-slate-700 font-bold text-[var(--accent)] flex items-center gap-1"><Share2 size={9}/>WebM</button>
-                      <div className="w-px h-3 bg-slate-600"/>
-                      <button onClick={() => shareRecording('wav')} className="px-2 py-1 hover:bg-slate-700 font-bold text-amber-400 flex items-center gap-1"><Waves size={9}/>WAV</button>
-                      <div className="w-px h-3 bg-slate-600"/>
-                      <button onClick={downloadWaveform} className="px-2 py-1 hover:bg-slate-700 font-bold text-cyan-400 flex items-center gap-1"><Activity size={9}/>PNG</button>
-                      <div className="w-px h-3 bg-slate-600"/>
-                      <button onClick={exportMp4} className="px-2 py-1 hover:bg-slate-700 rounded-r-full font-bold text-purple-400 flex items-center gap-1"><Video size={9}/>{videoFormat.extension.toUpperCase()}</button>
-                    </div>
-                  )}
-                </div>
+              <div className="fp-bar-end">
+                <RecordCheckKeys
+                  state={recordingState}
+                  duration={formatTime(recordingDuration)}
+                  videoLabel={videoFormat.extension}
+                  onToggle={toggleRecording}
+                  onDiscard={discardRecording}
+                  onShare={shareRecording}
+                  onExportVideo={exportMp4}
+                />
               </div>
             )}
           </div>
 
-          {/* ── LIVE VIEW ── */}
           {mainTab === 'live' && (
-            <div className="flex-1 relative overflow-hidden">
-              {/* Sound check overlay */}
-              {!isLive && !isPlayingFile && mode === 'live' && (
-                <div className="absolute inset-0 flex items-center justify-center backdrop-blur-sm z-30" style={{background:'rgba(0,0,0,0.65)'}}>
-                  <div className="text-center p-8 rounded-2xl border border-slate-700 shadow-2xl w-full max-w-sm" style={{background:'#0D1428'}}>
-                    <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4" style={{background:'rgba(var(--accent-rgb),0.15)', color:'var(--accent)'}}>
-                      <Mic size={32}/>
-                    </div>
-                    <h3 className="text-xl font-bold mb-2">Sound Check</h3>
-                    <p className="text-slate-400 text-sm mb-6">Connect mic or mixer, then go live.</p>
-                    <button onClick={toggleLive} className="px-8 py-3 text-white font-bold rounded-lg shadow-lg flex items-center gap-2 mx-auto hover:opacity-90" style={{background:'var(--accent)'}}>
-                      <Play size={18} fill="currentColor"/> Go Live
-                    </button>
-                  </div>
-                </div>
-              )}
-              {/* File mode info */}
-              {mode === 'file' && fileInfo && (
-                <div className="absolute top-3 left-3 z-10 text-[9px] text-slate-300 px-2 py-1 rounded-full border border-slate-700" style={{background:'rgba(13,20,40,0.85)'}}>
-                  File: <span className="text-white font-semibold">{fileInfo.name}</span>
-                </div>
-              )}
-              {/* Bypass overlay */}
-              {isBypassed && (
-                <div className="absolute top-3 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full text-[9px] font-bold tracking-widest shadow-lg animate-pulse z-20" style={{background:'#FF5252', color:'white'}}>
-                  BYPASS MODE — RAW AUDIO
-                </div>
-              )}
-              {/* Speech priority badge */}
-              {voiceActive && !isBypassed && (
-                <div className="absolute top-3 right-3 z-20">
-                  <div className="px-3 py-1 rounded-full border flex items-center gap-1.5" style={{background:'rgba(13,20,40,0.85)', borderColor:'rgba(0,230,118,0.4)', boxShadow:'0 0 15px rgba(0,230,118,0.3)'}}>
-                    <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#00E676'}}/>
-                    <span className="text-[9px] font-bold tracking-wide uppercase" style={{color:'#00E676'}}>Speech Priority Active</span>
-                  </div>
-                </div>
-              )}
-              {/* Recording status */}
-              {isLive && recordingState === 'recording' && (
-                <div className="absolute bottom-14 left-1/2 -translate-x-1/2 z-20 text-[9px] text-red-400 font-bold tracking-widest animate-pulse">RECORDING TEST SIGNAL...</div>
-              )}
-              {isLive && recordingState === 'review' && (
-                <div className="absolute bottom-14 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-1">
-                  <span className="text-[9px] text-[var(--accent)] font-bold tracking-widest">LIVE MIC MUTED • REVIEWING</span>
-                  {isPlayingBack && <span className="text-[9px] font-mono text-slate-400">{formatTime(playbackPosition)} / {playbackDuration ? formatTime(playbackDuration) : '--:--'}</span>}
-                  {!isPlayingBack && playbackDuration && <span className="text-[9px] font-mono text-slate-400">Ready • {formatTime(playbackDuration)}</span>}
-                </div>
-              )}
-              {/* Audio engine error */}
-              {isLive && audioEngineError && (
-                <div className="absolute inset-0 flex items-center justify-center backdrop-blur-sm z-30" style={{background:'rgba(0,0,0,0.7)'}}>
-                  <div className="text-center p-6 rounded-2xl border border-red-500/70 shadow-2xl max-w-sm" style={{background:'#0D1428'}}>
-                    <AlertTriangle className="w-8 h-8 text-red-400 mx-auto mb-3"/>
-                    <h3 className="text-base font-bold mb-2">Audio engine failed</h3>
-                    <p className="text-[10px] text-slate-300 mb-4 whitespace-pre-line">{audioEngineError}</p>
-                    <button onClick={() => { cleanupAudio(); setIsLive(false); }} className="px-5 py-2 rounded-lg border border-slate-600 text-[10px] font-semibold" style={{background:'#050A1C'}}>Back to Sound Check</button>
-                  </div>
-                </div>
-              )}
-              {/* MAIN CANVAS */}
-              <canvas ref={canvasRef} width={1000} height={500} className={`w-full h-full object-cover transition-opacity ${isBypassed ? 'opacity-40 grayscale' : 'opacity-90'}`}/>
-              {/* File Trim editor */}
-              {mode === 'file' && fileInfo && fileDuration > 0 && (
-                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 w-[min(760px,95%)]">
-                  <div className="border border-slate-700 rounded-xl px-4 py-3 backdrop-blur" style={{background:'rgba(13,20,40,0.95)'}}>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-[9px] font-semibold text-slate-300 flex items-center gap-1.5"><Sliders className="w-3 h-3" style={{color:'var(--accent)'}}/> Trim Sermon Section</span>
-                      <span className="text-[9px] font-mono text-slate-500">Total: {formatTime(Math.floor(fileDuration))}</span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <div className="flex justify-between text-[9px] text-slate-500 mb-1"><span>Start</span><span>{formatTime(Math.floor(trimStart || 0))}</span></div>
-                        <input type="range" min="0" max={fileDuration || 0} step="0.1" value={trimStart} onChange={handleTrimStartChange} className="w-full h-0.5 rounded appearance-none cursor-pointer" style={{background:'rgba(var(--accent-rgb),0.3)'}}/>
-                      </div>
-                      <div>
-                        <div className="flex justify-between text-[9px] text-slate-500 mb-1"><span>End</span><span>{formatTime(Math.floor(trimEnd || fileDuration || 0))}</span></div>
-                        <input type="range" min="0" max={fileDuration || 0} step="0.1" value={trimEnd} onChange={handleTrimEndChange} className="w-full h-0.5 rounded appearance-none cursor-pointer" style={{background:'rgba(var(--accent-rgb),0.3)'}}/>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 mt-2">
-                      <button onClick={previewTrimSegment} disabled={isPreviewingTrim} className="px-3 py-1 rounded text-[9px] font-semibold border border-[var(--accent)]/40 text-[var(--accent)] hover:bg-[var(--accent)]/10 flex items-center gap-1">
-                        {isPreviewingTrim ? <span className="w-2 h-2 rounded-full border border-[var(--accent)] border-t-transparent animate-spin"/> : <Play className="w-2.5 h-2.5"/>}
-                        {isPreviewingTrim ? 'Previewing...' : 'Preview'}
-                      </button>
-                      <button onClick={clearTrim} className="px-3 py-1 rounded text-[9px] font-semibold border border-slate-700 text-slate-400 hover:bg-slate-800">Full File</button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
+            <LiveView v={{
+              isLive,
+              isPlayingFile,
+              mode,
+              fileInfo,
+              isBypassed,
+              voiceActive,
+              recordingState,
+              isPlayingBack,
+              playbackPosition,
+              playbackDuration,
+              formatTime,
+              engineError: audioEngineError,
+              onErrorBack: () => { cleanupAudio(); setIsLive(false); },
+              onGoLive: toggleLive,
+              loudness: { m: lufsM, st: lufsST, i: lufsI, target: loudnessTarget, limiterOn: Boolean(features.streamingSafe) },
+              trim: {
+                duration: fileDuration,
+                start: trimStart,
+                end: trimEnd,
+                onStart: handleTrimStartChange,
+                onEnd: handleTrimEndChange,
+                onPreview: previewTrimSegment,
+                previewing: isPreviewingTrim,
+                onClear: clearTrim,
+                onExport: processAndExportFile,
+                canExport: Boolean(exportAvailability.canExportFileWav && destNodeRef.current && destNodeRef.current.stream),
+                exportStatus: fileExportStatus,
+              },
+            }} canvasRef={canvasRef} />
           )}
 
           {/* ── EDITOR VIEW (Phase 2/3/4) ── */}
@@ -4137,637 +3312,40 @@ const AudioProcessor = ({ goHome }) => {
             />
           )}
 
-        </div>{/* end center */}
+        </main>{/* end center */}
 
-        {/* ══════════════════════════════════
-            RIGHT — OUTPUT ROUTER
-        ══════════════════════════════════ */}
-        <div className="w-[232px] shrink-0 flex flex-col overflow-y-auto border-l border-slate-800" style={{background:'#0D1428'}}>
-          <div className="px-3 py-2 border-b border-slate-800 shrink-0">
-            <span className="text-[9px] font-bold tracking-[0.2em] text-slate-500 uppercase">Output Router</span>
-          </div>
-          <div className="p-3 space-y-3 flex-1">
-
-            {/* Monitor */}
-            <div className="rounded-lg border border-slate-800 overflow-hidden" style={{background:'#080E1F'}}>
-              <div className="px-3 py-1.5 border-b border-slate-800 flex items-center justify-between" style={{background:'rgba(255,255,255,0.03)'}}>
-                <span className="text-[9px] font-bold tracking-[0.1em] text-slate-500 uppercase flex items-center gap-1"><Headphones size={9}/> Monitor</span>
-                <button onClick={() => setIsMonitoring(!isMonitoring)} disabled={recordingState === 'review'}
-                  className={`w-5 h-5 rounded flex items-center justify-center border transition-all ${isMonitoring && recordingState !== 'review' ? 'border-[#00E676]/40' : 'border-slate-700'}`}
-                  style={isMonitoring && recordingState !== 'review' ? {background:'rgba(0,230,118,0.15)'} : {}}>
-                  <Headphones size={9} className={isMonitoring && recordingState !== 'review' ? 'text-[#00E676]' : 'text-slate-600'}/>
-                </button>
-              </div>
-              <div className="p-2.5">
-                <p className="text-[10px] text-slate-300 font-medium truncate">{monitorLabel}</p>
-                <p className="text-[9px] text-slate-600 mt-0.5">{isMonitoring && recordingState !== 'review' ? 'Active — hearing processed audio' : 'Muted'}</p>
-              </div>
-            </div>
-
-            {/* Broadcast */}
-            <div className="rounded-lg border border-slate-800 overflow-hidden" style={{background:'#080E1F'}}>
-              <div className="px-3 py-1.5 border-b border-slate-800 flex items-center justify-between" style={{background:'rgba(255,255,255,0.03)'}}>
-                <span className="text-[9px] font-bold tracking-[0.1em] text-slate-500 uppercase flex items-center gap-1"><Radio size={9}/> Broadcast</span>
-                <div className={`w-2 h-2 rounded-full ${isLive ? 'bg-[#00E676] animate-pulse' : 'bg-slate-700'}`}/>
-              </div>
-              <div className="p-2.5">
-                <p className="text-[10px] text-slate-300 font-medium truncate">{broadcastLabel}</p>
-                <button onClick={cycleOutputTarget} className="mt-1 flex items-center gap-1.5 text-[9px] text-[var(--accent)] hover:text-amber-300 transition-colors">
-                  {outputTargets.find(t => t.name === outputTarget)?.icon || <Cpu size={10}/>}
-                  <span>{outputTarget}</span>
-                </button>
-              </div>
-            </div>
-
-            {/* NDI® output (desktop only) */}
-            <NdiOutputPanel isLive={isLive} />
-
-            {/* NDI® inputs (desktop only) */}
-            <NdiInputPanel isLive={isLive} />
-
-            {/* Stream Guard */}
-            <div className="rounded-lg border border-slate-800 overflow-hidden" style={{background:'#080E1F'}}>
-              <div className="px-3 py-1.5 border-b border-slate-800" style={{background:'rgba(255,255,255,0.03)'}}>
-                <span className="text-[9px] font-bold tracking-[0.1em] text-slate-500 uppercase">Stream Guard</span>
-              </div>
-              <div className="p-2.5 space-y-1.5 text-[9px]">
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-500">Limiter</span>
-                  <span className={`font-bold ${features.streamingSafe ? 'text-[#00E676]' : 'text-slate-600'}`}>{features.streamingSafe ? 'ON' : 'OFF'}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-500">Target</span>
-                  <span className="font-mono text-[var(--accent)]">{loudnessTarget} LUFS</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-500">Current</span>
-                  <span className={`font-mono ${lufsST !== null && lufsST > loudnessTarget + 3 ? 'text-[#FF5252]' : 'text-slate-400'}`}>{lufsST !== null ? `${lufsST} LUFS` : '--'}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* DSP Signal Flow */}
-            <div className="rounded-lg border border-slate-800 overflow-hidden" style={{background:'#080E1F'}}>
-              <div className="px-3 py-1.5 border-b border-slate-800" style={{background:'rgba(255,255,255,0.03)'}}>
-                <span className="text-[9px] font-bold tracking-[0.1em] text-slate-500 uppercase">Signal Flow</span>
-              </div>
-              <div className="p-2 space-y-0">
-                {[
-                  {label:'MIC INPUT', active: isLive || isPlayingFile},
-                  {label:'RNNOISE', active: isLive && features.denoise},
-                  {label:'HYPER GATE', active: isLive && features.denoise},
-                  {label:'VOICE CLEANSE', active: isLive && features.voicePattern},
-                  {label:'AUTO MIX', active: isLive && features.smartMixing},
-                  {label:'WARMTH', active: isLive && features.sermonWarmth},
-                  {label:'ISOLATION', active: isLive && features.pastorIsolation},
-                  {label:'VOICE POLISH', active: isLive && features.mastering},
-                  {label:'LIMITER', active: isLive && features.streamingSafe},
-                  {label:'OUTPUT', active: isLive || isPlayingFile},
-                ].map(({label, active}, i, arr) => (
-                  <div key={label}>
-                    <div className="flex items-center gap-1.5 py-0.5">
-                      <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${active ? 'bg-[#00E676]' : 'bg-slate-700'}`}/>
-                      <span className={`text-[9px] font-mono ${active ? 'text-slate-300' : 'text-slate-600'}`}>{label}</span>
-                      {active && voiceActive && label !== 'MIC INPUT' && label !== 'OUTPUT' && (
-                        <div className="ml-auto w-1 h-1 rounded-full bg-[#00E676] animate-pulse"/>
-                      )}
-                    </div>
-                    {i < arr.length - 1 && <div className="w-px h-1.5 bg-slate-800 ml-[5px]"/>}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-          </div>
-        </div>{/* end right output router */}
+        <OutputRouter r={{
+          isLive,
+          isPlayingFile,
+          monitoring: isMonitoring,
+          reviewing: recordingState === 'review',
+          onToggleMonitor: () => setIsMonitoring((m) => !m),
+          monitorLabel,
+          broadcastLabel,
+          targetApp: outputTarget,
+          onCycleTarget: cycleOutputTarget,
+          features,
+        }} />
 
       </div>{/* end main 3-panel */}
 
-      {/* ─── MASTER CONSOLE ─── */}
-      <div className="h-[72px] shrink-0 border-t border-slate-800 px-4 flex items-center gap-4 z-20" style={{background:'#030710'}}>
-        {/* Transport button */}
-        <button onClick={mode === 'live' ? toggleLive : null}
-          className="w-11 h-11 rounded-full flex items-center justify-center transition-all"
-          style={isLive
-            ? {background:'#FF5252', boxShadow:'0 0 20px rgba(255,82,82,0.4)'}
-            : {background:'var(--accent)', boxShadow:'0 0 20px rgba(var(--accent-rgb),0.4)'}}>
-          {isLive ? <Square size={16} fill="currentColor"/> : <Play size={16} fill="currentColor" className="ml-0.5"/>}
-        </button>
-        {/* Status */}
-        <div className="min-w-[100px]">
-          <div className="text-[8px] font-bold uppercase tracking-wider text-slate-600 mb-0.5">STATUS</div>
-          <div className={`text-[10px] font-semibold flex items-center gap-1.5 ${isLive ? 'text-[#00E676]' : 'text-slate-500'}`}>
-            {isLive && recordingState === 'review' ? <span className="text-amber-400">Reviewing</span>
-              : isLive ? <><span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{background:'#00E676'}}/>Live Processing</>
-              : 'Standby'}
-          </div>
+      {/* Small screens: the essentials in one bottom plate. */}
+      <div className="lg:hidden">
+      <nav className="fp-bar fixed bottom-0 left-0 right-0 z-40" aria-label="Quick controls" style={{ borderTop: '1px solid var(--fp-seam)', borderBottom: 0 }}>
+        <Key lit={isLive ? 'red' : 'green'} onClick={mode === 'live' ? toggleLive : undefined} disabled={mode !== 'live'}>
+          {isLive ? 'stop' : 'start'}
+        </Key>
+        <Lamp tone={isLive ? 'g' : 'off'}>{isLive ? 'running' : 'standby'}</Lamp>
+        <div className="fp-bar-end">
+          <Key lit={isBypassed ? 'amber' : null} pressed={isBypassed} onClick={() => setIsBypassed(!isBypassed)}>bypass</Key>
+          <Key onClick={() => setShowSettings(true)}>setup</Key>
         </div>
-        <div className="h-9 w-px bg-slate-800"/>
-        {/* Meters */}
-        <div className="flex items-center gap-2">
-          <div className="flex flex-col items-center gap-1">
-            <div className="flex items-end gap-0.5 h-9">
-              {[...Array(8)].map((_,i) => (
-                <div key={i} className={`w-1.5 rounded-sm transition-all duration-75`}
-                  style={{height:`${(i+1)*12}%`, background: isLive ? (i < 5 ? '#00E676' : i < 7 ? '#FFB800' : '#FF5252') : '#1e293b'}}/>
-              ))}
-            </div>
-            <span className="text-[8px] text-slate-600" style={{fontFamily:'JetBrains Mono, monospace'}}>IN L</span>
-          </div>
-          <div className="flex flex-col items-center gap-1">
-            <div className="flex items-end gap-0.5 h-9">
-              {[...Array(8)].map((_,i) => (
-                <div key={i} className="w-1.5 rounded-sm transition-all duration-75"
-                  style={{height:`${(i+1)*12}%`, background: isLive && recordingState !== 'review' ? (isBypassed ? '#64748b' : i < 6 ? 'var(--accent)' : '#FF5252') : '#1e293b'}}/>
-              ))}
-            </div>
-            <span className="text-[8px] text-slate-600" style={{fontFamily:'JetBrains Mono, monospace'}}>OUT L</span>
-          </div>
-        </div>
-        <div className="h-9 w-px bg-slate-800"/>
-        {/* Gain Rider */}
-        <div>
-          <div className="text-[8px] font-bold uppercase tracking-wider text-slate-600 mb-0.5">Gain Rider</div>
-          <span className={`text-[11px] font-mono ${features.smartMixing ? 'text-[var(--accent)]' : 'text-slate-700'}`} style={{fontFamily:'JetBrains Mono, monospace'}}>
-            {features.smartMixing ? `${gainRiderDb >= 0 ? '+' : ''}${gainRiderDb.toFixed(1)} dB` : 'OFF'}
-          </span>
-        </div>
-        <div className="h-9 w-px bg-slate-800"/>
-        {/* Controls — right side */}
-        <div className="flex items-center gap-2 ml-auto flex-wrap">
-          <button onClick={() => setIsBypassed(!isBypassed)}
-            className="px-2.5 py-1.5 rounded-lg border flex items-center gap-1.5 text-[9px] font-bold transition-all"
-            style={isBypassed ? {background:'rgba(255,82,82,0.15)', borderColor:'rgba(255,82,82,0.4)', color:'#FF5252'} : {background:'#0D1428', borderColor:'#1e293b', color:'#94a3b8'}}>
-            <Power size={12}/>{isBypassed ? 'BYPASSED' : 'BYPASS AI'}
-          </button>
-          <button onClick={() => setIsMonitoring(!isMonitoring)} disabled={recordingState === 'review'}
-            className="p-1.5 rounded-lg border relative transition-all"
-            style={isMonitoring ? {background:'rgba(var(--accent-rgb),0.15)', borderColor:'rgba(var(--accent-rgb),0.4)', color:'var(--accent)'} : {background:'#0D1428', borderColor:'#1e293b', color:'#94a3b8'}}>
-            <Headphones size={16}/>
-            {isMonitoring && recordingState !== 'review' && <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full animate-pulse" style={{background:'#00E676'}}/>}
-          </button>
-          {isLive && (
-            <button onClick={downloadWaveform} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[9px] font-semibold hover:opacity-80"
-              style={{background:'#0D1428', borderColor:'rgba(34,211,238,0.3)', color:'#22d3ee'}}>
-              <Activity className="w-3 h-3"/> Snapshot
-            </button>
-          )}
-          {isLive && (
-            <button onClick={exportMp4} disabled={!exportAvailability.canExportMp4} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[9px] font-semibold hover:opacity-80 disabled:opacity-40"
-              style={{background:'#0D1428', borderColor:'rgba(168,85,247,0.4)', color:'#c084fc'}}
-              title={`Record 10s of canvas + processed audio as ${videoFormat.label}`}>
-              {exportStatus === 'sharing' ? <span className="w-2.5 h-2.5 rounded-full border border-purple-400 border-t-transparent animate-spin"/> : <Video className="w-3 h-3"/>}
-              {exportStatus === 'done' ? 'Saved!' : exportStatus === 'sharing' ? 'Recording...' : videoFormat.label}
-            </button>
-          )}
-          <button onClick={hardReset} className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[9px] font-semibold hover:opacity-80"
-            style={{background:'#0D1428', borderColor:'rgba(var(--accent-rgb),0.3)', color:'#fbbf24'}}>
-            <RefreshCw className="w-3 h-3"/> Reset
-          </button>
-          {mode === 'file' && fileInfo && (
-            <button onClick={processAndExportFile} disabled={!exportAvailability.canExportFileWav || !destNodeRef.current || !destNodeRef.current.stream}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[9px] font-semibold hover:opacity-80 disabled:opacity-30"
-              style={{background:'#0D1428', borderColor:'rgba(0,230,118,0.3)', color:'#00E676'}}>
-              {fileExportStatus === 'processing' ? <span className="w-2.5 h-2.5 rounded-full border border-[#00E676] border-t-transparent animate-spin"/> : fileExportStatus === 'done' ? <Check className="w-3 h-3"/> : <Upload className="w-3 h-3"/>}
-              {fileExportStatus === 'done' ? 'Mastered' : fileExportStatus === 'processing' ? 'Processing...' : 'Process & Export'}
-            </button>
-          )}
-          <button onClick={() => setShowSettings(true)} className="p-1.5 rounded-lg border transition-all hover:border-slate-600"
-            style={{background:'#0D1428', borderColor:'#1e293b', color:'#94a3b8'}}>
-            <Settings size={14}/>
-          </button>
-        </div>
-      </div>{/* end master console */}
-
-      {/* Mobile fallback for very small screens */}
-      <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 border-t border-slate-800 px-3 py-2 flex justify-between items-center" style={{background:'#030710'}}>
-        <button onClick={mode === 'live' ? toggleLive : null} className="w-10 h-10 rounded-full flex items-center justify-center"
-          style={isLive ? {background:'#FF5252'} : {background:'var(--accent)'}}>
-          {isLive ? <Square size={14} fill="currentColor"/> : <Play size={14} fill="currentColor"/>}
-        </button>
-        <span className={`text-[10px] font-semibold ${isLive ? 'text-[#00E676]' : 'text-slate-500'}`}>{isLive ? 'Live' : 'Standby'}</span>
-        <button onClick={() => setIsBypassed(!isBypassed)} className={`px-2 py-1 rounded text-[9px] font-bold border ${isBypassed ? 'border-red-500/50 text-red-400' : 'border-slate-700 text-slate-500'}`}>
-          {isBypassed ? 'BYPASS' : 'AI ON'}
-        </button>
-        <button onClick={() => setShowSettings(true)} className="p-2 text-slate-400"><Settings size={16}/></button>
+      </nav>
       </div>
-
-      {/* AI Assistant floating button */}
-      <button
-        onClick={() => setShowAI(p => !p)}
-        title="TIWATON AI — Claude powered"
-        className="fixed bottom-4 left-4 z-50 w-10 h-10 rounded-full flex items-center justify-center shadow-lg border transition-all hover:scale-105"
-        style={showAI
-          ? { background: 'var(--accent)', borderColor: 'var(--accent)' }
-          : { background: '#0D1428', borderColor: 'rgba(var(--accent-rgb),0.4)' }}
-      >
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-          <path d="M8 1.5C4.41 1.5 1.5 4.41 1.5 8s2.91 6.5 6.5 6.5 6.5-2.91 6.5-6.5S11.59 1.5 8 1.5zm0 2a1 1 0 110 2 1 1 0 010-2zm1 8H7v-4h2v4z"
-            fill={showAI ? '#fff' : 'var(--accent)'}/>
-        </svg>
-      </button>
-
-      {/* AI Assistant panel */}
-      <AIAssistant
-        isOpen={showAI}
-        onClose={() => setShowAI(false)}
-        isLive={isLive}
-        features={features}
-        setFeatures={setFeatures}
-        currentPreset={speakerPreset}
-        spectrumData={null}
-      />
 
     </div>
   );   // ✅ end of JSX returned from AudioProcessor
  }; // ✅ end of: const AudioProcessor = ({ goHome }) => {
 
-
-// --- Small UI helpers ---
-const FeatureToggle = ({ icon, label, desc, active, onClick }) => (
-  <div
-    onClick={onClick}
-    className={`p-3 rounded-xl border cursor-pointer transition-all group ${
-      active
-        ? 'bg-amber-900/30 border-amber-500/50 shadow-[0_0_15px_rgba(var(--accent-rgb),0.2)]'
-        : 'bg-slate-900 border-slate-800 hover:border-slate-700 opacity-60 hover:opacity-100'
-    }`}
-  >
-    <div className="flex items-center justify-between mb-1">
-      <div
-        className={`flex items-center gap-3 ${
-          active ? 'text-amber-400' : 'text-slate-400 group-hover:text-slate-300'
-        }`}
-      >
-        {icon}
-        <span className="font-semibold text-sm">{label}</span>
-      </div>
-      <div
-        className={`w-4 h-4 rounded-full border flex items-center justify-center ${
-          active ? 'bg-amber-500 border-amber-500' : 'border-slate-600'
-        }`}
-      >
-        {active && <CheckCircle2 size={12} className="text-white" />}
-      </div>
-    </div>
-    <p className="text-xs text-slate-500 pl-8">{desc}</p>
-  </div>
-);
-
-const Meter = ({ label, level, color = 'bg-green-500' }) => (
-  <div className="flex flex-col items-center gap-1">
-    <div className="flex items-end gap-0.5 h-6 md:h-10">
-      {[...Array(5)].map((_, i) => (
-        <div
-          key={i}
-          className={`w-1 md:w-1.5 rounded-sm transition-all ${
-            level > i * 20 ? color : 'bg-slate-800'
-          }`}
-          style={{ height: `${(i + 1) * 20}%` }}
-        />
-      ))}
-    </div>
-    <span className="text-[9px] md:text-[10px] text-slate-500 font-mono scale-90 md:scale-100">
-      {label}
-    </span>
-  </div>
-);
-
-const Badge = ({ active, text }) => (
-  <div
-    className={`px-2 py-1 rounded text-[10px] font-bold tracking-wider border ${
-      active
-        ? 'bg-green-500/10 text-green-400 border-green-500/30'
-        : 'bg-slate-800 text-slate-600 border-transparent'
-    }`}
-  >
-    {text}
-  </div>
-);
-
-// Legacy help drawer moved to src/components/HelpCorner.jsx.
-function ExpandableCard({ icon, title, content }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div
-      className={`rounded-xl border overflow-hidden transition-all ${open ? 'border-amber-500/40' : 'border-slate-800 hover:border-slate-700'}`}
-      style={{ background: '#0D1428' }}
-    >
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center gap-3 px-4 py-3 text-left"
-      >
-        <span className="text-xl leading-none shrink-0">{icon}</span>
-        <span className="flex-1 text-[12px] font-semibold text-slate-200">{title}</span>
-        <span className={`text-slate-500 text-lg leading-none transition-transform duration-200 ${open ? 'rotate-90' : ''}`}>›</span>
-      </button>
-      {open && (
-        <div className="px-4 pb-3 pt-0 border-t border-slate-800/80">
-          <p className="text-[11px] text-slate-400 leading-relaxed mt-2">{content}</p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Interactive Sunday checklist
-function ChecklistPanel({ checklist }) {
-  const [checked, setChecked] = useState({});
-  const groups = [...new Set(checklist.map(c => c.group))];
-  const toggle = step => setChecked(prev => ({ ...prev, [step]: !prev[step] }));
-  const doneCount = checklist.filter(c => checked[c.step]).length;
-  const allDone = doneCount === checklist.length;
-
-  return (
-    <div className="p-4 space-y-5">
-      {/* Progress bar */}
-      <div>
-        <div className="flex items-center justify-between mb-1.5">
-          <p className="text-[10px] text-slate-500 uppercase tracking-wider font-bold">Sunday Pre-Service Checklist</p>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-mono text-slate-500">{doneCount}/{checklist.length}</span>
-            <button onClick={() => setChecked({})} className="text-[9px] text-slate-700 hover:text-slate-400 transition-colors">Reset</button>
-          </div>
-        </div>
-        <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
-          <div
-            className="h-full rounded-full transition-all duration-500"
-            style={{ width: `${(doneCount / checklist.length) * 100}%`, background: allDone ? '#00E676' : 'var(--accent)' }}
-          />
-        </div>
-      </div>
-
-      {groups.map(group => (
-        <div key={group}>
-          <p className="text-[9px] font-bold text-slate-600 uppercase tracking-widest mb-2">{group}</p>
-          <div className="space-y-2">
-            {checklist.filter(c => c.group === group).map(({ step }) => (
-              <label
-                key={step}
-                onClick={() => toggle(step)}
-                className="flex items-start gap-3 cursor-pointer group"
-              >
-                <div
-                  className={`mt-0.5 w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-all ${
-                    checked[step]
-                      ? 'bg-[#00E676] border-[#00E676]'
-                      : 'border-slate-700 bg-slate-900 group-hover:border-slate-500'
-                  }`}
-                >
-                  {checked[step] && <Check size={10} className="text-black" strokeWidth={3} />}
-                </div>
-                <span className={`text-[11px] leading-snug transition-colors ${checked[step] ? 'text-slate-600 line-through' : 'text-slate-300 group-hover:text-slate-200'}`}>
-                  {step}
-                </span>
-              </label>
-            ))}
-          </div>
-        </div>
-      ))}
-
-      {allDone && (
-        <div className="rounded-xl border border-emerald-500/30 px-4 py-3 text-center" style={{ background: 'rgba(0,230,118,0.07)' }}>
-          <p className="text-[13px] font-bold text-emerald-400">All clear! You're ready to go live.</p>
-          <p className="text-[10px] text-emerald-700 mt-0.5">Press the amber button to start the engine.</p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function LegacyHelpCorner() {
-  const [isOpen, setIsOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState('fixes');
-
-  const quickFixes = [
-    {
-      icon: '🔇',
-      title: 'No sound on stream',
-      content: 'Make sure LIVE is ON (amber button → turns red). Then in OBS go to Audio Settings and set your mic source to VB-CABLE Input (or BlackHole on Mac) — not your physical microphone.',
-    },
-    {
-      icon: '😤',
-      title: 'Too much background noise / HVAC hum',
-      content: 'Enable Hyper-Gate and RNNoise in the features panel. Then go to Engine menu → Auto-Calibrate Gate while the room is at its normal noise level (congregation seated, AC running). This teaches TIWATON what "silence" sounds like.',
-    },
-    {
-      icon: '🔁',
-      title: 'Echo / hearing voice twice',
-      content: 'Two audio sources are active. In OBS, open Audio Mixer settings and remove every source except VB-CABLE / BlackHole. Delete the webcam mic, laptop mic, and any direct mixer input from OBS.',
-    },
-    {
-      icon: '✂️',
-      title: 'Voice getting cut off mid-sentence',
-      content: 'The noise gate threshold is too aggressive. Lower the Noise Threshold slider in the settings panel, or run Auto-Calibrate Gate again. If the problem persists, disable Hyper-Gate temporarily.',
-    },
-    {
-      icon: '📻',
-      title: 'Audio sounds thin or tinny',
-      content: 'Enable Sermon Warmth and Voice Polish features. For post-processing, go to the Audio Editor tab, import your recording, and click Sermon Master → choose "Sermon (Warm)" preset, then Export WAV.',
-    },
-    {
-      icon: '🔴',
-      title: 'Red clipping — levels too hot',
-      content: 'Reduce the gain on your physical mixer or audio interface first. Then lower the input gain in TIWATON settings. Aim for peak levels around −12 dBFS during normal speech.',
-    },
-    {
-      icon: '💻',
-      title: 'App crashed or frozen',
-      content: 'Click Reset in the footer bar (bottom of the screen). Wait 3 seconds, then press the Live button again. Do not switch audio input devices while Live is running.',
-    },
-    {
-      icon: '🎙',
-      title: 'Making a sermon recording sound podcast-quality',
-      content: 'Go to the Audio Editor tab → Import your WAV or MP3 recording → Select the preset (Sermon Warm / Podcast Crisp / Broadcast Punchy) → Click "Sermon Master" → wait a few seconds → Export WAV. Done.',
-    },
-  ];
-
-  const checklist = [
-    { step: 'Mic plugged into mixer or USB interface', group: 'Before You Start' },
-    { step: 'Gain set correctly — no red clipping on input', group: 'Before You Start' },
-    { step: 'System mic enhancements turned OFF (Windows: Sound → Properties → Enhancements)', group: 'Before You Start' },
-    { step: 'TIWATON input source set to your interface', group: 'TIWATON Setup' },
-    { step: 'Broadcast Output set to VB-CABLE or BlackHole', group: 'TIWATON Setup' },
-    { step: 'Hyper-Gate, Voice Isolation, Warmth, Auto-Mix all enabled', group: 'TIWATON Setup' },
-    { step: 'Auto-Calibrate Gate run (Engine menu) with normal room noise', group: 'TIWATON Setup' },
-    { step: 'OBS audio source set to VB-CABLE / BlackHole (not physical mic)', group: 'OBS / Streaming' },
-    { step: 'All raw microphone inputs removed from OBS', group: 'OBS / Streaming' },
-    { step: '10-second test recording sounds clear', group: 'Sound Check' },
-    { step: 'Press LIVE — status shows green "Live Processing"', group: 'Go Live' },
-  ];
-
-  const setupSteps = [
-    {
-      num: '1', title: 'Physical Connection', color: 'var(--accent)',
-      items: [
-        'Pastor mic → Mixer / Audio Interface (NOT directly into laptop)',
-        'One clean USB cable from interface into computer',
-        'Disable Windows / Mac system noise suppression & AGC',
-        'Sound engineer monitors on headphones, not speakers',
-      ],
-    },
-    {
-      num: '2', title: 'Inside TIWATON', color: '#00E676',
-      items: [
-        'Settings → select your interface as the input',
-        'Set Broadcast Output → VB-CABLE Input (Windows) or BlackHole (Mac)',
-        'Enable: Hyper-Gate · Voice Isolation · Warmth · Auto-Mix',
-        'Engine menu → Auto-Calibrate Gate (room at normal noise)',
-      ],
-    },
-    {
-      num: '3', title: 'In OBS / StreamYard', color: '#60a5fa',
-      items: [
-        'Add Audio Input Capture → choose VB-CABLE or BlackHole',
-        'Remove all physical mic sources (webcam, laptop, interface direct)',
-        'Rule: if TIWATON says "Broadcast: VB-CABLE" → OBS must also use VB-CABLE',
-        'Check OBS audio meter shows activity when pastor speaks',
-      ],
-    },
-  ];
-
-  return (
-    <>
-      {/* Floating Help Button — left side so it never blocks signal flow */}
-      <button
-        type="button"
-        data-help-button
-        onClick={() => setIsOpen(true)}
-        className="fixed bottom-4 left-16 z-40 flex items-center gap-2 rounded-full px-3 py-2 text-[11px] font-semibold text-slate-100 shadow-lg border transition-all hover:scale-105"
-        style={{ background: '#0D1428', borderColor: 'rgba(var(--accent-rgb),0.35)' }}
-        title="Audio help & Sunday checklist"
-      >
-        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-black">?</span>
-        <span className="hidden sm:inline text-slate-400">Help</span>
-      </button>
-
-      {/* Slide-in right drawer */}
-      {isOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end">
-          {/* Backdrop */}
-          <div
-            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-            onClick={() => setIsOpen(false)}
-          />
-
-          {/* Panel */}
-          <div className="relative flex flex-col w-full max-w-md h-full border-l border-slate-700 shadow-2xl overflow-hidden" style={{ background: '#080E1F' }}>
-
-            {/* Header */}
-            <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-800 shrink-0" style={{ background: '#030710' }}>
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm text-black" style={{ background: 'var(--accent)' }}>?</div>
-              <div className="flex-1">
-                <p className="text-[13px] font-bold text-slate-100">Audio Help Center</p>
-                <p className="text-[10px] text-slate-500">Quick fixes · Setup guide · Sunday checklist</p>
-              </div>
-              <button onClick={() => setIsOpen(false)} className="p-1.5 rounded-lg text-slate-500 hover:text-white hover:bg-slate-800 transition-colors">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            {/* Tabs */}
-            <div className="flex border-b border-slate-800 shrink-0" style={{ background: '#030710' }}>
-              {[
-                { id: 'fixes',     label: '⚡ Quick Fixes' },
-                { id: 'setup',     label: '🔧 Setup Guide' },
-                { id: 'checklist', label: '✅ Checklist'   },
-              ].map(tab => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`flex-1 py-2.5 text-[11px] font-semibold transition-colors ${
-                    activeTab === tab.id
-                      ? 'text-amber-400 border-b-2 border-amber-500'
-                      : 'text-slate-500 hover:text-slate-300'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Content */}
-            <div className="flex-1 overflow-y-auto">
-
-              {/* ── Quick Fixes ── */}
-              {activeTab === 'fixes' && (
-                <div className="p-4 space-y-2">
-                  <p className="text-[10px] text-slate-600 uppercase tracking-wider mb-3">Tap your problem for an instant fix</p>
-                  {quickFixes.map(card => (
-                    <ExpandableCard key={card.title} icon={card.icon} title={card.title} content={card.content} />
-                  ))}
-                </div>
-              )}
-
-              {/* ── Setup Guide ── */}
-              {activeTab === 'setup' && (
-                <div className="p-4 space-y-4">
-                  <p className="text-[10px] text-slate-600 uppercase tracking-wider mb-1">Follow these 3 steps every Sunday</p>
-
-                  {setupSteps.map(({ num, title, color, items }) => (
-                    <div key={num} className="rounded-xl border border-slate-800 overflow-hidden" style={{ background: '#0D1428' }}>
-                      <div className="flex items-center gap-2.5 px-3 py-2.5 border-b border-slate-800" style={{ background: 'rgba(255,255,255,0.03)' }}>
-                        <div className="w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold text-black shrink-0" style={{ background: color }}>{num}</div>
-                        <span className="font-bold text-[12px] text-slate-100">{title}</span>
-                      </div>
-                      <ul className="px-4 py-3 space-y-2">
-                        {items.map(item => (
-                          <li key={item} className="flex items-start gap-2 text-[11px] text-slate-400 leading-snug">
-                            <span className="text-slate-700 mt-0.5 shrink-0">›</span>
-                            <span>{item}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ))}
-
-                  {/* Golden Rule */}
-                  <div className="rounded-xl border px-4 py-3" style={{ background: 'rgba(var(--accent-rgb),0.07)', borderColor: 'rgba(var(--accent-rgb),0.25)' }}>
-                    <p className="text-[11px] font-bold text-amber-400 mb-1">Golden Rule</p>
-                    <p className="text-[11px] text-slate-300 leading-relaxed">
-                      TIWATON replaces ALL microphones in OBS. Only the <span className="text-amber-400 font-semibold">Broadcast Output</span> virtual cable from TIWATON goes into OBS — never a raw physical mic.
-                    </p>
-                  </div>
-
-                  {/* Keyboard shortcuts */}
-                  <div className="rounded-xl border border-slate-800 overflow-hidden" style={{ background: '#0D1428' }}>
-                    <div className="px-3 py-2 border-b border-slate-800" style={{ background: 'rgba(255,255,255,0.03)' }}>
-                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Keyboard Shortcuts</span>
-                    </div>
-                    <div className="px-3 py-2 space-y-1.5">
-                      {[
-                        ['Ctrl + Enter', 'Start / Stop Live engine'],
-                        ['B', 'Toggle AI Bypass'],
-                        ['Ctrl + 1', 'Switch to Live view'],
-                        ['Ctrl + 2', 'Switch to Audio Editor'],
-                        ['Ctrl + S', 'Save session snapshot'],
-                        ['F12', 'Developer tools'],
-                      ].map(([key, action]) => (
-                        <div key={key} className="flex items-center justify-between">
-                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">{key}</span>
-                          <span className="text-[10px] text-slate-500">{action}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* ── Checklist ── */}
-              {activeTab === 'checklist' && (
-                <ChecklistPanel checklist={checklist} />
-              )}
-            </div>
-
-            {/* Footer */}
-            <div className="border-t border-slate-800 px-4 py-2 shrink-0 text-center" style={{ background: '#030710' }}>
-              <p className="text-[9px] text-slate-700">TIWATON Audio Help · Built for churches & live streamers</p>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
-  );
-}
 
 export default TiwatonApp;

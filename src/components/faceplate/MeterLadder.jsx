@@ -1,5 +1,6 @@
-import { useEffect, useRef } from 'react';
+import { useContext, useEffect, useRef } from 'react';
 import { initialMeter, meterFraction, meterZone, stepMeter, ZONE_AMBER_DB, ZONE_RED_DB } from '../../lib/faceplateMeter.js';
+import { ScaleContext } from './scaleContext.js';
 
 const SEGMENT_PX = 4;
 const GAP_PX = 1;
@@ -53,11 +54,13 @@ export default function MeterLadder({ getDb, height = 178, width = 6, label }) {
     getDbRef.current = getDb;
   });
 
+  const zoom = useContext(ScaleContext);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return undefined;
     const ctx = canvas.getContext('2d');
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = (window.devicePixelRatio || 1) * zoom;
     canvas.width = width * dpr;
     canvas.height = height * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -74,7 +77,7 @@ export default function MeterLadder({ getDb, height = 178, width = 6, label }) {
     };
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
-  }, [width, height]);
+  }, [width, height, zoom]);
 
   return (
     <canvas
