@@ -209,3 +209,24 @@
 .fp-minigauge-fill.fp-tone-fault { background: var(--fp-led-r); }
 .fp-minigauge-target { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--fp-glass-text); }
 @media (prefers-reduced-motion: reduce) { .fp-minigauge-fill { transition: none; } }
+
+/* ---------- floating setup panel ---------- */
+.fp-setup {
+  position: fixed; z-index: 40; width: 360px; max-height: calc(100dvh - 16px); display: flex; flex-direction: column;
+  background: var(--fp-plate); color: var(--fp-legend); font-family: var(--fp-font-legend);
+  border: 1px solid var(--fp-seam); border-radius: var(--fp-radius-plate);
+  box-shadow: var(--fp-elev-float);
+}
+.fp-setup-hd {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px;
+  border-bottom: 1px solid var(--fp-seam); cursor: grab; touch-action: none; user-select: none;
+}
+.fp-setup-hd:active { cursor: grabbing; }
+.fp-setup-grip { display: inline-flex; align-items: center; gap: 8px; font: var(--fp-weight-semibold) var(--fp-text-lg)/1 var(--fp-font-legend); border-radius: var(--fp-radius-key); }
+.fp-setup-grip:focus-visible { outline: 2px solid var(--fp-focus); outline-offset: 3px; }
+.fp-grip { width: 8px; height: 14px; background-image: radial-gradient(var(--fp-muted) 1px, transparent 1.5px); background-size: 4px 4px; }
+.fp-setup-bd { display: flex; flex-direction: column; gap: 12px; padding: 10px; overflow-y: auto; }
+.fp-setup-row { display: flex; flex-direction: column; gap: 6px; }
+.fp-setup-fmt { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; font-size: var(--fp-text-sm); }
+.fp-setup-fmt .fp-lamp { color: var(--fp-glass-dim); }
+.fp-setup-ft { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-top: 1px solid var(--fp-seam); min-height: 41px; }

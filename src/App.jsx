@@ -17,7 +17,6 @@ import RecordCheckKeys from './components/recorder/RecordCheckKeys.jsx';
 import DeviceSettingsModal from './components/DeviceSettingsModal';
 import LinkPanel from './components/link/LinkPanel.jsx';
 import ObsPanel from './components/obs/ObsPanel.jsx';
-import MainOutputSelect from './components/MainOutputSelect';
 import OutputRouter from './components/desk/OutputRouter.jsx';
 import LiveView from './components/desk/LiveView.jsx';
 import DesktopRecordButton from './components/recorder/DesktopRecordButton.jsx';
@@ -3161,6 +3160,8 @@ const AudioProcessor = ({ goHome }) => {
         }}
         availableDevices={availableDevices}
         audioStats={audioStats}
+        mixerController={mixerController}
+        isLive={isLive}
       />
 
       {/* ─── MAIN 3-PANEL WORKSPACE ─── */}
