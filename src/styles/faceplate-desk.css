@@ -1,0 +1,155 @@
+/* Faceplate desk frame: side panels, modules, rows, fields, tabs, drawers and dialogs.
+   Scoped to fp- classes and read only --fp-* tokens. The primitives are in faceplate-parts.css. */
+
+/* ---------- desk body ---------- */
+.fp-desk { background: var(--fp-chassis); color: var(--fp-legend); font-family: var(--fp-font-legend); }
+.fp-centre { background: var(--fp-chassis); }
+
+/* ---------- side panel ---------- */
+.fp-panel {
+  display: flex; flex-direction: column; flex: none; min-height: 0; overflow: hidden;
+  background: var(--fp-plate); color: var(--fp-legend); font-family: var(--fp-font-legend);
+}
+.fp-panel-l { width: 272px; border-right: 1px solid var(--fp-seam); }
+.fp-panel-r { width: 248px; border-left: 1px solid var(--fp-seam); }
+.fp-panel-hd {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; flex: none;
+  min-height: 36px; padding: 6px 10px; border-bottom: 1px solid var(--fp-seam);
+  font: var(--fp-weight-semibold) var(--fp-text-sm)/1 var(--fp-font-legend);
+}
+.fp-panel-bd { flex: 1; min-height: 0; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+
+/* ---------- module (a plate inside a panel) ---------- */
+.fp-mod { background: var(--fp-raised); border: 1px solid var(--fp-seam); border-radius: var(--fp-radius-plate); }
+.fp-mod-hd {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 6px 8px; border-bottom: 1px solid var(--fp-seam);
+  font: var(--fp-weight-semibold) var(--fp-text-sm)/1.2 var(--fp-font-legend);
+}
+.fp-mod-hd > span:first-child { display: inline-flex; align-items: center; gap: 6px; }
+.fp-mod-bd { display: flex; flex-direction: column; gap: 8px; padding: 8px; }
+
+/* ---------- rows, values, fields ---------- */
+.fp-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0;
+  font: var(--fp-weight-regular) var(--fp-text-sm)/1.3 var(--fp-font-legend);
+}
+.fp-row > :first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fp-num { font-family: var(--fp-font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fp-sub { color: var(--fp-muted); font-size: var(--fp-text-xs); }
+.fp-good { color: var(--fp-led-g); }
+.fp-caution { color: var(--fp-led-a); }
+.fp-fault { color: var(--fp-led-r); }
+.fp-field {
+  width: 100%; min-width: 0; height: 28px; padding: 0 8px;
+  border-radius: var(--fp-radius-key); border: 1px solid var(--fp-glass-edge);
+  background: var(--fp-glass); color: var(--fp-glass-text);
+  font: var(--fp-weight-regular) var(--fp-text-sm)/1 var(--fp-font-mono);
+}
+.fp-field::placeholder { color: var(--fp-glass-dim); }
+.fp-field:focus-visible { outline: 2px solid var(--fp-focus); outline-offset: 1px; }
+.fp-field:disabled { opacity: 0.5; }
+.fp-check { width: 16px; height: 16px; accent-color: var(--fp-led-g); }
+
+/* ---------- range (plain slider for rack settings) ---------- */
+.fp-range { width: 100%; height: 20px; margin: 0; background: none; cursor: pointer; appearance: none; -webkit-appearance: none; }
+.fp-range::-webkit-slider-runnable-track { height: 4px; border-radius: var(--fp-radius-led); background: var(--fp-slot); box-shadow: 0 0 0 1px var(--fp-slot-edge); }
+.fp-range::-moz-range-track { height: 4px; border-radius: var(--fp-radius-led); background: var(--fp-slot); }
+.fp-range::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 14px; height: 18px; margin-top: -7px;
+  border-radius: var(--fp-radius-key); border: 1px solid var(--fp-cap-rim); background: var(--fp-ch-stone);
+}
+.fp-range::-moz-range-thumb { width: 14px; height: 18px; border-radius: var(--fp-radius-key); border: 1px solid var(--fp-cap-rim); background: var(--fp-ch-stone); }
+.fp-range:focus-visible { outline: 2px solid var(--fp-focus); outline-offset: 2px; }
+.fp-range:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ---------- key groups and tabs ---------- */
+.fp-keys { display: flex; gap: 4px; flex-wrap: wrap; }
+.fp-keys-fill > .fp-key { flex: 1 1 0; }
+.fp-key-wide { width: 100%; }
+.fp-key-tall { height: 32px; font-size: var(--fp-text-sm); }
+
+/* ---------- centre bar ---------- */
+.fp-bar {
+  display: flex; align-items: center; gap: 8px; flex: none; min-height: 40px; padding: 6px 10px;
+  background: var(--fp-plate); border-bottom: 1px solid var(--fp-seam);
+}
+.fp-bar-end { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+
+/* ---------- drawer, dialog, scrim ---------- */
+.fp-scrim { position: fixed; inset: 0; z-index: 50; background: rgb(0 0 0 / 0.55); }
+.fp-drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 51; width: min(420px, 100%);
+  display: flex; flex-direction: column; background: var(--fp-plate); color: var(--fp-legend);
+  border-left: 1px solid var(--fp-seam); font-family: var(--fp-font-legend);
+}
+.fp-dialog-wrap { position: fixed; inset: 0; z-index: 51; display: grid; place-items: center; padding: 16px; pointer-events: none; }
+.fp-dialog {
+  pointer-events: auto; width: min(520px, 100%); max-height: calc(100dvh - 32px); overflow-y: auto;
+  display: flex; flex-direction: column; background: var(--fp-plate); color: var(--fp-legend);
+  border: 1px solid var(--fp-seam); border-radius: var(--fp-radius-plate); font-family: var(--fp-font-legend);
+}
+.fp-dialog-hd, .fp-drawer-hd {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; flex: none;
+  padding: 10px 12px; border-bottom: 1px solid var(--fp-seam);
+  font: var(--fp-weight-semibold) var(--fp-text-lg)/1.2 var(--fp-font-legend);
+}
+.fp-dialog-bd { display: flex; flex-direction: column; gap: 14px; padding: 12px; }
+.fp-drawer-bd { flex: 1; min-height: 0; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.fp-label { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; font: var(--fp-weight-medium) var(--fp-text-sm)/1.2 var(--fp-font-legend); }
+
+/* ---------- reading surface (help) ---------- */
+.fp-read-text { font: var(--fp-weight-regular) var(--fp-text-xl)/1.5 var(--fp-font-legend); color: var(--fp-legend); }
+.fp-read-text ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+.fp-read-text details > summary { cursor: pointer; padding: 6px 0; font-weight: var(--fp-weight-medium); }
+.fp-read-text details > summary:focus-visible { outline: 2px solid var(--fp-focus); outline-offset: 2px; }
+.fp-read-text details > p { margin: 0 0 8px; color: var(--fp-legend); }
+
+/* ---------- overlay card (live view) ---------- */
+.fp-overlay { position: absolute; inset: 0; z-index: 30; display: grid; place-items: center; background: rgb(0 0 0 / 0.6); }
+.fp-card {
+  display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 20px 24px; max-width: 360px;
+  background: var(--fp-plate); color: var(--fp-legend); text-align: center;
+  border: 1px solid var(--fp-seam); border-radius: var(--fp-radius-plate);
+}
+.fp-card h3 { margin: 0; font: var(--fp-weight-semibold) var(--fp-text-xl)/1.2 var(--fp-font-legend); }
+.fp-chip {
+  position: absolute; z-index: 20; display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px;
+  background: var(--fp-plate); border: 1px solid var(--fp-seam); border-radius: var(--fp-radius-key);
+  font: var(--fp-weight-medium) var(--fp-text-xs)/1.2 var(--fp-font-legend); color: var(--fp-legend);
+}
+
+/* ---------- mixer size ---------- */
+.fp-desk-scale { display: flex; flex: 1; min-width: 0; min-height: 0; }
+
+/* Tips inside a side panel open toward the panel, not past its edge. */
+.fp-panel .fp-tipbox { left: auto; right: -4px; transform: none; max-width: 220px; }
+
+/* An inline link inside legends: underlined so it is not told apart by colour alone. */
+.fp-link {
+  padding: 0; border: 0; background: none; cursor: pointer; color: inherit;
+  font: inherit; text-decoration: underline; text-underline-offset: 2px;
+}
+.fp-link:focus-visible { outline: 2px solid var(--fp-focus); outline-offset: 2px; }
+
+/* ---------- mixer: record plate and scenes bar ---------- */
+.fp-recplate {
+  display: flex; flex-direction: column; gap: 6px; flex: none; padding: 8px 10px;
+  background: var(--fp-plate); border-bottom: 1px solid var(--fp-seam);
+  color: var(--fp-legend); font: var(--fp-weight-regular) var(--fp-text-sm)/1.2 var(--fp-font-legend);
+}
+.fp-recrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fp-scenes { overflow-x: auto; scrollbar-width: none; flex: 1; min-width: 0; }
+.fp-banner {
+  display: flex; align-items: center; justify-content: center; gap: 8px; flex: none; padding: 4px 10px;
+  background: var(--fp-plate); border-bottom: 1px solid var(--fp-seam);
+}
+.fp-toast {
+  position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 30;
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+  background: var(--fp-plate); border: 1px solid var(--fp-led-r); border-radius: var(--fp-radius-plate);
+  color: var(--fp-legend); font: var(--fp-weight-medium) var(--fp-text-sm)/1.3 var(--fp-font-legend);
+}
+
+/* Narrow key groups: keep the legend inside the key. */
+.fp-keys-fill > .fp-key, .fp-strip .fp-key { padding: 0 2px; overflow: hidden; text-overflow: clip; }

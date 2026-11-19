@@ -1,4 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+
+import InfoTip from './faceplate/InfoTip.jsx';
+import Key from './faceplate/Key.jsx';
+import Lamp from './faceplate/Lamp.jsx';
 
 import { isTauri, openExternal } from '../lib/platform';
 import { NDI_TOOLS_URL, NDI_TRADEMARK, NDI_URL, createNdiClient } from '../lib/ndiOutput';
@@ -29,7 +33,7 @@ function ExternalLink({ href, children }) {
     <button
       type="button"
       onClick={() => { openExternal(href).catch(() => {}); }}
-      className="text-[var(--accent)] hover:underline"
+      className="fp-link"
     >
       {children}
     </button>
@@ -135,79 +139,58 @@ function NdiInputCard({ isLive }) {
   const anyConnected = live.some((input) => input.connected);
 
   return (
-    <div className="rounded-lg border border-slate-800 overflow-hidden" style={{ background: '#080E1F' }}>
-      <div className="px-3 py-1.5 border-b border-slate-800 flex items-center justify-between" style={{ background: 'rgba(255,255,255,0.03)' }}>
-        <span className="text-[9px] font-bold tracking-[0.1em] text-slate-500 uppercase">Receive from NDI®</span>
-        <span className={`flex items-center gap-1 text-[8px] font-bold uppercase ${anyConnected ? 'text-[#00E676]' : 'text-slate-600'}`}>
-          <span className={`w-2 h-2 rounded-full ${anyConnected ? 'bg-[#00E676] animate-pulse' : 'bg-slate-700'}`} />
-          {anyConnected ? 'Receiving' : 'Idle'}
+    <section className="fp-mod" aria-label="Receive from NDI">
+      <div className="fp-mod-hd">
+        <span>
+          Receive NDI®
+          <InfoTip label="Receive NDI">Each source becomes a mixer strip after the input channels, fader down. Applies when the engine restarts. Up to {MAX_NDI_INPUTS}.</InfoTip>
         </span>
+        <Lamp tone={anyConnected ? 'g' : 'off'}>{anyConnected ? 'receiving' : 'idle'}</Lamp>
       </div>
-      <div className="p-2.5 space-y-2 text-[9px]">
+      <div className="fp-mod-bd">
         {!receiveAvailable && (
-          <p className="text-amber-400">
-            This NDI runtime cannot receive. <ExternalLink href={NDI_TOOLS_URL}>Get NDI Tools</ExternalLink>
-          </p>
+          <div className="fp-sub fp-caution">
+            Cannot receive. <ExternalLink href={NDI_TOOLS_URL}>Get NDI Tools</ExternalLink>
+          </div>
         )}
 
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-slate-500">Sources (up to {MAX_NDI_INPUTS})</span>
-          <button
-            type="button"
-            onClick={refresh}
-            disabled={searching || busy}
-            className="px-1.5 py-0.5 rounded border border-slate-700 text-slate-300 hover:text-[var(--accent)] disabled:opacity-40"
-          >
-            {searching ? 'Searching…' : 'Refresh'}
-          </button>
+        <div className="fp-row">
+          <span>Sources</span>
+          <Key onClick={refresh} disabled={searching || busy}>{searching ? 'searching' : 'refresh'}</Key>
         </div>
 
-        {rows.length === 0 && !searching && (
-          <p className="text-slate-600">Press Refresh to look for sources on the network.</p>
-        )}
+        {rows.length === 0 && !searching && <span className="fp-sub">none found</span>}
 
         {rows.map((row) => {
           const checked = Boolean(selected?.includes(row.name));
           const status = liveBySource.get(row.name);
           const disabled = !selected || busy || row.own || (!checked && full);
-          const hint = row.own
-            ? 'This is one of this app’s own outputs; receiving it would feed back.'
-            : row.name;
+          const note = row.own ? 'this app' : row.offline ? 'not found' : status?.connected ? `${status.fillMs} ms` : null;
           return (
-            <label key={row.name} className="flex items-center justify-between gap-2 cursor-pointer" title={hint}>
-              <span className={`truncate ${row.offline || row.own ? 'text-slate-600' : 'text-slate-300'}`}>
-                {status && (
-                  <span className={status.connected ? 'text-[#00E676]' : 'text-[#FF5252]'}>● </span>
-                )}
-                {row.name}
-                {row.offline && ' (not found)'}
-                {row.own && ' (this app)'}
-                {status?.connected && ` · ${status.fillMs} ms`}
+            <div key={row.name} className="fp-row" title={row.own ? 'One of this app’s own outputs; receiving it would feed back.' : row.name}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                {status && <span className={`fp-led ${status.connected ? 'fp-led-g' : 'fp-led-r'}`} aria-label={status.connected ? 'connected' : 'not connected'} />}
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', color: row.offline || row.own ? 'var(--fp-muted)' : undefined }}>{row.name}</span>
               </span>
-              <input
-                type="checkbox"
-                className="accent-[var(--accent)]"
-                checked={checked}
-                disabled={disabled}
-                onChange={(event) => toggle(row.name, event.target.checked)}
-              />
-            </label>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                {note && <span className="fp-sub fp-num">{note}</span>}
+                <Key lit={checked ? 'sel' : null} pressed={checked} disabled={disabled} aria-label={`receive ${row.name}`}
+                  onClick={() => toggle(row.name, !checked)} style={{ minWidth: 36 }}>
+                  {checked ? 'on' : 'off'}
+                </Key>
+              </span>
+            </div>
           );
         })}
 
-        <p className="text-slate-600 leading-snug">
-          Each source becomes a mixer strip after the input channels, with its fader down.
-          Changes apply when the engine restarts.
-        </p>
-
         {notice && (
-          <p className={notice.error ? 'text-[#FF5252]' : 'text-amber-400'}>{notice.text}</p>
+          <div className={notice.error ? 'fp-sub fp-fault' : 'fp-sub fp-caution'} role={notice.error ? 'alert' : undefined}>{notice.text}</div>
         )}
 
-        <p className="text-[8px] text-slate-600 leading-snug">
+        <div className="fp-sub">
           {NDI_TRADEMARK}. <ExternalLink href={NDI_URL}>ndi.video</ExternalLink>
-        </p>
+        </div>
       </div>
-    </div>
+    </section>
   );
 }

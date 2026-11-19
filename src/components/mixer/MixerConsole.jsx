@@ -1,17 +1,111 @@
-import { useState } from 'react';
-import { Save, Trash2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
 
 import { validateSceneName } from '../../lib/mixerEngine.js';
-import { useMixer } from './useMixer.js';
-import ChannelStrip from './ChannelStrip.jsx';
-import BusStrip from './BusStrip.jsx';
+import { nextStripSize, readStripSize, stripScale, stripSizeLabel } from '../../lib/stripScale.js';
+import InfoTip from '../faceplate/InfoTip.jsx';
+import Key from '../faceplate/Key.jsx';
+import Lamp from '../faceplate/Lamp.jsx';
+import TwoPressKey from '../faceplate/TwoPressKey.jsx';
+import { ScaleContext } from '../faceplate/scaleContext.js';
 import RecordPanel from '../recorder/RecordPanel.jsx';
+import BusStrip from './BusStrip.jsx';
+import ChannelStrip from './ChannelStrip.jsx';
+import { useMixer } from './useMixer.js';
+
+const SIZE_KEY = 'tiwaton_strip_size';
+
+function loadSize() {
+  try {
+    return readStripSize(window.localStorage.getItem(SIZE_KEY));
+  } catch {
+    return 'fit';
+  }
+}
+
+/** Strip size setting plus the height of the strip area, for "fit". */
+function useStripSize() {
+  const [size, setSize] = useState(loadSize);
+  const [height, setHeight] = useState(0);
+  // A callback ref: the strip area mounts only after the mixer has loaded.
+  const [area, areaRef] = useState(null);
+
+  useEffect(() => {
+    if (!area || typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(([entry]) => setHeight(entry.contentRect.height));
+    ro.observe(area);
+    return () => ro.disconnect();
+  }, [area]);
+
+  const cycle = () => setSize((s) => {
+    const next = nextStripSize(s);
+    try {
+      window.localStorage.setItem(SIZE_KEY, next);
+    } catch {
+      // Storage can be blocked; the size still applies for this session.
+    }
+    return next;
+  });
+
+  return { size, scale: stripScale(size, height), areaRef, cycle };
+}
+
+function ScenesBar({ scenes, onLoad, onDelete, onSave, sizeLabel, onCycleSize }) {
+  const [name, setName] = useState('');
+  const [error, setError] = useState(null);
+
+  const save = async () => {
+    const trimmed = name.trim();
+    const problem = validateSceneName(trimmed);
+    if (problem) {
+      setError(problem);
+      return;
+    }
+    if (await onSave(trimmed)) {
+      setName('');
+      setError(null);
+    }
+  };
+
+  return (
+    <>
+      <div className="fp-bar" role="group" aria-label="Scenes">
+        <span className="fp-label" style={{ margin: 0 }}>
+          Scenes <InfoTip label="Scenes">Press a scene twice to load it. Delete also needs two presses.</InfoTip>
+        </span>
+        <div className="fp-keys fp-scenes" style={{ flexWrap: 'nowrap' }}>
+          {scenes.length === 0 && <span className="fp-sub">none saved</span>}
+          {scenes.map((scene) => (
+            <span key={scene} className="fp-keys" style={{ flexWrap: 'nowrap' }}>
+              <TwoPressKey label={`load scene ${scene}`} onConfirm={() => onLoad(scene)}>{scene}</TwoPressKey>
+              <TwoPressKey label={`delete scene ${scene}`} tone="red" onConfirm={() => onDelete(scene)}>del</TwoPressKey>
+            </span>
+          ))}
+        </div>
+        <div className="fp-bar-end">
+          <input
+            value={name}
+            onChange={(e) => { setName(e.target.value); setError(null); }}
+            onKeyDown={(e) => { if (e.key === 'Enter') save(); }}
+            placeholder="Scene name"
+            maxLength={40}
+            aria-label="New scene name"
+            className="fp-field"
+            style={{ width: 140 }}
+          />
+          <Key onClick={save} disabled={!name.trim()}>store</Key>
+          <Key onClick={onCycleSize} aria-label={`strip ${sizeLabel}`}>{sizeLabel}</Key>
+        </div>
+      </div>
+      {error && <div className="fp-banner fp-fault" role="alert" style={{ justifyContent: 'flex-start' }}>{error}</div>}
+    </>
+  );
+}
 
 /**
- * MixerConsole — scene bar, a horizontally scrolling row of channel strips,
- * and the Main/Stream/Monitor bus strips pinned on the right. Driven by
- * useMixer(controller), which works identically for the real Tauri
- * controller and the in-memory demo controller.
+ * MixerConsole: the scenes bar, the record plate, a horizontally scrolling row of channel strips
+ * and the Main, Stream and Monitor buses on the right. The strips scale up to fill the height
+ * ("size fit") or to a fixed size. Driven by useMixer(controller), which works the same for the
+ * Tauri controller and the in-memory demo controller.
  */
 export default function MixerConsole({ controller, demoBanner }) {
   const {
@@ -20,164 +114,67 @@ export default function MixerConsole({ controller, demoBanner }) {
     setBusParam, setBusBool,
     saveScene, loadScene, deleteScene,
   } = useMixer(controller);
-
-  const [sceneName, setSceneName] = useState('');
-  const [sceneNameError, setSceneNameError] = useState(null);
-  const [pendingLoad, setPendingLoad] = useState(null);
-  const [pendingDelete, setPendingDelete] = useState(null);
+  const { size, scale, areaRef, cycle } = useStripSize();
 
   if (loading || !state) {
-    return (
-      <div className="flex-1 flex items-center justify-center text-slate-500 text-[11px]" style={{ background: '#050A1C' }}>
-        Loading mixer…
-      </div>
-    );
+    return <div className="flex-1 grid place-items-center fp-sub">loading mixer</div>;
   }
 
-  const handleSceneClick = (name) => {
-    if (pendingLoad === name) {
-      loadScene(name);
-      setPendingLoad(null);
-    } else {
-      setPendingLoad(name);
-      setPendingDelete(null);
-    }
-  };
-
-  const handleSaveScene = async () => {
-    const trimmed = sceneName.trim();
-    const error = validateSceneName(trimmed);
-    if (error) {
-      setSceneNameError(error);
-      return;
-    }
-    const ok = await saveScene(trimmed);
-    if (ok) {
-      setSceneName('');
-      setSceneNameError(null);
-    }
-  };
-
-  const handleDeleteScene = (name) => {
-    if (pendingDelete === name) {
-      deleteScene(name);
-      setPendingDelete(null);
-    } else {
-      setPendingDelete(name);
-      setPendingLoad(null);
-    }
-  };
-
   return (
-    <div className="relative flex-1 flex flex-col min-h-0" style={{ background: '#050A1C' }}>
+    <div className="relative flex-1 flex flex-col min-h-0">
       {demoBanner && (
-        <div
-          className="px-3 py-1.5 text-center text-[9px] font-bold tracking-wide"
-          style={{ background: 'rgba(255,184,0,0.12)', color: '#FFB800', borderBottom: '1px solid rgba(255,184,0,0.3)' }}
-        >
-          {demoBanner}
+        <div className="fp-banner">
+          <Lamp tone="a">demo mixer</Lamp>
+          <InfoTip label="Demo mixer">{demoBanner}</InfoTip>
         </div>
       )}
 
-      {/* Scene bar */}
-      <div className="h-10 shrink-0 border-b border-slate-800 flex items-center gap-2 px-3" style={{ background: '#0D1428' }}>
-        <span className="text-[8px] font-bold uppercase tracking-wider text-slate-500 shrink-0">Scenes</span>
-        <div className="flex items-center gap-1 overflow-x-auto flex-1" style={{ scrollbarWidth: 'none' }}>
-          {(state.scenes || []).length === 0 && (
-            <span className="text-[9px] text-slate-600">No scenes saved yet.</span>
-          )}
-          {(state.scenes || []).map((name) => (
-            <div key={name} className="flex items-center gap-0.5 shrink-0">
-              <button
-                type="button"
-                onClick={() => handleSceneClick(name)}
-                className="px-2 py-1 rounded text-[9px] font-semibold border transition-all whitespace-nowrap"
-                style={pendingLoad === name
-                  ? { background: 'var(--accent)', borderColor: 'var(--accent)', color: '#fff' }
-                  : { background: 'transparent', borderColor: '#1e293b', color: '#94a3b8' }}
-              >
-                {pendingLoad === name ? `Load "${name}"?` : name}
-              </button>
-              <button
-                type="button"
-                onClick={() => handleDeleteScene(name)}
-                title={`Delete scene ${name}`}
-                aria-label={`Delete scene ${name}`}
-                className="p-1 rounded border"
-                style={pendingDelete === name
-                  ? { background: '#FF5252', borderColor: '#FF5252', color: '#fff' }
-                  : { background: 'transparent', borderColor: '#1e293b', color: '#64748b' }}
-              >
-                <Trash2 size={10} />
-              </button>
-            </div>
-          ))}
-        </div>
-        <div className="flex items-center gap-1 shrink-0">
-          <input
-            value={sceneName}
-            onChange={(e) => { setSceneName(e.target.value); setSceneNameError(null); }}
-            onKeyDown={(e) => { if (e.key === 'Enter') handleSaveScene(); }}
-            placeholder="Save as…"
-            maxLength={40}
-            aria-label="New scene name"
-            className="w-28 px-2 py-1 rounded text-[9px] border border-slate-700 outline-none focus:border-[var(--accent)]"
-            style={{ background: '#050A1C', color: 'white' }}
-          />
-          <button
-            type="button"
-            onClick={handleSaveScene}
-            disabled={!sceneName.trim()}
-            className="p-1.5 rounded border text-[9px] disabled:opacity-40"
-            style={{ background: 'rgba(var(--accent-rgb),0.12)', borderColor: 'rgba(var(--accent-rgb),0.4)', color: 'var(--accent)' }}
-            title="Save current mix as a scene"
-            aria-label="Save current mix as a scene"
-          >
-            <Save size={12} />
-          </button>
-        </div>
-      </div>
-      {sceneNameError && (
-        <div className="px-3 py-1 text-[9px] text-[#FF5252]">{sceneNameError}</div>
-      )}
+      <ScenesBar
+        scenes={state.scenes || []}
+        onLoad={loadScene}
+        onDelete={deleteScene}
+        onSave={saveScene}
+        sizeLabel={stripSizeLabel(size)}
+        onCycleSize={cycle}
+      />
 
       <RecordPanel strips={state.strips} engineRunning={Boolean(state.running)} />
 
-      {/* Strips */}
-      <div className="flex-1 flex overflow-hidden">
-        <div className="flex-1 flex gap-2 p-2 overflow-x-auto">
-          {state.strips.map((strip) => (
-            <ChannelStrip
-              key={strip.index}
-              strip={strip}
-              metersRef={metersRef}
-              onSetParam={(key, value) => setStripParam(strip.index, key, value)}
-              onSetBool={(key, value) => setStripBool(strip.index, key, value)}
-              onRename={(name) => renameStrip(strip.index, name)}
-            />
-          ))}
-        </div>
-        <div className="fp-buses" role="group" aria-label="Buses">
-          {state.buses.map((bus) => (
-            <BusStrip
-              key={bus.id}
-              bus={bus}
-              metersRef={metersRef}
-              onSetParam={(key, value) => setBusParam(bus.id, key, value)}
-              onSetBool={(key, value) => setBusBool(bus.id, key, value)}
-            />
-          ))}
-        </div>
+      <div ref={areaRef} className="flex-1 flex overflow-hidden min-h-0">
+        <ScaleContext.Provider value={scale}>
+          <div className="fp-desk-scale" style={{ zoom: scale }}>
+            <div className="flex-1 flex gap-2 p-2 overflow-x-auto">
+              {state.strips.map((strip) => (
+                <ChannelStrip
+                  key={strip.index}
+                  strip={strip}
+                  metersRef={metersRef}
+                  onSetParam={(key, value) => setStripParam(strip.index, key, value)}
+                  onSetBool={(key, value) => setStripBool(strip.index, key, value)}
+                  onRename={(name) => renameStrip(strip.index, name)}
+                />
+              ))}
+            </div>
+            <div className="fp-buses" role="group" aria-label="Buses">
+              {state.buses.map((bus) => (
+                <BusStrip
+                  key={bus.id}
+                  bus={bus}
+                  metersRef={metersRef}
+                  onSetParam={(key, value) => setBusParam(bus.id, key, value)}
+                  onSetBool={(key, value) => setBusBool(bus.id, key, value)}
+                />
+              ))}
+            </div>
+          </div>
+        </ScaleContext.Provider>
       </div>
 
       {toast && (
-        <div
-          role="alert"
-          className="absolute bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg border text-[10px] font-semibold shadow-2xl z-30 flex items-center gap-3"
-          style={{ background: '#0D1428', borderColor: 'rgba(255,82,82,0.5)', color: '#FF5252' }}
-        >
+        <div role="alert" className="fp-toast">
+          <span className="fp-led fp-led-r" aria-hidden="true" />
           {toast}
-          <button type="button" onClick={dismissToast} aria-label="Dismiss error" className="text-slate-500 hover:text-white">✕</button>
+          <Key onClick={dismissToast} aria-label="Dismiss error">dismiss</Key>
         </div>
       )}
     </div>

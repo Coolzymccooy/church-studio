@@ -1,4 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+
+import Lamp from './faceplate/Lamp.jsx';
+import ToggleRow from './desk/ToggleRow.jsx';
 
 import { isTauri, openExternal } from '../lib/platform';
 import {
@@ -30,7 +33,7 @@ function ExternalLink({ href, children }) {
     <button
       type="button"
       onClick={() => { openExternal(href).catch(() => {}); }}
-      className="text-[var(--accent)] hover:underline"
+      className="fp-link"
     >
       {children}
     </button>
@@ -126,36 +129,32 @@ function NdiOutputCard({ isLive }) {
   const isSending = isLive && sending.length > 0;
 
   return (
-    <div className="rounded-lg border border-slate-800 overflow-hidden" style={{ background: '#080E1F' }}>
-      <div className="px-3 py-1.5 border-b border-slate-800 flex items-center justify-between" style={{ background: 'rgba(255,255,255,0.03)' }}>
-        <span className="text-[9px] font-bold tracking-[0.1em] text-slate-500 uppercase">Send to NDI®</span>
-        <span className={`flex items-center gap-1 text-[8px] font-bold uppercase ${isSending ? 'text-[#00E676]' : 'text-slate-600'}`}>
-          <span className={`w-2 h-2 rounded-full ${isSending ? 'bg-[#00E676] animate-pulse' : 'bg-slate-700'}`} />
-          {isSending ? 'Sending' : 'Idle'}
-        </span>
+    <section className="fp-mod" aria-label="Send to NDI">
+      <div className="fp-mod-hd">
+        <span>Send to NDI®</span>
+        <Lamp tone={isSending ? 'g' : 'off'}>{isSending ? 'sending' : 'idle'}</Lamp>
       </div>
-      <div className="p-2.5 space-y-2 text-[9px]">
-        <p className={statusInfo.available ? 'text-slate-400' : 'text-amber-400'}>
+      <div className="fp-mod-bd">
+        <div className={`fp-sub ${statusInfo.available ? '' : 'fp-caution'}`}>
           {statusInfo.available || !status || status.loading
             ? statusInfo.label
             : <ExternalLink href={NDI_TOOLS_URL}>{statusInfo.label}</ExternalLink>}
-        </p>
+        </div>
 
         {NDI_BUSES.map(({ key, label }) => (
-          <label key={key} className="flex items-center justify-between gap-2 cursor-pointer">
-            <span className="text-slate-300 truncate" title={ndiSourceName(outputs?.baseName, label)}>{label}</span>
-            <input
-              type="checkbox"
-              className="accent-[var(--accent)]"
-              checked={Boolean(outputs?.[key])}
-              disabled={!outputs || busy}
-              onChange={(event) => apply({ ...outputs, [key]: event.target.checked })}
-            />
-          </label>
+          <ToggleRow
+            key={key}
+            label={label}
+            tip={`Sends as "${ndiSourceName(outputs?.baseName, label)}".`}
+            tone="sel"
+            on={Boolean(outputs?.[key])}
+            disabled={!outputs || busy}
+            onToggle={() => apply({ ...outputs, [key]: !outputs[key] })}
+          />
         ))}
 
         <div>
-          <label htmlFor="ndi-base-name" className="block text-slate-500 mb-0.5">Source name</label>
+          <label htmlFor="ndi-base-name" className="fp-label">Source name</label>
           <input
             id="ndi-base-name"
             type="text"
@@ -165,24 +164,22 @@ function NdiOutputCard({ isLive }) {
             onChange={(event) => setNameDraft(event.target.value)}
             onBlur={commitName}
             onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
-            className="w-full bg-slate-950 border border-slate-700 rounded px-1.5 py-1 text-[10px] text-slate-200"
+            className="fp-field"
           />
         </div>
 
-        {isSending && (
-          <ul className="space-y-0.5 text-[#00E676]">
-            {sending.map((name) => <li key={name} className="truncate">● {name}</li>)}
-          </ul>
-        )}
+        {isSending && sending.map((name) => (
+          <Lamp key={name} tone="g">{name}</Lamp>
+        ))}
 
         {notice && (
-          <p className={notice.error ? 'text-[#FF5252]' : 'text-amber-400'}>{notice.text}</p>
+          <div className={notice.error ? 'fp-sub fp-fault' : 'fp-sub fp-caution'} role={notice.error ? 'alert' : undefined}>{notice.text}</div>
         )}
 
-        <p className="text-[8px] text-slate-600 leading-snug">
+        <div className="fp-sub">
           {NDI_TRADEMARK}. <ExternalLink href={NDI_URL}>ndi.video</ExternalLink>
-        </p>
+        </div>
       </div>
-    </div>
+    </section>
   );
 }
