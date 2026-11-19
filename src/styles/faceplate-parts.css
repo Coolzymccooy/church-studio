@@ -167,3 +167,8 @@
 .fp-dyn .fp-led { width: 6px; height: 6px; }
 .fp-fz { display: flex; gap: 3px; justify-content: center; align-items: flex-start; }
 .fp-fz .fp-ladder { margin-top: 9px; }
+
+/* ---------- bus strip ---------- */
+.fp-scrib.fp-c-bus { color: var(--fp-bus-line); }
+.fp-scrib .fp-busname { grid-column: 1 / 3; font: var(--fp-weight-semibold) var(--fp-text-md)/1.1 var(--fp-font-legend); }
+.fp-buses { display: flex; gap: 4px; padding: 8px; flex-shrink: 0; overflow-y: auto; background: var(--fp-plate); border-left: 1px solid var(--fp-seam); }

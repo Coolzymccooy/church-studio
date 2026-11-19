@@ -62,3 +62,14 @@ export function stripGateTone(gateEnabled, gateOpen) {
 export function grText(grDb) {
   return Number.isFinite(grDb) && grDb >= 0.1 ? `gr -${grDb.toFixed(1)}` : 'gr 0.0';
 }
+
+// ---------- buses ----------
+
+/** The bus limiter ceiling knob. The limiter itself is always on; only its ceiling moves. */
+export const BUS_LIMITER = knob('limiter_ceiling_db', 'lim', 'dyn', 0.5, -1, (v) => compactDb(v));
+
+const BUS_LABELS = { main: 'main', stream: 'stream', monitor: 'mon' };
+
+export function busLabel(id) {
+  return BUS_LABELS[id] ?? String(id);
+}
