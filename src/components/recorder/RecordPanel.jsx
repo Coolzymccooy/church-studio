@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 
+import Glass from '../faceplate/Glass.jsx';
 import InfoTip from '../faceplate/InfoTip.jsx';
 import Key from '../faceplate/Key.jsx';
 
@@ -31,11 +32,8 @@ async function pickFolder(defaultPath) {
 export default function RecordPanel({ strips, engineRunning }) {
   if (!isTauri) {
     return (
-      <section className="fp-recplate" aria-label="Record">
-        <div className="fp-recrow">
-          <span className="fp-label" style={{ margin: 0 }}>Record</span>
-          <span className="fp-sub">desktop app only</span>
-        </div>
+      <section className="fp-plate" aria-label="Record">
+        <div className="fp-plate-hd"><span>Record</span><span className="fp-sub">desktop app only</span></div>
       </section>
     );
   }
@@ -87,81 +85,80 @@ function RecordSection({ strips, engineRunning }) {
     if (added) setMarkerLabel('');
   };
 
+  const recKeyCls = ['fp-reckey', recording && !confirmStop && 'fp-reckey-on', recording && confirmStop && 'fp-reckey-arm'].filter(Boolean).join(' ');
+  const recLabel = !recording ? 'start recording' : confirmStop ? 'press again to stop recording' : 'stop recording';
+  const onRecKey = () => {
+    if (!recording) {
+      setArmedKey(null);
+      rec.start(title);
+    } else if (!confirmStop) {
+      setArmedKey(stopArmKey(status));
+    } else {
+      handleStop();
+    }
+  };
+
   return (
-    <section className="fp-recplate" aria-label="Record">
-      <div className="fp-recrow">
-        <span className="fp-label" style={{ margin: 0 }}>
+    <section className="fp-plate" aria-label="Record">
+      <div className="fp-plate-hd">
+        <span>
           Record
-          <InfoTip label="Record">One WAV per armed channel, raw, plus the Stream mix as it went to broadcast.</InfoTip>
+          <InfoTip label="Record">One WAV per armed channel, raw, plus the Stream mix as it went to broadcast. Stop needs two presses.</InfoTip>
         </span>
-        {!recording && (
-          <Key onClick={() => { setArmedKey(null); rec.start(title); }} disabled={!canStart}
-            title={engineOn ? 'Start a multitrack recording' : 'Start the engine to record'}>
-            rec
-          </Key>
-        )}
-        {recording && !confirmStop && (
-          <Key lit="red" onClick={() => setArmedKey(stopArmKey(status))} disabled={busy}>stop</Key>
-        )}
-        {recording && confirmStop && (
-          <span className="fp-keys" role="alertdialog" aria-label="Confirm stop recording">
-            <Key className="fp-arm-r" onClick={handleStop} autoFocus>stop now</Key>
-            <Key onClick={() => setArmedKey(null)}>keep recording</Key>
-          </span>
-        )}
-        <span className={`fp-glass fp-num ${recording ? 'fp-fault' : 'fp-glass-dim'}`} style={{ padding: '4px 8px' }}
-          aria-label="Elapsed recording time">
-          {formatElapsed(recording ? status.elapsedSeconds : 0)}
-        </span>
-        {!recording && (
-          <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Title" maxLength={60}
-            aria-label="Recording title" className="fp-field" style={{ width: 160 }} />
-        )}
-        {recording && (
-          <span className="fp-keys" style={{ alignItems: 'center' }}>
-            <input value={markerLabel} onChange={(event) => setMarkerLabel(event.target.value)}
-              onKeyDown={(event) => { if (event.key === 'Enter') handleMarker(); }}
-              placeholder="Marker" maxLength={80} aria-label="Marker label" className="fp-field" style={{ width: 140 }} />
-            <Key onClick={handleMarker} disabled={busy}>marker</Key>
-            <span className="fp-sub fp-num">{status.markers}</span>
-          </span>
-        )}
-        {!engineOn && !recording && <span className="fp-sub">engine off</span>}
+        <span className={`fp-sub ${HEALTH_CLASS[health.level]}`}>{health.text}</span>
       </div>
 
-      <RecordTrackChips
-        strips={strips}
-        armedStrips={config?.armedStrips ?? null}
-        includeMain={Boolean(config?.includeMain)}
-        disabled={!config || busy || recording}
-        onToggle={toggleStrip}
-      />
+      <div className="fp-recrow">
+        <button type="button" className={recKeyCls} onClick={onRecKey} disabled={recording ? busy : !canStart}
+          aria-label={recLabel} aria-pressed={recording} title={engineOn ? recLabel : 'Start the engine to record'}>
+          <span className="fp-reckey-dot" aria-hidden="true" />
+        </button>
+        <Glass className="fp-timer" aria-label="Elapsed recording time">
+          {formatElapsed(recording ? status.elapsedSeconds : 0)}
+        </Glass>
+        {recording && confirmStop && <Key onClick={() => setArmedKey(null)}>keep</Key>}
+        {!recording && (
+          <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Title" maxLength={60}
+            aria-label="Recording title" className="fp-field" style={{ flex: 1, minWidth: 0 }} />
+        )}
+      </div>
+
+      {recording ? (
+        <div className="fp-recrow">
+          <input value={markerLabel} onChange={(event) => setMarkerLabel(event.target.value)}
+            onKeyDown={(event) => { if (event.key === 'Enter') handleMarker(); }}
+            placeholder="Marker" maxLength={80} aria-label="Marker label" className="fp-field" style={{ flex: 1, minWidth: 0 }} />
+          <Key onClick={handleMarker} disabled={busy}>marker</Key>
+          <span className="fp-num fp-sub" aria-label="Markers">{status.markers}</span>
+        </div>
+      ) : (
+        <RecordTrackChips
+          strips={strips}
+          armedStrips={config?.armedStrips ?? null}
+          includeMain={Boolean(config?.includeMain)}
+          disabled={!config || busy}
+          onToggle={toggleStrip}
+        />
+      )}
 
       <div className="fp-recrow">
         <Key lit={config?.includeMain ? 'sel' : null} pressed={Boolean(config?.includeMain)}
           disabled={!config || busy || recording}
           onClick={() => rec.saveConfig({ ...config, includeMain: !config.includeMain })}>
-          main mix
+          + main mix
         </Key>
-        <span className="fp-sub" style={{ maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={folder}>
-          {folder || 'no folder'}
-        </span>
-        <Key onClick={chooseFolder} disabled={!config || busy || recording}>folder</Key>
-        {config?.folder && !recording && (
-          <Key onClick={() => rec.saveConfig({ ...config, folder: null })}>default</Key>
-        )}
-        <span className={`fp-sub ${HEALTH_CLASS[health.level]}`}>{health.text}</span>
+        <Key onClick={chooseFolder} disabled={!config || busy || recording} title={folder}>folder</Key>
+        {config?.folder && !recording && <Key onClick={() => rec.saveConfig({ ...config, folder: null })}>default</Key>}
+        {summary && <Key onClick={rec.openFolder}>open last</Key>}
       </div>
 
       {summary && (
-        <div className="fp-recrow">
-          <span className="fp-sub">
-            saved {summary.files?.length ?? 0} files · {formatElapsed(summary.durationSeconds)} · {summary.markers ?? 0} markers
-            {summary.droppedFrames > 0 ? ` · ${summary.droppedFrames} dropped frames` : ''}
-          </span>
-          <Key onClick={rec.openFolder}>open folder</Key>
+        <div className="fp-sub">
+          saved {summary.files?.length ?? 0} files · {formatElapsed(summary.durationSeconds)} · {summary.markers ?? 0} markers
+          {summary.droppedFrames > 0 ? ` · ${summary.droppedFrames} dropped frames` : ''}
         </div>
       )}
+      {!engineOn && !recording && <div className="fp-sub">engine off</div>}
 
       {rec.error && (
         <div role="alert" className="fp-recrow fp-fault">

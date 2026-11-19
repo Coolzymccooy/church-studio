@@ -20,6 +20,8 @@ export function useMixer(controller) {
   const [state, setState] = useState(null);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
+  // The last scene loaded, and by whom ('desk', 'obs' or 'lumina'), for the scenes plate.
+  const [currentScene, setCurrentScene] = useState(null);
   const metersRef = useRef({ strips: [], buses: [] });
   const toastTimerRef = useRef(null);
   // Continuous controls (faders, knobs) fire on every input event while
@@ -82,7 +84,11 @@ export function useMixer(controller) {
         .catch(() => {});
     };
     const stateSub = controller.subscribeStateChanges?.(refetch);
-    const sceneSub = controller.subscribeSceneLoaded?.(refetch);
+    const sceneSub = controller.subscribeSceneLoaded?.((payload) => {
+      if (cancelled) return;
+      if (payload?.name) setCurrentScene({ name: payload.name, source: payload.source || 'link' });
+      refetch();
+    });
 
     return () => {
       cancelled = true;
@@ -207,6 +213,7 @@ export function useMixer(controller) {
     try {
       const next = await controller.loadScene(name);
       setState(next);
+      setCurrentScene({ name, source: 'desk' });
       return true;
     } catch (err) {
       showToast(describeMixerError(err));
@@ -217,6 +224,7 @@ export function useMixer(controller) {
   const deleteScene = useCallback(async (name) => {
     try {
       await controller.deleteScene(name);
+      setCurrentScene((cur) => (cur?.name === name ? null : cur));
       await refresh();
       return true;
     } catch (err) {
@@ -229,6 +237,7 @@ export function useMixer(controller) {
     state,
     loading,
     toast,
+    currentScene,
     dismissToast: () => setToast(null),
     metersRef,
     setStripParam,

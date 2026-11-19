@@ -3308,6 +3308,7 @@ const AudioProcessor = ({ goHome }) => {
           {mainTab === 'mixer' && (
             <MixerConsole
               controller={mixerController}
+              onOpenObs={() => setShowObs(true)}
               demoBanner={isTauri ? null : 'Demo mixer — live multichannel mixing runs in the desktop app'}
             />
           )}
