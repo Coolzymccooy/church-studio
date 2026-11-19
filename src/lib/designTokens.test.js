@@ -42,7 +42,7 @@ const TEXT_PAIRS = [
   ['--fp-legend', '--fp-chassis'], ['--fp-legend', '--fp-plate'], ['--fp-legend', '--fp-raised'],
   ['--fp-muted', '--fp-chassis'], ['--fp-muted', '--fp-plate'], ['--fp-muted', '--fp-raised'],
   ['--fp-key-text', '--fp-key'], ['--fp-sel-ink', '--fp-sel'],
-  ['--fp-arm', '--fp-key'], ['--fp-arm-r', '--fp-key'],
+  ['--fp-arm', '--fp-arm-bg'], ['--fp-arm-r', '--fp-arm-r-bg'],
   ['--fp-bus-line', '--fp-bus-cap'],
   ['--fp-glass-text', '--fp-glass'], ['--fp-glass-dim', '--fp-glass'],
   ['--fp-led-g', '--fp-glass'], ['--fp-led-a', '--fp-glass'], ['--fp-led-r', '--fp-glass'],

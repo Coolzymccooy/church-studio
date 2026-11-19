@@ -1,0 +1,124 @@
+/* Faceplate primitives: key, two-press key, lamp, glass, knob, fader, meter ladder, info tip.
+   Every rule is scoped to an fp- class and reads only --fp-* tokens, so nothing outside the
+   faceplate components changes. Components live in src/components/faceplate/. */
+
+.fp-sr {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* ---------- key ---------- */
+.fp-key {
+  height: 24px; min-width: 0; padding: 0 6px;
+  border-radius: var(--fp-radius-key); border: 1px solid var(--fp-key-edge);
+  background: var(--fp-key); color: var(--fp-key-text);
+  font: var(--fp-weight-medium) var(--fp-text-xs)/1 var(--fp-font-mono);
+  cursor: pointer; white-space: nowrap;
+  transition: background-color var(--fp-motion-fast), color var(--fp-motion-fast), border-color var(--fp-motion-fast);
+}
+.fp-key:hover { border-color: var(--fp-legend); }
+.fp-key:active { transform: translateY(1px); }
+.fp-key:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+.fp-key:focus-visible { outline: 2px solid var(--fp-focus); outline-offset: 2px; }
+.fp-key.fp-on-green { background: var(--fp-led-g); border-color: var(--fp-led-g); color: var(--fp-on-green); }
+.fp-key.fp-on-amber { background: var(--fp-led-a); border-color: var(--fp-led-a); color: var(--fp-ink); }
+.fp-key.fp-on-orange { background: var(--fp-orange); border-color: var(--fp-orange); color: var(--fp-ink); }
+.fp-key.fp-on-sel { background: var(--fp-sel); border-color: var(--fp-sel); color: var(--fp-sel-ink); }
+.fp-key.fp-on-red { background: var(--fp-led-r); border-color: var(--fp-led-r); color: var(--fp-on-red); }
+.fp-key.fp-arm { background: var(--fp-arm-bg); border-color: var(--fp-arm); color: var(--fp-arm); box-shadow: inset 0 0 0 1px var(--fp-arm); }
+.fp-key.fp-arm-r { background: var(--fp-arm-r-bg); border-color: var(--fp-arm-r); color: var(--fp-arm-r); box-shadow: inset 0 0 0 1px var(--fp-arm-r); }
+
+/* ---------- lamp ---------- */
+.fp-lamp {
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  font: var(--fp-weight-medium) var(--fp-text-xs)/1.2 var(--fp-font-legend); color: var(--fp-muted);
+}
+.fp-led { width: 8px; height: 8px; flex: none; border-radius: var(--fp-radius-led); background: var(--fp-led-off); }
+.fp-led-g { background: var(--fp-led-g); }
+.fp-led-a { background: var(--fp-led-a); }
+.fp-led-r { background: var(--fp-led-r); }
+
+/* ---------- glass ---------- */
+.fp-glass {
+  background: var(--fp-glass); color: var(--fp-glass-text);
+  border-radius: var(--fp-radius-strip); box-shadow: var(--fp-inset-glass);
+  font-family: var(--fp-font-mono); font-variant-numeric: tabular-nums;
+}
+.fp-glass-dim { color: var(--fp-glass-dim); }
+
+/* ---------- knob ---------- */
+.fp-kc { display: flex; flex-direction: column; align-items: center; gap: 1px; min-width: 0; }
+.fp-knob {
+  position: relative; padding: 0; border: 0; background: none; border-radius: 50%;
+  cursor: ns-resize; touch-action: none; width: 34px; height: 34px;
+}
+.fp-kc-s .fp-knob { width: 26px; height: 26px; }
+.fp-knob:focus-visible { outline: 2px solid var(--fp-focus); outline-offset: 2px; }
+.fp-knob[aria-disabled="true"] { cursor: not-allowed; }
+.fp-ring { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.fp-ring circle { fill: none; stroke-width: 3; }
+.fp-ring .fp-trk { stroke: var(--fp-ring-trk); transform: rotate(135deg); transform-origin: 20px 20px; }
+.fp-ring .fp-val { stroke: var(--fp-arc); transform-origin: 20px 20px; }
+.fp-cap { position: absolute; inset: 6px; border-radius: 50%; background: var(--fp-capc); border: 1px solid var(--fp-cap-rim); }
+.fp-kc-s .fp-cap { inset: 5px; }
+.fp-ptr { position: absolute; left: 50%; top: 2px; width: 2px; height: 40%; margin-left: -1px; border-radius: 1px; background: var(--fp-ptrc); }
+.fp-cap-trim { --fp-capc: var(--fp-cap-trim); --fp-arc: var(--fp-cap-trim); --fp-ptrc: var(--fp-ptr-light); }
+.fp-cap-hpf { --fp-capc: var(--fp-cap-hpf); --fp-arc: var(--fp-cap-hpf); --fp-ptrc: var(--fp-ptr-light); }
+.fp-cap-dyn { --fp-capc: var(--fp-cap-dyn); --fp-arc: var(--fp-cap-dyn); --fp-ptrc: var(--fp-ptr-light); }
+.fp-cap-eq { --fp-capc: var(--fp-cap-eq); --fp-arc: var(--fp-eq-arc); --fp-ptrc: var(--fp-ink); }
+.fp-cap-pan { --fp-capc: var(--fp-cap-pan); --fp-arc: var(--fp-cap-pan); --fp-ptrc: var(--fp-ink); }
+.fp-cap-send { --fp-capc: var(--fp-cap-send); --fp-arc: var(--fp-cap-send); --fp-ptrc: var(--fp-ink); }
+.fp-kc.fp-off .fp-cap, .fp-kc.fp-off .fp-val { opacity: 0.35; }
+.fp-kv { font: var(--fp-weight-regular) var(--fp-text-xs)/1.15 var(--fp-font-mono); font-variant-numeric: tabular-nums; color: var(--fp-legend); }
+.fp-kl { font: var(--fp-weight-medium) var(--fp-text-xs)/1.15 var(--fp-font-legend); color: var(--fp-muted); }
+
+/* ---------- fader ---------- */
+.fp-ft { position: relative; width: 26px; flex: none; }
+.fp-slot {
+  position: absolute; left: 50%; top: 9px; bottom: 9px; width: 4px; margin-left: -2px;
+  border-radius: var(--fp-radius-led); background: var(--fp-slot); box-shadow: 0 0 0 1px var(--fp-slot-edge);
+}
+.fp-tk { position: absolute; left: 2px; width: 6px; height: 1px; margin-bottom: -1px; background: var(--fp-muted); }
+.fp-tk.fp-z0 { width: 9px; left: 0; height: 2px; background: var(--fp-legend); }
+.fp-fcap {
+  position: absolute; left: 0; width: 26px; height: 18px; margin-bottom: -9px; pointer-events: none;
+  border-radius: var(--fp-radius-key); background: var(--fp-cc, var(--fp-ch-stone)); border: 1px solid var(--fp-cap-rim);
+}
+.fp-fcap::after {
+  content: ""; position: absolute; left: 4px; right: 4px; top: 50%; height: 2px; margin-top: -1px;
+  background: var(--fp-cline, var(--fp-ink));
+}
+.fp-fr {
+  position: absolute; left: 50%; top: 50%; height: 26px; margin: 0; opacity: 0; cursor: ns-resize;
+  transform: translate(-50%, -50%) rotate(-90deg); touch-action: none;
+}
+.fp-ft:has(.fp-fr:focus-visible) .fp-fcap { outline: 2px solid var(--fp-focus); outline-offset: 2px; }
+.fp-fdb { text-align: center; font: var(--fp-weight-medium) var(--fp-text-xs)/1 var(--fp-font-mono); font-variant-numeric: tabular-nums; color: var(--fp-legend); }
+.fp-c-amber { --fp-cc: var(--fp-ch-amber); }
+.fp-c-clay { --fp-cc: var(--fp-ch-clay); }
+.fp-c-teal { --fp-cc: var(--fp-ch-teal); }
+.fp-c-olive { --fp-cc: var(--fp-ch-olive); }
+.fp-c-sky { --fp-cc: var(--fp-ch-sky); }
+.fp-c-rose { --fp-cc: var(--fp-ch-rose); }
+.fp-c-stone { --fp-cc: var(--fp-ch-stone); }
+.fp-c-bus { --fp-cc: var(--fp-bus-cap); --fp-cline: var(--fp-bus-line); }
+
+/* ---------- meter ladder (drawn on canvas; this is its frame) ---------- */
+.fp-ladder { display: block; flex: none; border-radius: var(--fp-radius-meter); background: var(--fp-meter-bg); }
+
+/* ---------- info tip ---------- */
+.fp-tipwrap { position: relative; display: inline-flex; }
+.fp-tip {
+  display: inline-grid; place-items: center; width: 16px; height: 16px; padding: 0;
+  border-radius: 50%; border: 1px solid var(--fp-key-edge); background: transparent; color: var(--fp-muted);
+  font: var(--fp-weight-medium) var(--fp-text-xs)/1 var(--fp-font-mono); cursor: help;
+}
+.fp-tip[aria-expanded="true"] { border-color: var(--fp-legend); color: var(--fp-legend); }
+.fp-tip:focus-visible { outline: 2px solid var(--fp-focus); outline-offset: 2px; }
+.fp-tipbox {
+  position: absolute; top: calc(100% + 6px); left: 50%; z-index: 50; transform: translateX(-50%);
+  width: max-content; max-width: 240px; padding: 6px 8px;
+  border-radius: var(--fp-radius-strip); border: 1px solid var(--fp-seam);
+  background: var(--fp-raised); color: var(--fp-legend);
+  font: var(--fp-weight-regular) var(--fp-text-sm)/1.35 var(--fp-font-legend);
+}

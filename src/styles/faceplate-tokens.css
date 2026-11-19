@@ -105,6 +105,8 @@
   --fp-eq-arc: #E3D8C0;
   --fp-arm: #F2B43E;
   --fp-arm-r: #FF7A66;
+  --fp-arm-bg: #30343A;
+  --fp-arm-r-bg: #30343A;
 }
 
 /* ---------- finish: bone ---------- */
@@ -131,6 +133,8 @@
   --fp-eq-arc: #8A7F66;
   --fp-arm: #8A5A00;
   --fp-arm-r: #B0281A;
+  --fp-arm-bg: #F6E7C4;
+  --fp-arm-r-bg: #F8DDD8;
 }
 
 /* ---------- finish: auto follows the system; this block must match bone exactly ---------- */
@@ -158,6 +162,8 @@
     --fp-eq-arc: #8A7F66;
     --fp-arm: #8A5A00;
     --fp-arm-r: #B0281A;
+    --fp-arm-bg: #F6E7C4;
+    --fp-arm-r-bg: #F8DDD8;
   }
 }
 
@@ -223,6 +229,8 @@
   --color-fp-eq-arc: var(--fp-eq-arc);
   --color-fp-arm: var(--fp-arm);
   --color-fp-arm-r: var(--fp-arm-r);
+  --color-fp-arm-bg: var(--fp-arm-bg);
+  --color-fp-arm-r-bg: var(--fp-arm-r-bg);
   --font-fp-legend: var(--fp-font-legend);
   --font-fp-mono: var(--fp-font-mono);
   --text-fp-xs: var(--fp-text-xs);
