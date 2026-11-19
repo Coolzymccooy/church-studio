@@ -1,5 +1,6 @@
 import { StrictMode, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import './styles/faceplate-fonts.js';
 import './index.css';
 import App from './App.jsx';
 import LandingPage from './LandingPage.jsx';

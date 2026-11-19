@@ -1,5 +1,6 @@
 /* Tell Tailwind to generate all utilities (v4 style) */
 @import "tailwindcss";
+@import "./styles/faceplate-tokens.css";
 
 /* ---- GLOBAL RESET FOR FULL-SCREEN APP ---- */
 
