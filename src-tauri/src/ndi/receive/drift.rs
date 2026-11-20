@@ -147,6 +147,15 @@ impl DriftReader {
         }
     }
 
+    /// Forget the current position and buffer to the target again (the
+    /// caller emptied the ring). Real-time safe.
+    pub fn restart(&mut self) {
+        self.buffering = true;
+        self.current = [0.0; STEREO];
+        self.next = [0.0; STEREO];
+        self.frac = 0.0;
+    }
+
     #[allow(dead_code)] // status helper, used by the tests
     pub fn is_buffering(&self) -> bool {
         self.buffering

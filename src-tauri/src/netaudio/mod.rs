@@ -75,6 +75,10 @@ pub struct PeerInfo {
 #[derive(Debug, Default)]
 pub struct PeerStats {
     pub connected: AtomicBool,
+    /// Bumped by the receiver thread whenever the slot changes hands (a new
+    /// peer, or the peer left). The callback then drops what is left in the
+    /// ring, so one person's audio never plays under another's strip.
+    pub generation: AtomicU32,
     /// Stereo frames waiting in the ring (audio callback).
     pub fill_frames: AtomicU64,
     pub underruns: AtomicU64,
@@ -136,6 +140,7 @@ pub struct NetInputFeed<C> {
     consumer: C,
     reader: DriftReader,
     stats: Arc<PeerStats>,
+    generation: u32,
 }
 
 impl<C: Consumer<Item = f32>> NetInputFeed<C> {
@@ -146,12 +151,22 @@ impl<C: Consumer<Item = f32>> NetInputFeed<C> {
             consumer,
             reader: DriftReader::with_settings(target, high, NET_MAX_NUDGE),
             stats,
+            generation: 0,
         }
     }
 
     /// Audio thread: fill `out` with the next block of this peer (mono).
     /// Real-time safe: ring operations and relaxed atomics only.
     pub fn pull(&mut self, out: &mut [f32]) {
+        let generation = self.stats.generation.load(Ordering::Acquire);
+        if generation != self.generation {
+            // The slot changed hands: drop the ring (whole frames only; the
+            // producer pushes whole frames) and buffer again.
+            self.generation = generation;
+            let stale = self.consumer.occupied_len();
+            self.consumer.skip(stale - stale % STEREO);
+            self.reader.restart();
+        }
         let report = self.reader.read(&mut self.consumer, out);
         self.stats
             .fill_frames

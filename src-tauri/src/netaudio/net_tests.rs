@@ -265,3 +265,24 @@ fn a_sender_at_another_sample_rate_is_told_so() {
     assert!(rx.peer.rate_mismatch_packets.load(Ordering::Relaxed) > 0);
     assert_eq!(rx.peer_ring.occupied_len(), 0);
 }
+
+#[test]
+fn a_new_peer_never_hears_the_previous_peers_leftovers() {
+    let (mut producer, consumer) = HeapRb::<f32>::new(ring_capacity(RATE)).split();
+    let stats = Arc::new(PeerStats::default());
+    let mut feed = NetInputFeed::new(consumer, RATE, 20, stats.clone());
+    let mut out = vec![0.0f32; 128];
+    // The old peer leaves a partial buffer (under target: the reader waits).
+    push_tone(&mut producer, 300, 0.7);
+    feed.pull(&mut out);
+    // The slot changes hands; the new peer's audio follows.
+    stats.generation.fetch_add(1, Ordering::Release);
+    let mut heard = Vec::new();
+    for _ in 0..40 {
+        push_tone(&mut producer, 128, 0.2);
+        feed.pull(&mut out);
+        heard.extend_from_slice(&out);
+    }
+    assert!(heard.iter().all(|s| (s - 0.7).abs() > 0.1), "old audio played");
+    assert!(heard.iter().any(|s| (s - 0.2).abs() < 1e-3), "new audio never played");
+}

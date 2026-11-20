@@ -26,6 +26,13 @@ export const MAX_PASSPHRASE_CHARS = 128;
 export const MAX_TARGET_CHARS = 255;
 export const MAX_NAME_CHARS = 32;
 export const BUSES = ['main', 'stream', 'monitor'];
+/** Buffer choices in the panel, from the minimum up; 80 ms rides out typical laptop Wi-Fi stalls. */
+export const BUFFER_STEPS = [MIN_BUFFER_MS, 20, 30, 40, 60, 80, 120, MAX_BUFFER_MS];
+
+/** The buffer step after `current`: the next larger one, wrapping to the smallest. */
+export function nextBufferMs(current) {
+  return BUFFER_STEPS.find((step) => step > current) ?? BUFFER_STEPS[0];
+}
 
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/g;

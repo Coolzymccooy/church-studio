@@ -5,10 +5,11 @@ import Key from './faceplate/Key.jsx';
 import Lamp from './faceplate/Lamp.jsx';
 
 import { isTauri } from '../lib/platform';
-import { BUSES, MAX_NET_INPUTS, createNetAudioClient, passphraseProblem } from '../lib/netAudio';
+import {
+  BUSES, MAX_NET_INPUTS, createNetAudioClient, nextBufferMs, passphraseProblem,
+} from '../lib/netAudio';
 
 const STATUS_POLL_MS = 1000;
-const BUFFER_STEPS = [10, 20, 30, 40, 60, 100];
 
 const tauriInvoke = (command, args) => (
   import('@tauri-apps/api/core').then(({ invoke }) => invoke(command, args))
@@ -192,7 +193,7 @@ function NetworkAudioCard({ isLive }) {
                 Buffer <InfoTip label="Buffer">Raise it if a remote voice crackles; lower it for less delay.</InfoTip>
               </span>
               <Key disabled={busy} aria-label={`buffer: ${receive.bufferMs} ms`}
-                onClick={() => setReceive({ bufferMs: nextIn(BUFFER_STEPS, receive.bufferMs) ?? 20 })}>
+                onClick={() => setReceive({ bufferMs: nextBufferMs(receive.bufferMs) })}>
                 <span className="fp-num">{receive.bufferMs} ms</span>
               </Key>
             </div>

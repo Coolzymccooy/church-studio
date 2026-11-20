@@ -2,11 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  BUFFER_STEPS,
   DEFAULT_BUFFER_MS,
+  MAX_BUFFER_MS,
+  MIN_BUFFER_MS,
   DEFAULT_PORT,
   MAX_NET_INPUTS,
   MIN_PASSPHRASE_CHARS,
   createNetAudioClient,
+  nextBufferMs,
   netAudioFromEngineStatus,
   passphraseProblem,
   sanitizeNetAudio,
@@ -100,4 +104,22 @@ test('createNetAudioClient sends the camelCase config and reads the result', asy
   assert.equal(result.saveError, 'disk full');
   assert.equal(await client.newPassphrase(), 'mnpq-rstu-vwxy');
   assert.deepEqual(await client.localAddresses(), ['192.168.1.20', '100.75.12.100']);
+});
+
+test('buffer steps are all valid settings and the cycle always moves', () => {
+  for (const step of BUFFER_STEPS) {
+    assert.equal(sanitizeNetAudio({ receive: { bufferMs: step } }).receive.bufferMs, step);
+  }
+  assert.equal(BUFFER_STEPS[0], MIN_BUFFER_MS);
+  assert.ok(BUFFER_STEPS.includes(80));
+  let value = BUFFER_STEPS[0];
+  const seen = new Set();
+  for (let i = 0; i < BUFFER_STEPS.length; i += 1) {
+    seen.add(value);
+    value = nextBufferMs(value);
+  }
+  assert.equal(seen.size, BUFFER_STEPS.length);
+  // A saved value between steps moves to the next larger step.
+  assert.equal(nextBufferMs(25), 30);
+  assert.equal(nextBufferMs(MAX_BUFFER_MS), BUFFER_STEPS[0]);
 });

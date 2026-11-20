@@ -191,6 +191,7 @@ impl Receiver {
             Kind::Bye => {
                 if let Some(slot) = self.table.release(from, header.session) {
                     self.stats[slot].connected.store(false, Ordering::Relaxed);
+                    self.stats[slot].generation.fetch_add(1, Ordering::Release);
                 }
             }
         }
@@ -208,6 +209,7 @@ impl Receiver {
             Claim::Existing(slot) => Some(slot),
             Claim::New(slot) => {
                 self.streams[slot] = PeerStream::new(self.sample_rate);
+                self.stats[slot].generation.fetch_add(1, Ordering::Release);
                 self.stats[slot].reset_for(from.to_string());
                 log::info!("network audio peer {from} on Remote {}", slot + 1);
                 Some(slot)
@@ -319,6 +321,7 @@ impl Receiver {
         let stats = &self.stats;
         self.table.expire(now_ms, |slot| {
             stats[slot].connected.store(false, Ordering::Relaxed);
+            stats[slot].generation.fetch_add(1, Ordering::Release);
             stats[slot].set_info(PeerInfo::default());
         });
     }
