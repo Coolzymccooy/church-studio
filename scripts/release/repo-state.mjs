@@ -51,5 +51,8 @@ export async function inspectRepo({ repoRoot, tag, repo }) {
     remoteTag && `tag ${tag} already exists on origin`,
     release.code === 0 && `a GitHub release named ${tag} already exists`,
   ].filter(Boolean);
-  return Object.freeze({ sha, onMaster: /origin\/master\b/.test(onOrigin), problems });
+  // Exact ancestry check: a prefix match would accept origin/master-anything.
+  const onMaster = await run('git', ['-C', repoRoot, 'merge-base', '--is-ancestor', sha, 'refs/remotes/origin/master'],
+    { allowFail: true, quiet: true });
+  return Object.freeze({ sha, onMaster: onMaster.code === 0, problems });
 }
