@@ -3,6 +3,8 @@ mod computer_audio;
 mod computer_audio_commands;
 mod dsp;
 mod engine_stopping;
+mod export;
+mod export_commands;
 mod history;
 mod link;
 mod mixer_commands;
@@ -418,6 +420,8 @@ pub fn run() {
             recorder_commands::recorder_stop,
             recorder_commands::recorder_add_marker,
             recorder_commands::recorder_open_folder,
+            export_commands::recorder_export,
+            export_commands::editor_export,
         ])
         .setup(|app| {
             // Load the NDI runtime off the main thread; ndi_status reports
