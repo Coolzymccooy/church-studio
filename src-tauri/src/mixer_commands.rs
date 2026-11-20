@@ -6,7 +6,7 @@
 //! slug comes from `scene_slug`, which only allows `[a-z0-9_-]`, so a name
 //! can never address a path outside that directory.
 use crate::audio::EngineState;
-use crate::mixer_control::{scene_slug, MixerControl, MixerState, StoredScene};
+use crate::mixer_control::{scene_slug, BusOutputs, MixerControl, MixerState, StoredScene};
 use crate::mixer_layout::StripLayout;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -48,16 +48,16 @@ impl SceneLoadedHook {
     }
 }
 
-/// (strip layout, running). One hardware strip and nothing else when
-/// stopped.
-fn engine_info(engine: &EngineState) -> (StripLayout, bool) {
-    let stopped = (StripLayout::new(1, false, 0), false);
+/// (strip layout, running, bus output devices). One hardware strip, no
+/// outputs and nothing else when stopped.
+fn engine_info(engine: &EngineState) -> (StripLayout, bool, BusOutputs) {
+    let stopped = || (StripLayout::new(1, false, 0), false, BusOutputs::default());
     match engine.lock() {
         Ok(guard) => match guard.as_ref() {
-            Some(running) => (running.strip_layout(), true),
-            None => stopped,
+            Some(running) => (running.strip_layout(), true, running.bus_outputs()),
+            None => stopped(),
         },
-        Err(_) => stopped,
+        Err(_) => stopped(),
     }
 }
 
@@ -124,8 +124,8 @@ fn scenes_or_empty(app: &AppHandle) -> Vec<String> {
 }
 
 fn build_state(app: &AppHandle, mixer: &MixerControl, engine: &EngineState) -> MixerState {
-    let (layout, running) = engine_info(engine);
-    mixer.snapshot_layout(layout, running, scenes_or_empty(app))
+    let (layout, running, outputs) = engine_info(engine);
+    mixer.snapshot_outputs(layout, running, scenes_or_empty(app), &outputs)
 }
 
 #[tauri::command]
