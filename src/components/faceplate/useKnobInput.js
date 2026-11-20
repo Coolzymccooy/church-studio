@@ -32,9 +32,17 @@ export default function useKnobInput({ value, range, disabled, onSet }) {
   const liveTimer = useRef(null);
   const [live, setLive] = useState(false);
 
+  // While a gesture runs the knob is the source of the value: a render can still carry a value it
+  // sent a moment ago, and re-reading the position from that would make the knob jump back.
+  const turning = () => drag.current !== null || liveTimer.current !== null;
+  const resync = () => {
+    const { value: v, range: r } = latest.current;
+    if (v !== pos.current.value) pos.current = { value: v, travel: knobTravelFor(v, r) };
+  };
+
   useEffect(() => {
     latest.current = { value, range, disabled, onSet };
-    if (value !== pos.current.value) pos.current = { value, travel: knobTravelFor(value, range) };
+    if (!turning()) resync();
   });
 
   const moveTo = useCallback((travel) => {
@@ -46,8 +54,14 @@ export default function useKnobInput({ value, range, disabled, onSet }) {
 
   const showLive = useCallback((hold) => {
     clearTimeout(liveTimer.current);
+    liveTimer.current = null;
     setLive(true);
-    if (hold) liveTimer.current = setTimeout(() => setLive(false), LIVE_HOLD_MS);
+    if (hold) {
+      liveTimer.current = setTimeout(() => {
+        liveTimer.current = null;
+        setLive(false);
+      }, LIVE_HOLD_MS);
+    }
   }, []);
 
   useEffect(() => {
@@ -64,11 +78,11 @@ export default function useKnobInput({ value, range, disabled, onSet }) {
         deltaX: e.deltaX, deltaY: e.deltaY, deltaMode: e.deltaMode,
         inverted: Boolean(e.webkitDirectionInvertedFromDevice), shiftKey: e.shiftKey, ctrlKey: e.ctrlKey,
       };
-      const travel = knobWheelStep(pos.current.travel, wheel, latest.current.range, isFine(e));
-      if (travel === null) return;
+      if (knobWheelStep(0, wheel, latest.current.range) === null) return;
+      if (!turning()) resync();
       e.preventDefault();
       showLive(true);
-      moveTo(travel);
+      moveTo(knobWheelStep(pos.current.travel, wheel, latest.current.range, isFine(e)));
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
@@ -79,9 +93,9 @@ export default function useKnobInput({ value, range, disabled, onSet }) {
   const onPointerDown = (e) => {
     if (disabled || e.button !== 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    if (value !== pos.current.value) pos.current = { value, travel: knobTravelFor(value, range) };
-    drag.current = { x: e.clientX, y: e.clientY };
     showLive(false);
+    resync();
+    drag.current = { x: e.clientX, y: e.clientY };
   };
   const onPointerMove = (e) => {
     if (!drag.current) return;

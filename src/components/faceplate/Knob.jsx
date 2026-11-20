@@ -32,7 +32,11 @@ export default function Knob({
   const set = (next) => {
     if (!disabled && next !== null && next !== value) onChange(next);
   };
-  const { elRef, live, handlers } = useKnobInput({ value, range, disabled, onSet: set });
+  // The hook tracks what it last sent, so it skips the comparison with a possibly stale `value`.
+  const send = (next) => {
+    if (!disabled) onChange(next);
+  };
+  const { elRef, live, handlers } = useKnobInput({ value, range, disabled, onSet: send });
   const view = knobView(value, range);
   const text = valueText ?? String(value);
   const cap = JOBS.has(job) ? job : 'send';
