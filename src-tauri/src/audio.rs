@@ -325,6 +325,10 @@ impl AudioEngine {
         }
 
         let (in_cfg, out_cfgs) = negotiate_stream_configs(&in_dev, &output_devices)?;
+        let in_cfg = match in_dev.supported_input_configs() {
+            Ok(ranges) => widest_input_config(&ranges.collect::<Vec<_>>(), in_cfg),
+            Err(_) => in_cfg,
+        };
 
         let sr = in_cfg.sample_rate();
         let out_sr = out_cfgs[0].sample_rate();
@@ -1037,6 +1041,28 @@ fn negotiate_stream_configs(
     )
 }
 
+/// `chosen`, widened to the most input channels the device offers at the same
+/// rate and sample format. Some devices (a macOS aggregate device of two USB
+/// mics) report a 1-channel default config while supporting every channel,
+/// and each channel must reach its own strip.
+fn widest_input_config(
+    ranges: &[SupportedStreamConfigRange],
+    chosen: SupportedStreamConfig,
+) -> SupportedStreamConfig {
+    let rate = chosen.sample_rate();
+    ranges
+        .iter()
+        .filter(|r| {
+            r.sample_format() == chosen.sample_format()
+                && rate >= r.min_sample_rate()
+                && rate <= r.max_sample_rate()
+                && r.channels() > chosen.channels()
+        })
+        .max_by_key(|r| r.channels())
+        .map(|r| r.with_sample_rate(rate))
+        .unwrap_or(chosen)
+}
+
 fn find_config_for_rate(
     ranges: &[SupportedStreamConfigRange],
     rate: u32,
@@ -1124,5 +1150,43 @@ mod device_probe {
             }
             assert!(!devices.is_empty(), "no {label} devices found");
         }
+    }
+}
+
+#[cfg(test)]
+mod input_channel_tests {
+    use super::widest_input_config;
+    use cpal::{SampleFormat, SupportedBufferSize, SupportedStreamConfig, SupportedStreamConfigRange};
+
+    fn range(ch: u16, min: u32, max: u32, fmt: SampleFormat) -> SupportedStreamConfigRange {
+        SupportedStreamConfigRange::new(ch, min, max, SupportedBufferSize::Unknown, fmt)
+    }
+
+    #[test]
+    fn a_one_channel_default_opens_every_channel_at_that_rate() {
+        // What a macOS aggregate of two USB mics reports.
+        let chosen = SupportedStreamConfig::new(1, 48_000, SupportedBufferSize::Unknown, SampleFormat::F32);
+        let ranges = [
+            range(2, 8_000, 8_000, SampleFormat::F32),
+            range(2, 44_100, 44_100, SampleFormat::F32),
+            range(2, 48_000, 48_000, SampleFormat::F32),
+        ];
+        let cfg = widest_input_config(&ranges, chosen);
+        assert_eq!((cfg.channels(), cfg.sample_rate()), (2, 48_000));
+    }
+
+    #[test]
+    fn rate_and_format_never_change() {
+        let chosen = SupportedStreamConfig::new(2, 48_000, SupportedBufferSize::Unknown, SampleFormat::F32);
+        let ranges = [
+            range(8, 44_100, 44_100, SampleFormat::F32), // other rate
+            range(16, 48_000, 48_000, SampleFormat::I16), // other format
+            range(1, 48_000, 48_000, SampleFormat::F32), // fewer channels
+        ];
+        let cfg = widest_input_config(&ranges, chosen.clone());
+        assert_eq!(cfg, chosen);
+        let wide = [range(18, 32_000, 96_000, SampleFormat::F32)];
+        let cfg = widest_input_config(&wide, chosen);
+        assert_eq!((cfg.channels(), cfg.sample_rate(), cfg.sample_format()), (18, 48_000, SampleFormat::F32));
     }
 }
