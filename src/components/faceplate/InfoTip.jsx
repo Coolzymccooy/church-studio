@@ -18,7 +18,7 @@ export default function InfoTip({ label, children }) {
   useLayoutEffect(() => {
     const el = box.current;
     if (!open || !el || !wrap.current) return;
-    const { top, left } = tipPosition(wrap.current.getBoundingClientRect(), window.innerWidth, el.offsetWidth);
+    const { top, left } = tipPosition(wrap.current.getBoundingClientRect(), window.innerWidth, el.offsetWidth, el.offsetHeight, window.innerHeight);
     Object.assign(el.style, { position: 'fixed', top: `${top}px`, left: `${left}px`, transform: 'none' });
   }, [open]);
 

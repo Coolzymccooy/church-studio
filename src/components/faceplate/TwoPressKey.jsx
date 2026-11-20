@@ -41,7 +41,7 @@ function KeyTipBox({ id, text, wrapRef }) {
   useLayoutEffect(() => {
     const el = box.current;
     if (!el || !wrapRef.current) return;
-    const { top, left } = tipPosition(wrapRef.current.getBoundingClientRect(), window.innerWidth, el.offsetWidth);
+    const { top, left } = tipPosition(wrapRef.current.getBoundingClientRect(), window.innerWidth, el.offsetWidth, el.offsetHeight, window.innerHeight);
     Object.assign(el.style, { position: 'fixed', top: `${top}px`, left: `${left}px`, transform: 'none' });
   }, [wrapRef]);
   return <span ref={box} id={id} role="tooltip" className="fp-tipbox">{text}</span>;
