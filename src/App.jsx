@@ -41,6 +41,7 @@ import {
   resolveBroadcastLabel,
   resolveDeviceLabel,
 } from './lib/audioRouting';
+import { SNAPSHOTS_KEY, nextSnapshotId, parseSnapshots, serializeSnapshots } from './lib/voiceSnapshots.js';
 import {
   captureNativeNoiseProfile,
   describeNativeEngineError,
@@ -308,8 +309,10 @@ const AudioProcessor = ({ goHome }) => {
   // De-esser gain reduction for meter
   const [desserGrDb, setDesserGrDb] = useState(0);
   const [abMode, setAbMode] = useState('B');
-  const [snapshots, setSnapshots] = useState([]);
-  const snapshotCounterRef = useRef(1);
+  const [snapshots, setSnapshots] = useState(() => {
+    try { return parseSnapshots(window.localStorage.getItem(SNAPSHOTS_KEY)); } catch { return []; }
+  });
+  const snapshotCounterRef = useRef(nextSnapshotId(snapshots));
   const [noiseProfiles, setNoiseProfiles] = useState(() => {
     try {
       const saved = window.localStorage.getItem('tiwaton:noiseProfiles');
@@ -366,6 +369,11 @@ const AudioProcessor = ({ goHome }) => {
     noiseProfilesRef.current = noiseProfiles;
     try { window.localStorage.setItem('tiwaton:noiseProfiles', JSON.stringify(noiseProfiles)); } catch { /* Ignore local persistence failures. */ }
   }, [noiseProfiles]);
+
+  // Voice snapshots are the operator's saved setups: they outlive the app and "reset".
+  useEffect(() => {
+    try { window.localStorage.setItem(SNAPSHOTS_KEY, serializeSnapshots(snapshots)); } catch { /* Ignore local persistence failures. */ }
+  }, [snapshots]);
 
   useEffect(() => {
     selectedNoiseProfileIdRef.current = selectedNoiseProfileId;
@@ -659,8 +667,6 @@ const AudioProcessor = ({ goHome }) => {
     setLufsM(null); setLufsST(null); setLufsI(null);
     setLoudnessTarget(-14);
     setAbMode('B');
-    setSnapshots([]);
-    snapshotCounterRef.current = 1;
     setNoiseProfiles([]);
     setSelectedNoiseProfileId('');
     noiseProfileCounterRef.current = 1;
@@ -3104,11 +3110,13 @@ const AudioProcessor = ({ goHome }) => {
   };
 
   const handleSnapshotApply = (snapshot) => {
-    setFeatures({ ...snapshot.features });
+    setFeatures((prev) => ({ ...prev, ...snapshot.features }));
     setSpeakerPreset(snapshot.speakerPreset);
-    setSelectedNoiseProfileId(snapshot.selectedNoiseProfileId || '');
-    setNoiseFloorThreshold(snapshot.noiseFloorThreshold);
-    setInputGainValue(snapshot.inputGainValue);
+    // A noise profile cleared by reset can't be recalled; fall back to none.
+    const profileId = snapshot.selectedNoiseProfileId || '';
+    setSelectedNoiseProfileId(noiseProfiles.some((np) => np.id === profileId) ? profileId : '');
+    if (snapshot.noiseFloorThreshold != null) setNoiseFloorThreshold(snapshot.noiseFloorThreshold);
+    if (snapshot.inputGainValue != null) setInputGainValue(snapshot.inputGainValue);
   };
 
   const handleNoiseProfileCapture = async () => {
