@@ -3,7 +3,7 @@
 //!
 //! The token is 32 random bytes as lowercase hex. It is never logged: the
 //! `Debug` impl redacts it.
-use crate::link::rules::{default_rules, validate_rules, Rule};
+use crate::link::rules::{default_rules, validate_rules, Rule, MAX_RULES, RULES_ADDED_IN_V2};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fs;
@@ -11,6 +11,8 @@ use std::path::Path;
 
 pub const CONFIG_FILE: &str = "link.json";
 pub const TOKEN_BYTES: usize = 32;
+/// Bumped when new default rules ship; older saved configs gain them once.
+pub const RULES_VERSION: u32 = 2;
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -21,6 +23,29 @@ pub struct LinkConfig {
     pub enabled: bool,
     #[serde(default = "default_rules")]
     pub rules: Vec<Rule>,
+    /// Absent in configs saved before versioning, which read as version 1.
+    #[serde(default = "first_rules_version")]
+    pub rules_version: u32,
+}
+
+fn first_rules_version() -> u32 {
+    1
+}
+
+/// Append the defaults introduced after `version` that the saved list doesn't already have
+/// (by id), so an operator's own edits and deletions after the upgrade are respected.
+fn upgrade_rules(mut rules: Vec<Rule>, version: u32) -> (Vec<Rule>, bool) {
+    if version >= RULES_VERSION {
+        return (rules, false);
+    }
+    for rule in default_rules() {
+        let new_in_v2 = RULES_ADDED_IN_V2.contains(&rule.id.as_str());
+        let missing = !rules.iter().any(|r| r.id == rule.id);
+        if new_in_v2 && missing && rules.len() < MAX_RULES {
+            rules.push(rule);
+        }
+    }
+    (rules, true)
 }
 
 fn default_true() -> bool {
@@ -44,6 +69,7 @@ impl LinkConfig {
             token: generate_token()?,
             enabled: true,
             rules: default_rules(),
+            rules_version: RULES_VERSION,
         })
     }
 }
@@ -92,18 +118,26 @@ pub fn parse_config(text: &str) -> Result<(LinkConfig, bool), String> {
         generate_token()?
     };
     let rules = match validate_rules(&parsed.rules) {
-        Ok(rules) => rules,
+        Ok(rules) => {
+            let (rules, upgraded) = upgrade_rules(rules, parsed.rules_version);
+            changed |= upgraded;
+            rules
+        }
         Err(e) => {
             log::warn!("link: stored rules are invalid ({e}); using the defaults");
             changed = true;
             default_rules()
         }
     };
+    if parsed.rules_version != RULES_VERSION {
+        changed = true;
+    }
     Ok((
         LinkConfig {
             token,
             enabled: parsed.enabled,
             rules,
+            rules_version: RULES_VERSION,
         },
         changed,
     ))
@@ -168,6 +202,48 @@ pub fn save(path: &Path, config: &LinkConfig) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn saved_rules_gain_new_defaults_once() {
+        // A link.json saved before the scripture item rules existed (no rulesVersion).
+        let token = "a".repeat(TOKEN_BYTES * 2);
+        let old = format!(
+            r#"{{"token":"{token}","enabled":true,"rules":[{{"id":"lyrics-worship","when":{{"event":"slide.changed","contentKind":"lyrics"}},"then":{{"loadScene":"Worship"}}}}]}}"#
+        );
+        let (cfg, changed) = parse_config(&old).unwrap();
+        assert!(changed, "the upgrade is written back");
+        let ids: Vec<&str> = cfg.rules.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(ids, ["lyrics-worship", "bible-sermon", "scripture-item-sermon"]);
+        assert_eq!(cfg.rules_version, RULES_VERSION);
+
+        // Once upgraded, a rule the operator deletes stays deleted.
+        let mut trimmed = cfg.clone();
+        trimmed.rules.retain(|r| r.id != "bible-sermon");
+        let saved = serde_json::to_string(&trimmed).unwrap();
+        let (again, changed) = parse_config(&saved).unwrap();
+        assert!(!changed);
+        assert!(again.rules.iter().all(|r| r.id != "bible-sermon"));
+    }
+
+    #[test]
+    fn upgrade_does_not_duplicate_rules_the_operator_already_has() {
+        let token = "b".repeat(TOKEN_BYTES * 2);
+        let old = format!(
+            r#"{{"token":"{token}","rules":[{{"id":"bible-sermon","enabled":false,"when":{{"event":"slide.changed","itemType":"BIBLE"}},"then":{{"loadScene":"Talk"}}}}]}}"#
+        );
+        let (cfg, _) = parse_config(&old).unwrap();
+        let bible: Vec<_> = cfg.rules.iter().filter(|r| r.id == "bible-sermon").collect();
+        assert_eq!(bible.len(), 1);
+        assert!(!bible[0].enabled, "the operator's own version is kept");
+        assert_eq!(bible[0].then.load_scene, "Talk");
+    }
+
+    #[test]
+    fn a_fresh_install_starts_on_the_current_rules_version() {
+        let cfg = LinkConfig::fresh().unwrap();
+        assert_eq!(cfg.rules_version, RULES_VERSION);
+        assert!(cfg.rules.iter().any(|r| r.id == "bible-sermon"));
+    }
     use super::*;
 
     #[test]

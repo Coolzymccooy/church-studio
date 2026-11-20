@@ -60,6 +60,7 @@ impl LinkRuntime {
                 token: String::new(),
                 enabled: false,
                 rules: rules::default_rules(),
+                rules_version: config::RULES_VERSION,
             })
         });
         let enabled = config.enabled;
