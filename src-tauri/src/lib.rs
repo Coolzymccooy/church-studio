@@ -1,7 +1,4 @@
 mod audio;
-mod remote_mixer;
-#[cfg(test)]
-mod remote_mixer_tests;
 mod computer_audio;
 mod computer_audio_commands;
 mod dsp;
@@ -31,6 +28,9 @@ mod ndi_commands;
 mod ndi_input_commands;
 mod net_audio_commands;
 mod routing;
+mod remote_mixer;
+#[cfg(test)]
+mod remote_mixer_tests;
 
 use audio::{DeviceSelection, EngineState, RunningEngine};
 use mixer_control::MixerControl;
@@ -413,12 +413,6 @@ pub fn run() {
             gate_commands::learn_mic_fingerprint,
             engine_status,
             mixer_commands::mixer_state,
-            remote_mixer::desktop::remote_mixer_start,
-            remote_mixer::desktop::remote_mixer_stop,
-            remote_mixer::desktop::remote_mixer_status,
-            remote_mixer::desktop::remote_mixer_pair_code,
-            remote_mixer::desktop::remote_mixer_cancel_code,
-            remote_mixer::desktop::remote_mixer_revoke,
             mixer_commands::mixer_set_strip_param,
             mixer_commands::mixer_set_strip_bool,
             mixer_commands::mixer_rename_strip,
@@ -435,6 +429,12 @@ pub fn run() {
             link::commands::link_activity,
             link::commands::link_undo,
             link::commands::link_set_automation_paused,
+            remote_mixer::desktop::remote_mixer_start,
+            remote_mixer::desktop::remote_mixer_stop,
+            remote_mixer::desktop::remote_mixer_status,
+            remote_mixer::desktop::remote_mixer_pair_code,
+            remote_mixer::desktop::remote_mixer_cancel_code,
+            remote_mixer::desktop::remote_mixer_revoke,
             obs::commands::obs_get_config,
             obs::commands::obs_set_config,
             obs::commands::obs_status,
