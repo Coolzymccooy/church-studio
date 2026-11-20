@@ -151,9 +151,14 @@ function verifyMacLibrary(file) {
 function verifyWindowsLibrary(file) {
   const script = '$s = Get-AuthenticodeSignature -LiteralPath $env:NDI_DLL; '
     + '"$($s.Status)|$($s.SignerCertificate.Subject)|$((Get-Item -LiteralPath $env:NDI_DLL).VersionInfo.FileVersion)"';
+  // Windows PowerShell 5.1 started from PowerShell 7 (as in GitHub Actions)
+  // inherits a PSModulePath it cannot load its own modules from; let it use its default.
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => key.toLowerCase() !== 'psmodulepath'),
+  );
   const [status, subject, fileVersion] = run(
     'powershell', ['-NoProfile', '-NonInteractive', '-Command', script],
-    { env: { ...process.env, NDI_DLL: file } },
+    { env: { ...env, NDI_DLL: file } },
   ).trim().split('|');
   if (status !== 'Valid') throw new Error(`NDI DLL signature is ${status}`);
   if (!signedByNdiOnWindows(subject)) throw new Error(`NDI DLL is signed by someone else: ${subject}`);
