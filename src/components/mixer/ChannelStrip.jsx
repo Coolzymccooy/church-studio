@@ -133,6 +133,8 @@ export default function ChannelStrip({ strip, metersRef, onSetParam, onSetBool, 
         max={k.max}
         step={k.step}
         bipolar={k.bipolar}
+        detent={k.detent}
+        taper={k.taper}
         defaultValue={k.defaultValue}
         value={value}
         valueText={k.fmt(value)}

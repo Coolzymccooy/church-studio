@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   ARM_TIMEOUT_MS, IDLE, pressTwoPress, isArmed,
-  knobFraction, knobView, knobKeyStep, knobDragValue, clampToStep,
+  knobFraction, knobView, knobKeyStep, knobResetValue, clampToStep, LOG_TAPER,
 } from './faceplateControls.js';
 import {
   METER_MIN_DB, METER_MAX_DB, meterFraction, meterZone, stepMeter, initialMeter, ZONE_AMBER_DB, ZONE_RED_DB,
@@ -75,11 +75,24 @@ test('keys step the knob; shift steps ten times; Home and End jump', () => {
   assert.equal(knobKeyStep(3, GAIN, 'Tab'), null);
 });
 
-test('dragging up 150 px sweeps the full range; values snap to the step', () => {
-  assert.equal(knobDragValue(-12, -150, GAIN), 12);
-  assert.equal(knobDragValue(0, 30, GAIN), -5);
+test('values snap to the step and the range', () => {
   assert.equal(clampToStep(0.26, GAIN), 0.5);
   assert.equal(clampToStep(-40, GAIN), -12);
+});
+
+test('reset returns to the default, else the detent, else the bottom stop', () => {
+  assert.equal(knobResetValue(GAIN, 3), 3);
+  assert.equal(knobResetValue({ ...GAIN, detent: 0 }), 0);
+  assert.equal(knobResetValue(GAIN), -12);
+  assert.equal(knobResetValue(GAIN, 99), 12);
+});
+
+test('a log taper puts each octave on an equal turn', () => {
+  const HZ = { min: 20, max: 320, step: 5, taper: LOG_TAPER };
+  assert.equal(knobFraction(20, HZ), 0);
+  assert.equal(knobFraction(80, HZ), 0.5);
+  assert.equal(knobFraction(320, HZ), 1);
+  assert.equal(knobFraction(1, HZ), 0);
 });
 
 // ---------- meter ----------

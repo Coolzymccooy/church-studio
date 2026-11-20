@@ -121,7 +121,7 @@ labels with wide tracking.
 | Two-press key | Engine stop, scene load, scene delete, stream, record stop, new token, reset. The first press arms the key (`arm` edge and legend); a second press within `arm-timeout` (3s) acts; otherwise it disarms |
 | Lamp | 8px square LED plus a word. Off is `led-off`, never hidden |
 | Glass | Dark recessed window for anything measured or live |
-| Knob | Cap coloured by job, arc ring, value under it in mono 11px |
+| Knob | Raised cap: dark knurled skirt (`knob-skirt`, `knob-knurl`), face coloured by job, pointer through both, arc ring. Depth from flat layers (offset shadow, light bevel above, dark below), never gradients. Value under it in mono 11px, lit as glass while turning. Drag (200px for the range), wheel or trackpad, Shift or Alt for fine; detents at 0 dB and centre |
 | Fader | 26px cap in the channel colour with an ink line; the scale is printed on the plate |
 | Meter ladder | Green, amber and red zones with segment gaps and a peak hold |
 | Info tip | Round 16px ⓘ key. Hover or focus shows the tip; click pins it. Carries every explanation |
