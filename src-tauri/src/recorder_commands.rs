@@ -6,7 +6,8 @@ use crate::audio::EngineState;
 use crate::mixer_control::MixerControl;
 use crate::recorder::config::{self, RecorderConfig, DEFAULT_FOLDER_NAME};
 use crate::recorder::names::unique_name;
-use crate::recorder::plan::{build_tracks, clamp_offset, stamp_for};
+use crate::mixer_layout::StripLayout;
+use crate::recorder::plan::{build_tracks, clamp_offset, stamp_for, StripSources};
 use crate::recorder::session::Marker;
 use crate::recorder::status::{RecorderStatus, RecordingSummary};
 use crate::recorder::writer::{self, StatusFn, WriterEvent, WriterPlan};
@@ -187,9 +188,9 @@ fn status_emitter(
 }
 
 /// Strip display names, as the mixer shows them.
-fn strip_names(mixer: &MixerControl, input_channels: u32, ndi_inputs: u32) -> Vec<String> {
+fn strip_names(mixer: &MixerControl, layout: StripLayout) -> Vec<String> {
     mixer
-        .snapshot_with_ndi(input_channels, ndi_inputs, true, Vec::new())
+        .snapshot_layout(layout, true, Vec::new())
         .strips
         .into_iter()
         .map(|strip| strip.name)
@@ -237,9 +238,18 @@ pub async fn recorder_start(
             return Err("A recording is already running".to_string());
         }
         let ndi_strips: Vec<usize> = running.ndi_inputs.iter().map(|input| input.strip).collect();
-        let names = strip_names(mixer.inner(), running.input_channels, ndi_strips.len() as u32);
+        let computer_strips: Vec<usize> = running
+            .computer_audio
+            .iter()
+            .flat_map(|audio| [audio.strips.0, audio.strips.1])
+            .collect();
+        let names = strip_names(mixer.inner(), running.strip_layout());
         let layout = running.recorder.layout();
-        let tracks = build_tracks(layout, &names, &ndi_strips, &config);
+        let sources = StripSources {
+            ndi: &ndi_strips,
+            computer: &computer_strips,
+        };
+        let tracks = build_tracks(layout, &names, sources, &config);
         (tracks, layout, running.recorder.sample_rate(), running.recorder.shared())
     };
 

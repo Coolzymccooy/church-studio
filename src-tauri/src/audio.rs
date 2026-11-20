@@ -20,6 +20,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
+use crate::computer_audio::{self, ComputerAudioCapture, ComputerAudioHandle, OwnOutputs};
 use crate::dsp::mixer::{BUS_MAIN, BUS_MONITOR, BUS_STREAM};
 use crate::dsp::noise::compute_noise_profile;
 use crate::dsp::{AudioDeviceInfo, DspChain, DspParams, MetersPayload};
@@ -74,6 +75,11 @@ pub struct AudioEngine {
     _ndi_receivers: NdiReceivers,
     ndi_inputs: Vec<NdiInputHandle>,
     ndi_inputs_applied: NdiInputs,
+    /// Computer-audio capture; on macOS dropping it removes the tap and
+    /// unmutes the tapped apps.
+    _computer_capture: Option<ComputerAudioCapture>,
+    computer_audio: Option<ComputerAudioHandle>,
+    computer_audio_applied: bool,
     /// Control side of the record ring; handed to `RunningEngine`.
     record_port: Option<RecordPort>,
     pub sample_rate: u32,
@@ -117,6 +123,11 @@ pub struct RunningEngine {
     pub ndi_inputs: Vec<NdiInputHandle>,
     /// The NDI input settings this engine was started with.
     pub ndi_inputs_applied: NdiInputs,
+    /// Computer audio, when it runs: the pair of strips right after the
+    /// hardware ones.
+    pub computer_audio: Option<ComputerAudioHandle>,
+    /// Whether computer audio was on when this engine started.
+    pub computer_audio_applied: bool,
     /// Multitrack recording; stopped (and finalized) before the engine.
     pub recorder: EngineRecorder,
 }
@@ -140,6 +151,8 @@ struct EngineInfo {
     ndi_applied: NdiOutputs,
     ndi_inputs: Vec<NdiInputHandle>,
     ndi_inputs_applied: NdiInputs,
+    computer_audio: Option<ComputerAudioHandle>,
+    computer_audio_applied: bool,
 }
 
 /// State shared between the audio callback and the control (Tauri) thread.
@@ -248,9 +261,12 @@ impl AudioEngine {
             ndi_applied: self.ndi_applied.clone(),
             ndi_inputs: self.ndi_inputs.clone(),
             ndi_inputs_applied: self.ndi_inputs_applied.clone(),
+            computer_audio: self.computer_audio.clone(),
+            computer_audio_applied: self.computer_audio_applied,
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn start(
         app: AppHandle,
         params: Arc<DspParams>,
@@ -258,6 +274,7 @@ impl AudioEngine {
         mixer: MixerLink,
         devices: DeviceSelection,
         ndi: NdiEngineConfig,
+        computer_audio_on: bool,
     ) -> Result<Self, String> {
         let host = cpal::default_host();
 
@@ -397,14 +414,28 @@ impl AudioEngine {
                 .cloned()
                 .collect(),
         };
-        let hardware_strips = StripLayout::new(in_channels, 0).hardware;
+        // Computer audio: a stereo pair right after the hardware strips. Its
+        // ring and feed exist now; the capture starts once the outputs run.
+        let computer_on = computer_audio_on && StripLayout::computer_fits(in_channels);
+        if computer_audio_on && !computer_on {
+            log::warn!("computer audio not started: no room for its two strips after {in_channels} input channels");
+        }
+        let (pending_computer, computer_feed) =
+            match StripLayout::new(in_channels, computer_on, 0).computer_strips() {
+                Some(strips) => {
+                    let (pending, feed) = computer_audio::prepare(sr, strips);
+                    (Some(pending), Some(feed))
+                }
+                None => (None, None),
+            };
+        let first_ndi_strip = StripLayout::new(in_channels, computer_on, 0).first_ndi_strip();
         let ndi_in = crate::ndi::receive::start_receivers(
             &receivable,
             sr,
-            hardware_strips,
-            StripLayout::ndi_room(in_channels),
+            first_ndi_strip,
+            StripLayout::ndi_room(in_channels, computer_on),
         );
-        let layout = StripLayout::new(in_channels, ndi_in.feeds.len());
+        let layout = StripLayout::new(in_channels, computer_on, ndi_in.feeds.len());
         // Record what feeds each strip before the stream plays: a strip whose
         // feed changed since the last start is reset to the new-strip
         // defaults (fader off) before any audio passes through it. NDI strips
@@ -414,7 +445,11 @@ impl AudioEngine {
             .iter()
             .map(|input| (input.strip, input.source.clone(), input.label.clone()))
             .collect();
-        let feeds = crate::mixer_control::engine_strip_feeds(layout.hardware, &ndi_strips);
+        let feeds = crate::mixer_control::engine_strip_feeds(
+            layout.hardware,
+            layout.computer_strips().map(|(left, _)| left),
+            &ndi_strips,
+        );
         let reset = mixer.assign_strip_feeds(&feeds);
         if !reset.is_empty() {
             log::info!("mixer strips {reset:?} have a new source; reset to defaults");
@@ -448,6 +483,7 @@ impl AudioEngine {
             meter_slots.clone(),
             routes,
             ndi_routes,
+            computer_feed,
             ndi_in.feeds,
             record_tap,
             meters_tx,
@@ -531,6 +567,27 @@ impl AudioEngine {
             out_streams.push(out_stream);
         }
 
+        // Start computer audio now that this engine plays its outputs (see
+        // `computer_audio::PendingCapture`). A failure stops the start: the
+        // operator turned it on and must hear why it is silent.
+        let (computer_capture, computer_handle) = match pending_computer {
+            Some(pending) => {
+                let own_names: Vec<String> = [
+                    Some(monitor_output_name.clone()),
+                    broadcast_output_name.clone(),
+                    main_output_name.clone(),
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
+                let (capture, handle) = pending.start(&OwnOutputs {
+                    device_names: &own_names,
+                })?;
+                (Some(capture), Some(handle))
+            }
+            None => (None, None),
+        };
+
         in_stream.play().map_err(|e| e.to_string())?;
 
         spawn_meters_thread(app, shared, meters_rx, meter_slots);
@@ -543,6 +600,9 @@ impl AudioEngine {
             _ndi_receivers: NdiReceivers(ndi_in.receivers),
             ndi_inputs: ndi_in.handles,
             ndi_inputs_applied: ndi.inputs,
+            _computer_capture: computer_capture,
+            computer_audio: computer_handle,
+            computer_audio_applied: computer_audio_on,
             record_port: Some(record_port),
             sample_rate: sr,
             buffer_frames: buf_frames,
@@ -673,6 +733,7 @@ impl RunningEngine {
         mixer: MixerLink,
         devices: DeviceSelection,
         ndi: NdiEngineConfig,
+        computer_audio_on: bool,
     ) -> Result<Self, String> {
         let (ready_tx, ready_rx) =
             mpsc::sync_channel::<Result<(EngineInfo, RecordPort), String>>(1);
@@ -687,6 +748,7 @@ impl RunningEngine {
             mixer,
             devices,
             ndi,
+            computer_audio_on,
         ) {
             Ok(mut engine) => {
                 let info = engine.info();
@@ -731,6 +793,8 @@ impl RunningEngine {
             ndi_applied: info.ndi_applied,
             ndi_inputs: info.ndi_inputs,
             ndi_inputs_applied: info.ndi_inputs_applied,
+            computer_audio: info.computer_audio,
+            computer_audio_applied: info.computer_audio_applied,
             recorder: EngineRecorder::new(record_port),
         })
     }
@@ -839,9 +903,14 @@ impl RunningEngine {
         self.shared.dropped_output_samples.load(Ordering::Relaxed)
     }
 
-    /// Mixer strips: input channels, then NDI inputs.
+    /// Mixer strips: input channels, the computer-audio pair, then NDI
+    /// inputs.
     pub fn strip_layout(&self) -> StripLayout {
-        StripLayout::new(self.input_channels as usize, self.ndi_inputs.len())
+        StripLayout::new(
+            self.input_channels as usize,
+            self.computer_audio.is_some(),
+            self.ndi_inputs.len(),
+        )
     }
 
     pub fn ndi_dropped_samples(&self) -> u64 {

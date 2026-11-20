@@ -47,7 +47,7 @@ const TEXT_PAIRS = [
   ['--fp-glass-text', '--fp-glass'], ['--fp-glass-dim', '--fp-glass'],
   ['--fp-led-g', '--fp-glass'], ['--fp-led-a', '--fp-glass'], ['--fp-led-r', '--fp-glass'],
   ['--fp-ink', '--fp-led-a'], ['--fp-ink', '--fp-orange'],
-  ['--fp-on-green', '--fp-led-g'], ['--fp-on-red', '--fp-led-r'],
+  ['--fp-on-green', '--fp-led-g'], ['--fp-on-green', '--fp-lit-g'], ['--fp-on-red', '--fp-led-r'],
   ['--fp-ink', '--fp-ch-amber'], ['--fp-ink', '--fp-ch-clay'], ['--fp-ink', '--fp-ch-teal'],
   ['--fp-ink', '--fp-ch-olive'], ['--fp-ink', '--fp-ch-sky'], ['--fp-ink', '--fp-ch-rose'],
   ['--fp-ink', '--fp-ch-stone'],

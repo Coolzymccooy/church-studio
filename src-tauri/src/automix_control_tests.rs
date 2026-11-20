@@ -2,7 +2,7 @@
 //! scenes (including files saved before automix existed), the music default
 //! for computer-audio strips, and the live readouts in `mixer_state`.
 use crate::mixer_control::{
-    engine_strip_feeds, is_music_identity, MixerControl, StoredScene, StripFeed,
+    engine_strip_feeds, MixerControl, StoredScene,
 };
 use std::sync::atomic::Ordering::Relaxed;
 
@@ -80,13 +80,8 @@ fn scenes_keep_automix_and_old_files_load_with_defaults() {
 
 #[test]
 fn computer_audio_strips_start_as_ducked_music() {
-    assert!(is_music_identity("computer:left") && is_music_identity("computer:right"));
-    assert!(!is_music_identity("hw") && !is_music_identity("ndi:PC (Keys)"));
-
     let m = MixerControl::new();
-    let mut feeds = engine_strip_feeds(1, &[]);
-    feeds.push(StripFeed { index: 1, identity: "computer:left".into(), label: None });
-    feeds.push(StripFeed { index: 2, identity: "computer:right".into(), label: None });
+    let feeds = engine_strip_feeds(1, Some(1), &[]);
     assert_eq!(m.link().assign_strip_feeds(&feeds), vec![1, 2]);
     let state = m.snapshot(3, true, Vec::new());
     assert!(state.strips[1].duck && state.strips[2].duck);
@@ -96,6 +91,20 @@ fn computer_audio_strips_start_as_ducked_music() {
     m.set_strip_bool(1, "duck", false).unwrap();
     assert!(m.link().assign_strip_feeds(&feeds).is_empty());
     assert!(!m.snapshot(3, true, Vec::new()).strips[1].duck);
+}
+
+#[test]
+fn adding_a_mic_moves_the_music_strips_with_their_automix_settings() {
+    let m = MixerControl::new();
+    m.link().assign_strip_feeds(&engine_strip_feeds(1, Some(1), &[]));
+    m.set_strip_bool(0, "automix", true).unwrap();
+    m.set_strip_param(2, "duck_depth_db", 20.0).unwrap();
+    // A second mic appears: the computer pair moves from 1–2 to 2–3.
+    m.link().assign_strip_feeds(&engine_strip_feeds(2, Some(2), &[]));
+    let state = m.snapshot(4, true, Vec::new());
+    assert!(state.strips[0].automix, "mic 1 keeps auto-mix");
+    assert!(state.strips[2].duck && state.strips[3].duck, "music keeps duck");
+    assert_eq!(state.strips[3].duck_depth_db, 20.0, "depth moved with its strip");
 }
 
 #[test]

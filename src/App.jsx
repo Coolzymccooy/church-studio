@@ -1210,6 +1210,48 @@ const AudioProcessor = ({ goHome }) => {
     }
   };
 
+  // The steps after the native engine is running: stats, routes, the analyser shim and the
+  // visualiser. Used after a start and to adopt an engine that is already running (after a
+  // reload, or when the app's flag fell out of step with the engine).
+  const attachNativeEngine = (info) => {
+    setAudioStats({
+      sampleRate: info.sample_rate,
+      bufferSize: info.buffer_frames || 256,
+      latencyMs: info.latency_ms ?? null,
+      callbackAvgMs: info.callback_avg_ms ?? null,
+      callbackPeakMs: info.callback_peak_ms ?? null,
+      cpuLoadPct: info.cpu_load_pct ?? null,
+      droppedOutputSamples: info.dropped_output_samples ?? 0,
+      state: 'running',
+    });
+    setNativeRouteStatus({
+      input: info.input_device_name || info.device_name || null,
+      monitor: info.monitor_output_name || null,
+      broadcast: info.broadcast_output_name || null,
+    });
+    setNativeNoiseProfileCaptured(false);
+
+    // Fake Web Audio analyser shim so visualizeAndGate() works unchanged.
+    // Spectrum data is injected from 'audio-meters' Tauri events into tauriSpectrumRef.
+    processingRefs.current.analyser = {
+      frequencyBinCount: 128,
+      // Native bins are normalised over -90..0 dB (Spectrum::take_bins).
+      minDecibels: -90,
+      maxDecibels: 0,
+      getByteFrequencyData(arr) {
+        const spec = tauriSpectrumRef.current;
+        for (let i = 0; i < arr.length && i < spec.length; i++) {
+          arr[i] = Math.round(spec[i] * 255);
+        }
+      },
+      getByteTimeDomainData(arr) { arr.fill(128); },
+    };
+
+    setIsLive(true);
+    setAudioEngineError(null);
+    visualizeAndGate();
+  };
+
   const toggleLive = async () => {
     if (isLive) {
       trackEvent('engine_stop');
@@ -1223,11 +1265,20 @@ const AudioProcessor = ({ goHome }) => {
     }
 
     // ── Tauri native Rust engine (CPAL — sub-5ms, direct hardware audio) ──────
-    if (isTauri && mode === 'live') {
+    // In the desktop app "start" always means the native engine. From file mode it first returns
+    // the rack to live; the browser microphone path does not work in the desktop webview.
+    if (isTauri) {
+      if (mode !== 'live') setMode('live');
       try {
-        await stopTauriEngine().catch(() => {});
-        cleanupAudio({ stopNative: false });
         const { invoke } = await import('@tauri-apps/api/core');
+        // The engine may already be running while this screen thinks it is off (a reload, or an
+        // error after a start): adopt it rather than stop and start it, which drops the audio.
+        const running = await getNativeEngineStatus(invoke).catch(() => null);
+        if (running?.running) {
+          attachNativeEngine(running);
+          return;
+        }
+        cleanupAudio({ stopNative: false });
         const latestDevices = await getDevices();
         const resolvedDevices = reconcileSelectedDevices(selectedDevices, latestDevices);
         if (
@@ -1240,48 +1291,13 @@ const AudioProcessor = ({ goHome }) => {
         }
 
         const info = await startNativeEngine(invoke, resolvedDevices);
-        setAudioStats({
-          sampleRate: info.sample_rate,
-          bufferSize: info.buffer_frames || 256,
-          latencyMs: info.latency_ms ?? null,
-          callbackAvgMs: info.callback_avg_ms ?? null,
-          callbackPeakMs: info.callback_peak_ms ?? null,
-          cpuLoadPct: info.cpu_load_pct ?? null,
-          droppedOutputSamples: info.dropped_output_samples ?? 0,
-          state: 'running',
-        });
-        setNativeRouteStatus({
-          input: info.input_device_name || info.device_name || null,
-          monitor: info.monitor_output_name || null,
-          broadcast: info.broadcast_output_name || null,
-        });
-        setNativeNoiseProfileCaptured(false);
-
-        // Fake Web Audio analyser shim so visualizeAndGate() works unchanged.
-        // Spectrum data is injected from 'audio-meters' Tauri events into tauriSpectrumRef.
-        processingRefs.current.analyser = {
-          frequencyBinCount: 128,
-          // Native bins are normalised over -90..0 dB (Spectrum::take_bins).
-          minDecibels: -90,
-          maxDecibels: 0,
-          getByteFrequencyData(arr) {
-            const spec = tauriSpectrumRef.current;
-            for (let i = 0; i < arr.length && i < spec.length; i++) {
-              arr[i] = Math.round(spec[i] * 255);
-            }
-          },
-          getByteTimeDomainData(arr) { arr.fill(128); },
-        };
-
-        setIsLive(true);
-        setAudioEngineError(null);
+        attachNativeEngine(info);
         trackEvent('engine_start', {
           preset: 'tauri-rust',
           sr: info.sample_rate,
           monitor: info.monitor_output_name || 'default',
           broadcast: info.broadcast_output_name || 'not-set',
         });
-        visualizeAndGate();
       } catch (err) {
         console.error('Tauri engine start failed', err);
         setAudioEngineError(describeNativeEngineError(err));
@@ -1330,7 +1346,13 @@ const AudioProcessor = ({ goHome }) => {
   };
 
   const handleModeSwitch = (newMode) => {
-    if (isLive) cleanupAudio();
+    // Choosing the mode you are already in changes nothing; it must not stop the engine.
+    if (newMode === mode) return;
+    // Leaving live for file stops the engine fully, so the header and the engine agree.
+    if (isLive) {
+      cleanupAudio();
+      setIsLive(false);
+    }
     setMode(newMode);
 
     if (newMode === 'file') {
@@ -2303,11 +2325,13 @@ const AudioProcessor = ({ goHome }) => {
   // --- Visualizer + Gate + Smart Gain Rider ---
   const visualizeAndGate = () => {
     const { analyser, gateGain, noiseBlend, noiseNotch, noiseLowShelf, noiseHighShelf } = processingRefs.current;
-    const canvas = canvasRef.current;
-    if (!analyser || !canvas) return;
+    // The gate and rider logic below runs on every tab; drawing happens only while the live tab's
+    // canvas exists, and follows it when the tab is left and shown again (a new canvas element).
+    if (!analyser) return;
     if (animationRef.current) cancelAnimationFrame(animationRef.current);
 
-    const ctx = canvas.getContext('2d');
+    let drawCanvas = null;
+    let ctx = null;
     const bufferLength = analyser.frequencyBinCount;
     const freqData = new Uint8Array(bufferLength);
     const timeData = new Uint8Array(bufferLength);
@@ -2341,7 +2365,12 @@ const AudioProcessor = ({ goHome }) => {
       analyser.getByteTimeDomainData(timeData);
       latestSpectrumRef.current = freqData.slice(0);
 
-      const scopeSize = fitCanvas(canvas, ctx, window.devicePixelRatio || 1);
+      const liveCanvas = canvasRef.current;
+      if (liveCanvas !== drawCanvas) {
+        drawCanvas = liveCanvas;
+        ctx = liveCanvas ? liveCanvas.getContext('2d') : null;
+      }
+      const scopeSize = ctx ? fitCanvas(drawCanvas, ctx, window.devicePixelRatio || 1) : null;
       const frameDt = lastFrameAt ? Math.min(0.1, Math.max(0, (timestamp - lastFrameAt) / 1000)) : 0;
       lastFrameAt = timestamp;
 
@@ -2810,7 +2839,7 @@ const AudioProcessor = ({ goHome }) => {
           level: dbFraction(db, -70, 0),
           state,
         });
-        drawScope(ctx, palette, scopeSize, {
+        if (ctx) drawScope(ctx, palette, scopeSize, {
           ...scope,
           state,
           confidence: Math.min(100, Math.max(0, (voiceRatio - 1) * 50)),
@@ -2935,16 +2964,31 @@ const AudioProcessor = ({ goHome }) => {
   }, [isLive, features.denoise, features.dereverb, features.dynamicDeEsser,
       isBypassed, noiseFloorThreshold, inputGainValue]);
 
+  // The status poll calls the latest cleanupAudio without re-subscribing on every render.
+  const cleanupAudioRef = useRef(cleanupAudio);
+  useEffect(() => {
+    cleanupAudioRef.current = cleanupAudio;
+  });
+
   useEffect(() => {
     if (!isTauri || !isLive) return;
     let cancelled = false;
     let intervalId = null;
 
+    let misses = 0;
     import('@tauri-apps/api/core').then(({ invoke }) => {
       const poll = async () => {
         try {
           const status = await getNativeEngineStatus(invoke);
-          if (cancelled || !status?.running) return;
+          if (cancelled) return;
+          if (!status?.running) {
+            // Two polls in a row without a running engine: it stopped on its own (a device was
+            // unplugged, or it failed), so the screen must stop saying it is running.
+            misses += 1;
+            if (misses >= 2) cleanupAudioRef.current({ stopNative: false });
+            return;
+          }
+          misses = 0;
 
           setAudioStats((prev) => ({
             ...prev,
@@ -2981,6 +3025,23 @@ const AudioProcessor = ({ goHome }) => {
       }
     };
   }, [isLive]);
+
+  // ── Tauri: adopt an engine that is already running ──────────────────────────
+  // After a reload the screen starts with the engine "off" while the Rust engine may still run.
+  // Check on start-up and whenever the live tab is shown; only the tab change triggers this, so a
+  // deliberate stop or reset is never undone.
+  useEffect(() => {
+    if (!isTauri || isLive || mode !== 'live' || mainTab !== 'live') return undefined;
+    let cancelled = false;
+    import('@tauri-apps/api/core')
+      .then(({ invoke }) => getNativeEngineStatus(invoke))
+      .then((status) => {
+        if (!cancelled && status?.running) attachNativeEngine(status);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mainTab]);
 
   // --- Helper: Resolve labels for Output Router panel ---//
   const monitorLabel = resolveDeviceLabel(availableDevices.outputs, selectedDevices.outputId);
@@ -3308,6 +3369,7 @@ const AudioProcessor = ({ goHome }) => {
           {mainTab === 'mixer' && (
             <MixerConsole
               controller={mixerController}
+              onOpenObs={() => setShowObs(true)}
               demoBanner={isTauri ? null : 'Demo mixer — live multichannel mixing runs in the desktop app'}
             />
           )}
@@ -3315,6 +3377,13 @@ const AudioProcessor = ({ goHome }) => {
         </main>{/* end center */}
 
         <OutputRouter r={{
+          engineError: audioEngineError,
+          broadcastSet: selectedDevices.broadcastBus !== 'Not set',
+          droppedSamples: audioStats.droppedOutputSamples ?? 0,
+          cpuPct: audioStats.cpuLoadPct,
+          lufsST,
+          target: loudnessTarget,
+          onShowSettings: () => setShowSettings(true),
           isLive,
           isPlayingFile,
           monitoring: isMonitoring,
@@ -3332,7 +3401,7 @@ const AudioProcessor = ({ goHome }) => {
       {/* Small screens: the essentials in one bottom plate. */}
       <div className="lg:hidden">
       <nav className="fp-bar fixed bottom-0 left-0 right-0 z-40" aria-label="Quick controls" style={{ borderTop: '1px solid var(--fp-seam)', borderBottom: 0 }}>
-        <Key lit={isLive ? 'red' : 'green'} onClick={mode === 'live' ? toggleLive : undefined} disabled={mode !== 'live'}>
+        <Key lit={isLive ? 'red' : 'green'} onClick={mode === 'live' || isTauri ? toggleLive : undefined} disabled={mode !== 'live' && !isTauri}>
           {isLive ? 'stop' : 'start'}
         </Key>
         <Lamp tone={isLive ? 'g' : 'off'}>{isLive ? 'running' : 'standby'}</Lamp>

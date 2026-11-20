@@ -4,6 +4,7 @@ import {
   clampPanel, draftChanges, draftFrom, isDirty, readPanelPos, rowStatus,
 } from '../lib/setupDraft.js';
 import { isTauri } from '../lib/platform';
+import ComputerAudioToggle from './ComputerAudioToggle';
 import InfoTip from './faceplate/InfoTip.jsx';
 import Key from './faceplate/Key.jsx';
 import Lamp from './faceplate/Lamp.jsx';
@@ -182,6 +183,7 @@ function SetupPanel({
           <option value="default">System default</option>
           {deviceOptions(availableDevices.inputs, 'Mic')}
         </DeviceRow>
+        <ComputerAudioToggle />
 
         <DeviceRow id="dev-monitor" label="Monitor" tip="What you hear: headphones or speakers for the sound engineer."
           status={status('outputId')} value={draft.outputId ?? 'default'} onChange={set('outputId')}

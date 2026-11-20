@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react';
 
-import { validateSceneName } from '../../lib/mixerEngine.js';
-import { nextStripSize, readStripSize, stripScale, stripSizeLabel } from '../../lib/stripScale.js';
+import { bankStrips, pickBank, stripBanks, stripCounts } from '../../lib/mixerBanks.js';
+import { nextStripSize, readStripSize, stripRowPx, stripScale, stripSizeLabel } from '../../lib/stripScale.js';
 import InfoTip from '../faceplate/InfoTip.jsx';
 import Key from '../faceplate/Key.jsx';
 import Lamp from '../faceplate/Lamp.jsx';
-import TwoPressKey from '../faceplate/TwoPressKey.jsx';
 import { ScaleContext } from '../faceplate/scaleContext.js';
 import RecordPanel from '../recorder/RecordPanel.jsx';
 import BusStrip from './BusStrip.jsx';
+import ObsPlate from './ObsPlate.jsx';
+import ScenesPlate from './ScenesPlate.jsx';
 import ChannelStrip from './ChannelStrip.jsx';
 import { useMixer } from './useMixer.js';
 
@@ -23,7 +24,7 @@ function loadSize() {
 }
 
 /** Strip size setting plus the height of the strip area, for "fit". */
-function useStripSize() {
+function useStripSize(rowPx) {
   const [size, setSize] = useState(loadSize);
   const [height, setHeight] = useState(0);
   // A callback ref: the strip area mounts only after the mixer has loaded.
@@ -46,105 +47,77 @@ function useStripSize() {
     return next;
   });
 
-  return { size, scale: stripScale(size, height), areaRef, cycle };
+  return { size, scale: stripScale(size, height, rowPx), areaRef, cycle };
 }
 
-function ScenesBar({ scenes, onLoad, onDelete, onSave, sizeLabel, onCycleSize }) {
-  const [name, setName] = useState('');
-  const [error, setError] = useState(null);
-
-  const save = async () => {
-    const trimmed = name.trim();
-    const problem = validateSceneName(trimmed);
-    if (problem) {
-      setError(problem);
-      return;
-    }
-    if (await onSave(trimmed)) {
-      setName('');
-      setError(null);
-    }
-  };
-
+function BankRow({ banks, bank, onBank, stripCount, demoBanner, sizeLabel, onCycleSize }) {
   return (
-    <>
-      <div className="fp-bar" role="group" aria-label="Scenes">
-        <span className="fp-label" style={{ margin: 0 }}>
-          Scenes <InfoTip label="Scenes">Press a scene twice to load it. Delete also needs two presses.</InfoTip>
-        </span>
-        <div className="fp-keys fp-scenes" style={{ flexWrap: 'nowrap' }}>
-          {scenes.length === 0 && <span className="fp-sub">none saved</span>}
-          {scenes.map((scene) => (
-            <span key={scene} className="fp-keys" style={{ flexWrap: 'nowrap' }}>
-              <TwoPressKey label={`load scene ${scene}`} onConfirm={() => onLoad(scene)}>{scene}</TwoPressKey>
-              <TwoPressKey label={`delete scene ${scene}`} tone="red" onConfirm={() => onDelete(scene)}>del</TwoPressKey>
-            </span>
+    <div className="fp-bar" role="group" aria-label="Strip banks">
+      {banks.length > 1 && (
+        <div className="fp-keys" role="tablist" aria-label="Banks">
+          {banks.map((b) => (
+            <Key key={b.id} role="tab" aria-selected={b.id === bank.id} lit={b.id === bank.id ? 'sel' : null} onClick={() => onBank(b.id)}>
+              {b.label}
+            </Key>
           ))}
         </div>
-        <div className="fp-bar-end">
-          <input
-            value={name}
-            onChange={(e) => { setName(e.target.value); setError(null); }}
-            onKeyDown={(e) => { if (e.key === 'Enter') save(); }}
-            placeholder="Scene name"
-            maxLength={40}
-            aria-label="New scene name"
-            className="fp-field"
-            style={{ width: 140 }}
-          />
-          <Key onClick={save} disabled={!name.trim()}>store</Key>
-          <Key onClick={onCycleSize} aria-label={`strip ${sizeLabel}`}>{sizeLabel}</Key>
-        </div>
+      )}
+      <span className="fp-num fp-sub">{stripCount} {stripCount === 1 ? 'strip' : 'strips'}</span>
+      {demoBanner && (
+        <span className="fp-keys" style={{ alignItems: 'center' }}>
+          <Lamp tone="a">demo mixer</Lamp>
+          <InfoTip label="Demo mixer">{demoBanner}</InfoTip>
+        </span>
+      )}
+      <div className="fp-bar-end">
+        <Key onClick={onCycleSize} aria-label={`strip ${sizeLabel}`}>{sizeLabel}</Key>
       </div>
-      {error && <div className="fp-banner fp-fault" role="alert" style={{ justifyContent: 'flex-start' }}>{error}</div>}
-    </>
+    </div>
   );
 }
 
 /**
- * MixerConsole: the scenes bar, the record plate, a horizontally scrolling row of channel strips
- * and the Main, Stream and Monitor buses on the right. The strips scale up to fill the height
+ * MixerConsole: bank keys, a horizontally scrolling row of channel strips with the Main, Stream
+ * and Monitor buses on the right, and a footer of scenes, OBS and recorder plates. The strips scale up to fill the height
  * ("size fit") or to a fixed size. Driven by useMixer(controller), which works the same for the
  * Tauri controller and the in-memory demo controller.
  */
-export default function MixerConsole({ controller, demoBanner }) {
+export default function MixerConsole({ controller, demoBanner, onOpenObs }) {
   const {
-    state, loading, toast, dismissToast, metersRef,
+    state, loading, toast, dismissToast, metersRef, currentScene,
     setStripParam, setStripBool, renameStrip,
     setBusParam, setBusBool,
     saveScene, loadScene, deleteScene,
   } = useMixer(controller);
-  const { size, scale, areaRef, cycle } = useStripSize();
+  const { size, scale, areaRef, cycle } = useStripSize(stripRowPx(state?.strips));
+  const [bankId, setBankId] = useState('all');
 
   if (loading || !state) {
     return <div className="flex-1 grid place-items-center fp-sub">loading mixer</div>;
   }
 
+  const counts = stripCounts(state);
+  const banks = stripBanks(counts.total, counts.ndi, counts.computer);
+  const bank = pickBank(banks, bankId);
+  const shown = bankStrips(state.strips, bank);
+
   return (
     <div className="relative flex-1 flex flex-col min-h-0">
-      {demoBanner && (
-        <div className="fp-banner">
-          <Lamp tone="a">demo mixer</Lamp>
-          <InfoTip label="Demo mixer">{demoBanner}</InfoTip>
-        </div>
-      )}
-
-      <ScenesBar
-        scenes={state.scenes || []}
-        onLoad={loadScene}
-        onDelete={deleteScene}
-        onSave={saveScene}
+      <BankRow
+        banks={banks}
+        bank={bank}
+        onBank={setBankId}
+        stripCount={state.strips.length}
+        demoBanner={demoBanner}
         sizeLabel={stripSizeLabel(size)}
         onCycleSize={cycle}
       />
-
-      <RecordPanel strips={state.strips} engineRunning={Boolean(state.running)} />
 
       <div ref={areaRef} className="flex-1 flex overflow-hidden min-h-0">
         <ScaleContext.Provider value={scale}>
           <div className="fp-desk-scale" style={{ zoom: scale }}>
             <div className="flex-1 flex gap-2 p-2 overflow-x-auto">
-              {state.strips.map((strip) => (
+              {shown.map((strip) => (
                 <ChannelStrip
                   key={strip.index}
                   strip={strip}
@@ -169,6 +142,12 @@ export default function MixerConsole({ controller, demoBanner }) {
           </div>
         </ScaleContext.Provider>
       </div>
+
+      <footer className="fp-foot" aria-label="Scenes, OBS and recorder">
+        <ScenesPlate scenes={state.scenes || []} current={currentScene} onLoad={loadScene} onSave={saveScene} onDelete={deleteScene} />
+        <ObsPlate onOpenObs={onOpenObs} />
+        <RecordPanel strips={state.strips} engineRunning={Boolean(state.running)} />
+      </footer>
 
       {toast && (
         <div role="alert" className="fp-toast">
