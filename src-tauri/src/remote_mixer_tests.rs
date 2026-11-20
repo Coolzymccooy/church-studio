@@ -434,3 +434,96 @@ async fn writes_share_desktop_notifications_and_device_limits() {
         .windows(2)
         .all(|pair| pair[1] - pair[0] >= Duration::from_millis(50)));
 }
+
+#[tokio::test]
+async fn a_write_can_reach_the_engine_after_an_overlapping_snapshot() {
+    use std::sync::mpsc;
+    use tokio::sync::Notify;
+
+    struct OverlapBoard {
+        level: Mutex<f32>,
+        first_snapshot: Mutex<Option<mpsc::Receiver<()>>>,
+        reading: Notify,
+    }
+
+    impl Board for OverlapBoard {
+        fn view(&self, role: Role) -> Result<MixerView, Status> {
+            let level = self.level.lock();
+            if let Some(release) = self.first_snapshot.lock().take() {
+                self.reading.notify_one();
+                release.recv_timeout(Duration::from_secs(2)).unwrap();
+            }
+            TestBoard(Mutex::new(*level)).view(role)
+        }
+
+        fn apply(&self, _: Role, control: Control) -> Result<(), Status> {
+            let mut level = self.level.try_lock().ok_or(Status::SERVICE_UNAVAILABLE)?;
+            if let Change::Level { db } = control.change {
+                *level = db;
+            }
+            Ok(())
+        }
+    }
+
+    let (release, first_snapshot) = mpsc::channel();
+    let board = Arc::new(OverlapBoard {
+        level: Mutex::new(0.0),
+        first_snapshot: Mutex::new(Some(first_snapshot)),
+        reading: Notify::new(),
+    });
+    let auth = Arc::new(Mutex::new(Auth::default()));
+    let app = router(board.clone(), auth.clone(), HOST);
+    let code = auth.lock().issue(Role::Desk).unwrap();
+    let paired = send(
+        &app,
+        "POST",
+        "/api/pair",
+        HOST,
+        Some(ORIGIN),
+        None,
+        serde_json::json!({ "name": "Fixture", "code": code }).to_string(),
+    )
+    .await;
+    assert_eq!(paired.status(), Status::NO_CONTENT);
+    let cookie = paired.headers()[header::SET_COOKIE]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap();
+    let read = {
+        let app = app.clone();
+        let cookie = cookie.to_owned();
+        tokio::spawn(async move {
+            send(
+                &app,
+                "GET",
+                "/api/state",
+                HOST,
+                None,
+                Some(&cookie),
+                String::new(),
+            )
+            .await
+        })
+    };
+    tokio::time::timeout(Duration::from_secs(1), board.reading.notified())
+        .await
+        .unwrap();
+    let write = || {
+        send(
+            &app,
+            "POST",
+            "/api/control",
+            HOST,
+            Some(ORIGIN),
+            Some(cookie),
+            r#"{"layout":"v1","target":{"type":"strip","index":0},"kind":"level","db":-24}"#.into(),
+        )
+    };
+    assert_eq!(write().await.status(), Status::SERVICE_UNAVAILABLE);
+    release.send(()).unwrap();
+    assert_eq!(read.await.unwrap().status(), Status::OK);
+    assert_eq!(write().await.status(), Status::NO_CONTENT);
+    assert_eq!(*board.level.lock(), -24.0);
+}
