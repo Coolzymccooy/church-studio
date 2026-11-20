@@ -23,6 +23,7 @@ import DesktopRecordButton from './components/recorder/DesktopRecordButton.jsx';
 import InputRack from './components/desk/InputRack.jsx';
 import MixerConsole from './components/mixer/MixerConsole';
 import { createMixerController, createMockMixerController } from './lib/mixerEngine';
+import { syncStreamLeveler } from './lib/streamLeveler';
 import { getExportAvailability } from './lib/exportFlow';
 import { loadRnnoiseAssets } from './lib/rnnoise';
 import { pickVideoMimeType } from './lib/mediaFormats';
@@ -356,6 +357,14 @@ const AudioProcessor = ({ goHome }) => {
     featuresRef.current = features;
     try { window.localStorage.setItem('tiwaton:features', JSON.stringify(features)); } catch { /* Ignore local persistence failures. */ }
   }, [features]);
+
+  // "Stream safe" and the loudness target drive the native Stream bus leveler.
+  const streamSafeOn = Boolean(features.streamingSafe);
+  useEffect(() => {
+    void syncStreamLeveler(mixerController, { on: streamSafeOn, target: loudnessTarget }).then((error) => {
+      if (error) console.warn('[TIWATON] Stream leveler not updated:', error);
+    });
+  }, [mixerController, streamSafeOn, loudnessTarget]);
 
   useEffect(() => {
     gateModeRef.current = gateMode;

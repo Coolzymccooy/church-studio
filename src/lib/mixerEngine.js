@@ -64,6 +64,7 @@ const PARAM_RANGES = {
   send_stream_db: [FADER_MIN_DB, FADER_MAX_DB],
   send_monitor_db: [FADER_MIN_DB, FADER_MAX_DB],
   limiter_ceiling_db: [-12, 0],
+  leveler_target_lufs: [-30, -10],
   duck_depth_db: [0, 40],
 };
 
@@ -258,7 +259,10 @@ function defaultStrip(index, name, overrides = {}) {
 }
 
 function defaultBus(id) {
-  return { id, fader_db: 0, mute: false, limiter_ceiling_db: -1 };
+  return {
+    id, fader_db: 0, mute: false, limiter_ceiling_db: -1,
+    leveler_enabled: false, leveler_target_lufs: -14,
+  };
 }
 
 function createInitialMockState() {

@@ -18,11 +18,13 @@
 //! `latency_samples` / `path_latency_samples`.
 //! Smoothing: all gains, pans, sends and mutes ramp linearly over 10 ms.
 //! Automix and auto-ducking (`automix.rs`) add per-sample post-fader gains
-//! and no latency.
+//! and no latency. The bus loudness leveler (`leveler.rs`, off by default)
+//! adds no latency either.
 #![allow(dead_code, unused_imports)]
 
 pub mod automix;
 pub mod bus;
+pub mod leveler;
 pub mod params;
 pub mod scene;
 pub mod smooth;
@@ -30,6 +32,8 @@ pub mod strip;
 
 #[cfg(test)]
 mod automix_tests;
+#[cfg(test)]
+mod leveler_tests;
 #[cfg(test)]
 mod tests;
 
