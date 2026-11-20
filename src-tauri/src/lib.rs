@@ -211,7 +211,17 @@ async fn start_audio_engine(
         },
         net_audio.snapshot(),
         computer_audio.snapshot().enabled,
-    )?;
+    )
+    .map_err(|e| {
+        log::error!("engine start failed: {e}");
+        e
+    })?;
+    log::info!(
+        "engine started: {} Hz, {} frames, input '{}'",
+        engine.sample_rate,
+        engine.buffer_frames,
+        engine.input_device_name
+    );
     let info = serde_json::json!({
         "sample_rate": engine.sample_rate,
         "buffer_frames": engine.buffer_frames,
