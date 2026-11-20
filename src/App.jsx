@@ -3271,6 +3271,7 @@ const AudioProcessor = ({ goHome }) => {
       <div className="flex-1 flex overflow-hidden min-h-0">
 
         <InputRack
+          mixer={mixerController}
           mode={mode}
           onModeSwitch={handleModeSwitch}
           core={{
