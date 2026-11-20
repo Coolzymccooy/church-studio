@@ -38,3 +38,9 @@ test('popMaxHeight keeps the popover above the bottom edge', () => {
   assert.equal(popMaxHeight(8, 900), 884);
   assert.equal(popMaxHeight(850, 900), 120);
 });
+
+test('computer audio muted at the speakers while nobody can hear it', () => {
+  const alerts = deskAlerts({ isLive: true, computerMutedUnheard: true });
+  assert.deepEqual(alerts.map((a) => [a.id, a.tone, a.action]), [['computer-muted', 'a', 'monitor']]);
+  assert.deepEqual(deskAlerts({ isLive: false, computerMutedUnheard: true }), []);
+});

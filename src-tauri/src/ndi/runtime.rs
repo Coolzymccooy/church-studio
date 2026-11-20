@@ -24,7 +24,7 @@ mod receive_api;
 
 /// Shown when no runtime could be loaded.
 pub const NOT_INSTALLED: &str =
-    "NDI Runtime not installed. Install NDI Tools from https://ndi.video/tools, then restart TIWATON AI Studio.";
+    "NDI runtime not found. Install NDI Tools from https://ndi.video/tools, then restart TIWATON AI Studio.";
 
 #[derive(Clone, Copy)]
 struct NdiApi {
@@ -73,6 +73,17 @@ pub fn library_file_name(os: TargetOs) -> &'static str {
     }
 }
 
+/// Copies of the runtime that NDI Tools for Mac installs inside its own apps and plug-ins. NDI
+/// Tools does not install a shared runtime on macOS, so these are the last places to look:
+/// the standard library first, then the Advanced build (which exports the same functions).
+pub const MACOS_NDI_TOOLS_LIBS: [&str; 5] = [
+    "/Applications/NDI Scan Converter.app/Contents/Frameworks/libndi.dylib",
+    "/Library/Application Support/Adobe/Common/Plug-ins/7.0/MediaCore/NDI_Transmit_AdobeCC.bundle/Contents/Frameworks/libndi.dylib",
+    "/Applications/NDI Video Monitor.app/Contents/Frameworks/libndi_advanced.dylib",
+    "/Applications/NDI Discovery.app/Contents/Frameworks/libndi_advanced.dylib",
+    "/Library/Audio/Plug-Ins/HAL/NDIAudio.driver/Contents/Frameworks/libndi_advanced.dylib",
+];
+
 fn push_unique(paths: &mut Vec<PathBuf>, path: PathBuf) {
     if !paths.contains(&path) {
         paths.push(path);
@@ -82,7 +93,8 @@ fn push_unique(paths: &mut Vec<PathBuf>, path: PathBuf) {
 /// Where to look for the runtime, in order:
 /// 1. `NDI_RUNTIME_DIR_V6`, 2. `NDI_RUNTIME_DIR_V5` (set by the installers),
 /// 3. the default install locations for `os`,
-/// 4. `exe_dir`, the app's own folder.
+/// 4. `exe_dir`, the app's own folder,
+/// 5. on macOS, the copies NDI Tools installs inside its own apps (`MACOS_NDI_TOOLS_LIBS`).
 ///
 /// Pure: the environment and the executable folder are passed in, so this
 /// is unit-tested without touching the machine.
@@ -136,6 +148,11 @@ pub fn candidate_paths(
 
     if let Some(dir) = exe_dir {
         push_unique(&mut paths, dir.join(lib));
+    }
+    if os == TargetOs::MacOs {
+        for path in MACOS_NDI_TOOLS_LIBS {
+            push_unique(&mut paths, PathBuf::from(path));
+        }
     }
     paths
 }
