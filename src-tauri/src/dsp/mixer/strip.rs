@@ -11,15 +11,18 @@
 //! same sample: `process_pre` (up to the pre-fader point, plus a copy of the
 //! post-HPF signal for the detector) and `process_out` (fader × automix ×
 //! duck, pan, sends). Automix and duck reach the post-fader paths only; the
-//! pre-fader Monitor send and PFL stay untouched.
+//! pre-fader Monitor sends and PFL stay untouched.
 //!
-//! Main and Stream sends are post-fader. The Monitor send is pre-fader unless
-//! `monitor_post_fader` is set. Mute removes the strip from every bus mix.
+//! Main and Stream sends are post-fader. The Monitor (mon 1) send is
+//! pre-fader unless `monitor_post_fader` is set. The Monitor 2 and Monitor 3
+//! sends (mon 2, mon 3) are always pre-fader: those mixes never follow the
+//! front-of-house fader. Mute removes the strip from every bus mix.
 //!
 //! Solo is PFL (live-console standard): when any strip is soloed the Monitor
-//! bus carries ONLY the soloed strips, pre-fader, at unity (0 dB) on BOTH
+//! (mon 1) bus carries ONLY the soloed strips, pre-fader, at unity (0 dB) on BOTH
 //! sides — no pan law, no send level — and PFL IGNORES mute, so the operator
-//! can check a muted mic before opening it. Main and Stream never see solo.
+//! can check a muted mic before opening it. Main, Stream, mon 2 and mon 3
+//! never see solo.
 //!
 //! Latency: the gate is a `SwitchedGate`, the same live-safe switch as the
 //! voice chain. Off, it is a zero-latency passthrough; switched on, it plays
@@ -29,8 +32,8 @@
 //! 20 ms behind an ungated one, which matters only when two strips carry the
 //! same source.
 use super::params::{
-    clamp_or, fader_db_to_lin, StripParams, BUS_MAIN, BUS_MONITOR, BUS_STREAM, EQ_MAX_DB,
-    NUM_BUSES, PAN_LAW_NORM, TRIM_MAX_DB, TRIM_MIN_DB,
+    clamp_or, fader_db_to_lin, StripParams, BUS_MAIN, BUS_MONITOR, BUS_MONITOR2, BUS_MONITOR3,
+    BUS_STREAM, EQ_MAX_DB, NUM_BUSES, PAN_LAW_NORM, TRIM_MAX_DB, TRIM_MIN_DB,
 };
 use super::smooth::LinearSmoother;
 use super::StereoBuffer;
@@ -132,6 +135,8 @@ impl Strip {
                 LinearSmoother::new(1.0, ramp),
                 LinearSmoother::new(1.0, ramp),
                 LinearSmoother::new(0.0, ramp),
+                LinearSmoother::new(0.0, ramp),
+                LinearSmoother::new(0.0, ramp),
             ],
             pfl: LinearSmoother::new(0.0, ramp),
             comp_mix: LinearSmoother::new(0.0, ramp),
@@ -179,8 +184,9 @@ impl Strip {
         for (dst, src) in sends.iter_mut().zip(p.send_db.iter()) {
             *dst = fader_db_to_lin(src.load(Relaxed));
         }
-        // While anything is soloed the Monitor bus is PFL only: the normal
-        // monitor send is silenced and soloed strips come in via `pfl`.
+        // While anything is soloed the Monitor (mon 1) bus is PFL only: the
+        // normal monitor send is silenced and soloed strips come in via
+        // `pfl`. Mon 2 and mon 3 keep their sends.
         let pfl = if any_solo && p.solo.load(Relaxed) { 1.0 } else { 0.0 };
         let comp_mix = if p.comp_enabled.load(Relaxed) { 1.0 } else { 0.0 };
         if any_solo {
@@ -343,7 +349,7 @@ impl Strip {
         // Stage 3: fader, pan, sends, mute → buses.
         let mut pre_peak = 0.0f32;
         let mut post_peak = 0.0f32;
-        let [main, stream, monitor] = buses;
+        let [main, stream, monitor, monitor2, monitor3] = buses;
         for i in 0..n {
             let pre = self.scratch[i];
             let auto = auto_gain.get(i).copied().unwrap_or(1.0);
@@ -354,6 +360,8 @@ impl Strip {
             let g_main = self.sends[BUS_MAIN].next() * m;
             let g_stream = self.sends[BUS_STREAM].next() * m;
             let g_mon = self.sends[BUS_MONITOR].next() * m;
+            let g_mon2 = self.sends[BUS_MONITOR2].next() * m;
+            let g_mon3 = self.sends[BUS_MONITOR3].next() * m;
 
             main.left[i] += post * g_main * pl;
             main.right[i] += post * g_main * pr;
@@ -363,6 +371,11 @@ impl Strip {
             let mon_src = if monitor_post { post } else { pre };
             monitor.left[i] += mon_src * g_mon * pl + pre * pfl;
             monitor.right[i] += mon_src * g_mon * pr + pre * pfl;
+            // Mon 2 / mon 3: always pre-fader, no PFL.
+            monitor2.left[i] += pre * g_mon2 * pl;
+            monitor2.right[i] += pre * g_mon2 * pr;
+            monitor3.left[i] += pre * g_mon3 * pl;
+            monitor3.right[i] += pre * g_mon3 * pr;
 
             pre_peak = pre_peak.max(pre.abs());
             post_peak = post_peak.max(post.abs());

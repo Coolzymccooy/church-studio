@@ -1,7 +1,9 @@
 //! Mixer scenes: a by-value snapshot of every strip and bus control that can
 //! be saved as JSON and recalled onto the live `MixerParams`.
-use super::params::{BusParams, MixerParams, StripParams, DUCK_DEPTH_DEFAULT_DB, NUM_BUSES};
-use serde::{Deserialize, Serialize};
+use super::params::{
+    BusParams, MixerParams, StripParams, DUCK_DEPTH_DEFAULT_DB, MIN_DB, NUM_BUSES,
+};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::sync::atomic::Ordering::Relaxed;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -22,6 +24,9 @@ pub struct StripScene {
     pub mute: bool,
     pub solo: bool,
     pub fader_db: f32,
+    /// One level per bus in `BUS_*` order. Files saved before mon 2 and
+    /// mon 3 existed carry three; the missing sends load as −90 (off).
+    #[serde(deserialize_with = "sends_padded")]
     pub send_db: Vec<f32>,
     pub monitor_post_fader: bool,
     /// Missing in scene files saved before automix existed: off.
@@ -35,6 +40,15 @@ pub struct StripScene {
 
 fn default_duck_depth() -> f32 {
     DUCK_DEPTH_DEFAULT_DB
+}
+
+/// `send_db` padded with `MIN_DB` (off) up to one level per bus.
+fn sends_padded<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<f32>, D::Error> {
+    let mut sends = Vec::<f32>::deserialize(deserializer)?;
+    if sends.len() < NUM_BUSES {
+        sends.resize(NUM_BUSES, MIN_DB);
+    }
+    Ok(sends)
 }
 
 impl StripScene {
@@ -156,7 +170,7 @@ impl MixerScene {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dsp::mixer::params::{BUS_MONITOR, BUS_STREAM};
+    use crate::dsp::mixer::params::{BUS_MONITOR, BUS_MONITOR2, BUS_MONITOR3, BUS_STREAM};
 
     #[test]
     fn serde_round_trip_and_apply() {
@@ -165,6 +179,8 @@ mod tests {
         params.strips[1].solo.store(true, Relaxed);
         params.strips[2].eq_mid_db.store(4.0, Relaxed);
         params.strips[3].send_db[BUS_MONITOR].store(-3.0, Relaxed);
+        params.strips[3].send_db[BUS_MONITOR2].store(-4.0, Relaxed);
+        params.strips[2].send_db[BUS_MONITOR3].store(-5.0, Relaxed);
         params.buses[BUS_STREAM].limiter_ceiling_db.store(-2.0, Relaxed);
 
         let scene = MixerScene::capture_named(&params, "Sermon");
@@ -178,5 +194,41 @@ mod tests {
         assert_eq!(fresh.strips[1].fader_db.load(Relaxed), -6.5);
         assert!(fresh.strips[1].solo.load(Relaxed));
         assert_eq!(fresh.buses[BUS_STREAM].limiter_ceiling_db.load(Relaxed), -2.0);
+        assert_eq!(fresh.strips[3].send_db[BUS_MONITOR2].load(Relaxed), -4.0);
+        assert_eq!(fresh.strips[2].send_db[BUS_MONITOR3].load(Relaxed), -5.0);
+        assert_eq!(scene.strips[0].send_db.len(), NUM_BUSES);
+        assert_eq!(scene.buses.len(), NUM_BUSES);
+    }
+
+    /// A strip as a scene file saved before mon 2 / mon 3 wrote it.
+    const OLD_STRIP_JSON: &str = r#"{
+        "trim_db": 0.0, "polarity_invert": false, "hpf_enabled": true,
+        "hpf_freq_hz": 80.0, "gate_enabled": false, "gate_threshold_db": -45.0,
+        "eq_low_db": 0.0, "eq_mid_db": 0.0, "eq_high_db": 0.0,
+        "comp_enabled": false, "comp_threshold_db": -18.0, "comp_ratio": 3.0,
+        "pan": 0.0, "mute": false, "solo": false, "fader_db": 0.0,
+        "send_db": [0.0, -6.0, -3.0], "monitor_post_fader": false
+    }"#;
+
+    #[test]
+    fn an_old_scene_loads_mon2_and_mon3_sends_off() {
+        let strip: StripScene = serde_json::from_str(OLD_STRIP_JSON).expect("old strip");
+        assert_eq!(strip.send_db, vec![0.0, -6.0, -3.0, MIN_DB, MIN_DB]);
+
+        let json = format!(
+            r#"{{"name":"Old","strips":[{OLD_STRIP_JSON}],"buses":[
+                {{"fader_db":0.0,"mute":false,"limiter_enabled":true,"limiter_ceiling_db":-1.0}},
+                {{"fader_db":0.0,"mute":false,"limiter_enabled":true,"limiter_ceiling_db":-1.0}},
+                {{"fader_db":0.0,"mute":false,"limiter_enabled":true,"limiter_ceiling_db":-1.0}}
+            ]}}"#
+        );
+        let scene: MixerScene = serde_json::from_str(&json).expect("old scene");
+        let params = MixerParams::new(1);
+        params.strips[0].send_db[BUS_MONITOR2].store(0.0, Relaxed);
+        params.strips[0].send_db[BUS_MONITOR3].store(-2.0, Relaxed);
+        scene.apply(&params);
+        assert_eq!(params.strips[0].send_db[BUS_MONITOR].load(Relaxed), -3.0);
+        assert_eq!(params.strips[0].send_db[BUS_MONITOR2].load(Relaxed), MIN_DB);
+        assert_eq!(params.strips[0].send_db[BUS_MONITOR3].load(Relaxed), MIN_DB);
     }
 }
