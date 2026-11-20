@@ -12,7 +12,8 @@ pub const DEFAULT_PORT: u16 = 47_810;
 /// At most this many Remote strips (decision 4).
 pub const MAX_NET_INPUTS: usize = 4;
 pub const DEFAULT_SLOTS: usize = 2;
-pub const MIN_BUFFER_MS: u32 = 5;
+/// Matches `super::MIN_TARGET_MS`: one packet plus a 10 ms device block.
+pub const MIN_BUFFER_MS: u32 = 15;
 pub const MAX_BUFFER_MS: u32 = 200;
 pub const DEFAULT_BUFFER_MS: u32 = 20;
 /// Shorter passphrases do not start network audio.

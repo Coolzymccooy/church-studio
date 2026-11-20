@@ -8,11 +8,16 @@
 //! at the receiver; a stall here trims the ring back so latency never
 //! builds up.
 //!
-//! The target is resolved on this thread (DNS may block) and again every
-//! `RESOLVE_RETRY` until it works.
+//! The target is resolved on a short-lived helper thread that is never
+//! joined (DNS may block for seconds), so stopping never waits on it; it is
+//! retried every `RESOLVE_RETRY` until it works. IPv4 is preferred, since
+//! the receiver listens on IPv4.
+//!
+//! A pong carries the receiver's verdict (`PONG_*`): the sender counts as
+//! connected only while the receiver actually plays it.
 use super::protocol::{
     decode, encode, pcm16_encode, Header, Kind, RoomKey, CODEC_PCM16, MAX_PACKET, MAX_PAYLOAD,
-    PACKET_FRAMES,
+    PACKET_FRAMES, PONG_ACCEPTED,
 };
 use super::receiver::is_benign;
 use super::{SenderStats, STEREO};
@@ -20,7 +25,7 @@ use ringbuf::traits::{Consumer, Observer};
 use ringbuf::HeapCons;
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{mpsc, Arc};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -88,8 +93,41 @@ pub fn frames_to_payload(stereo_in: &[f32], stereo_out: bool, out: &mut [u8]) ->
     pcm16_encode(&mono[..frames], out)
 }
 
+/// The address to send to: an IPv4 one when there is one.
+pub fn pick_address(addrs: impl Iterator<Item = SocketAddr>) -> Option<SocketAddr> {
+    let all: Vec<SocketAddr> = addrs.collect();
+    all.iter().find(|a| a.is_ipv4()).or_else(|| all.first()).copied()
+}
+
+/// Resolve `target` without blocking the caller: a literal address answers
+/// at once, a name on a detached helper thread.
+fn resolve_async(target: &str) -> mpsc::Receiver<Result<SocketAddr, String>> {
+    let (tx, rx) = mpsc::channel();
+    if let Ok(addr) = target.parse::<SocketAddr>() {
+        let _ = tx.send(Ok(addr));
+        return rx;
+    }
+    let target = target.to_string();
+    let spawned = std::thread::Builder::new()
+        .name("net-audio-resolve".to_string())
+        .spawn(move || {
+            let result = target
+                .to_socket_addrs()
+                .map_err(|e| e.to_string())
+                .and_then(|addrs| pick_address(addrs).ok_or_else(|| "no address".to_string()));
+            let _ = tx.send(result);
+        });
+    if let Err(err) = spawned {
+        let (tx, rx) = mpsc::channel();
+        let _ = tx.send(Err(format!("cannot start the resolver: {err}")));
+        return rx;
+    }
+    rx
+}
+
 struct Sender {
     plan: SendPlan,
+    resolving: Option<mpsc::Receiver<Result<SocketAddr, String>>>,
     socket: Option<UdpSocket>,
     target: Option<SocketAddr>,
     clock: Instant,
@@ -105,6 +143,7 @@ impl Sender {
     fn new(plan: SendPlan) -> Self {
         Sender {
             plan,
+            resolving: None,
             socket: None,
             target: None,
             clock: Instant::now(),
@@ -125,10 +164,14 @@ impl Sender {
         let mut last_ping: Option<Instant> = None;
         let mut last_resolve: Option<Instant> = None;
         while !stop.load(Ordering::Relaxed) {
-            if self.target.is_none() && last_resolve.is_none_or(|t| t.elapsed() >= RESOLVE_RETRY) {
+            if self.target.is_none()
+                && self.resolving.is_none()
+                && last_resolve.is_none_or(|t| t.elapsed() >= RESOLVE_RETRY)
+            {
                 last_resolve = Some(Instant::now());
-                self.connect();
+                self.resolving = Some(resolve_async(&self.plan.target));
             }
+            self.poll_resolve();
             self.trim_stall();
             let sent = self.send_ready_packets();
             self.read_replies();
@@ -144,14 +187,17 @@ impl Sender {
         self.say_bye();
     }
 
-    /// Resolve the target and open a socket of its address family.
-    fn connect(&mut self) {
-        let resolved = self
-            .plan
-            .target
-            .to_socket_addrs()
-            .map_err(|e| e.to_string())
-            .and_then(|mut addrs| addrs.next().ok_or_else(|| "no address".to_string()));
+    /// Take a finished resolution and open a socket of its address family.
+    fn poll_resolve(&mut self) {
+        let Some(rx) = self.resolving.as_ref() else {
+            return;
+        };
+        let resolved = match rx.try_recv() {
+            Ok(result) => result,
+            Err(mpsc::TryRecvError::Empty) => return,
+            Err(mpsc::TryRecvError::Disconnected) => Err("resolver stopped".to_string()),
+        };
+        self.resolving = None;
         let addr = match resolved {
             Ok(addr) => addr,
             Err(err) => {
@@ -275,6 +321,7 @@ impl Sender {
                     let now = self.now_us();
                     let rtt = now.saturating_sub(header.stamp);
                     self.plan.stats.rtt_us.store(rtt, Ordering::Relaxed);
+                    self.plan.stats.verdict.store(header.codec, Ordering::Relaxed);
                     self.last_pong_us = Some(now);
                 }
                 Kind::Ping => {
@@ -294,9 +341,12 @@ impl Sender {
     }
 
     fn update_connected(&self) {
-        let connected = self
+        let answered = self
             .last_pong_us
             .is_some_and(|at| self.now_us().saturating_sub(at) < CONNECTED_WINDOW_US);
+        self.plan.stats.answered.store(answered, Ordering::Relaxed);
+        let accepted = self.plan.stats.verdict.load(Ordering::Relaxed) == PONG_ACCEPTED;
+        let connected = answered && accepted;
         self.plan.stats.connected.store(connected, Ordering::Relaxed);
     }
 
@@ -320,6 +370,15 @@ impl Sender {
 mod tests {
     use super::*;
     use crate::netaudio::protocol::pcm16_decode;
+
+    #[test]
+    fn ipv4_is_preferred_over_ipv6() {
+        let v6: SocketAddr = "[::1]:47810".parse().unwrap();
+        let v4: SocketAddr = "127.0.0.1:47810".parse().unwrap();
+        assert_eq!(pick_address([v6, v4].into_iter()), Some(v4));
+        assert_eq!(pick_address([v6].into_iter()), Some(v6));
+        assert_eq!(pick_address(std::iter::empty()), None);
+    }
 
     #[test]
     fn mono_payload_is_the_average_of_left_and_right() {

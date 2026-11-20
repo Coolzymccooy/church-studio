@@ -17,13 +17,17 @@ const MAX_OFFSET_MINUTES: i32 = 14 * 60;
 pub struct StripSources<'a> {
     pub ndi: &'a [usize],
     pub computer: &'a [usize],
+    /// Remote strips (network audio).
+    pub net: &'a [usize],
 }
 
 impl StripSources<'_> {
-    /// "ndi", "computer" or "hardware".
+    /// "ndi", "computer", "net" or "hardware".
     pub fn source(&self, index: usize) -> &'static str {
         if self.ndi.contains(&index) {
             "ndi"
+        } else if self.net.contains(&index) {
+            "net"
         } else if self.computer.contains(&index) {
             "computer"
         } else {
@@ -115,7 +119,7 @@ mod tests {
     #[test]
     fn every_strip_and_the_stream_mix_by_default() {
         let layout = RecordLayout { strips: 3 };
-        let sources = StripSources { ndi: &[2], computer: &[1] };
+        let sources = StripSources { ndi: &[2], computer: &[1], net: &[] };
         let tracks = build_tracks(layout, &names(&["Pastor", "Choir", "Zoom"]), sources, &RecorderConfig::default());
         let bases: Vec<&str> = tracks.iter().map(|t| t.base.as_str()).collect();
         assert_eq!(bases, vec!["01 Pastor", "02 Choir", "03 Zoom", "Stream Mix"]);
@@ -123,6 +127,9 @@ mod tests {
         assert_eq!(tracks[1].source, "computer");
         assert_eq!(tracks[2].source, "ndi");
         assert_eq!(tracks[2].first_channel, 2);
+        let remote = StripSources { ndi: &[], computer: &[], net: &[0] };
+        assert_eq!(remote.source(0), "net");
+        assert_eq!(remote.source(1), "hardware");
         assert_eq!((tracks[3].first_channel, tracks[3].channels), (3, 2));
         assert_eq!(tracks[3].kind, TrackKind::Bus);
     }

@@ -24,17 +24,26 @@ mod protocol_tests;
 
 pub use settings::{NetAudioConfig, NetAudioSettings, MAX_NET_INPUTS};
 
-use crate::ndi::receive::drift::{frames_for_ms, DriftReader, OVERRUN_MARGIN_MS};
+use crate::ndi::receive::drift::{frames_for_ms, DriftReader};
 use protocol::{RoomKey, PACKET_FRAMES};
 use receiver::NetReceiver;
 use ringbuf::traits::{Consumer, Split};
 use ringbuf::{HeapCons, HeapProd, HeapRb};
 use sender::NetSender;
 use serde::Serialize;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 
 pub const STEREO: usize = 2;
+/// Largest read-ratio nudge for a Remote strip: ±0.5 %, so a burst of late
+/// packets drains back to the buffer target in seconds (NDI uses ±0.1 %).
+/// About 9 cents at full nudge, which only lasts while far from target.
+pub const NET_MAX_NUDGE: f64 = 0.005;
+/// Above target + this, a Remote strip's ring is trimmed back to target.
+pub const NET_OVERRUN_MS: usize = 80;
+/// Smallest buffer target: one packet plus one 10 ms device block, so a
+/// normal callback never finds the ring short.
+pub const MIN_TARGET_MS: usize = 15;
 
 /// Peer and send rings: one second of stereo at the engine rate.
 pub fn ring_capacity(sample_rate: u32) -> usize {
@@ -131,11 +140,11 @@ pub struct NetInputFeed<C> {
 
 impl<C: Consumer<Item = f32>> NetInputFeed<C> {
     pub fn new(consumer: C, sample_rate: u32, buffer_ms: u32, stats: Arc<PeerStats>) -> Self {
-        let target = frames_for_ms(sample_rate, buffer_ms as usize);
-        let high = target + frames_for_ms(sample_rate, OVERRUN_MARGIN_MS);
+        let target = frames_for_ms(sample_rate, (buffer_ms as usize).max(MIN_TARGET_MS));
+        let high = target + frames_for_ms(sample_rate, NET_OVERRUN_MS);
         NetInputFeed {
             consumer,
-            reader: DriftReader::with_levels(target, high),
+            reader: DriftReader::with_settings(target, high, NET_MAX_NUDGE),
             stats,
         }
     }
@@ -180,8 +189,12 @@ pub fn strip_identity(slot: usize) -> String {
 /// Counters of the sending side.
 #[derive(Debug, Default)]
 pub struct SenderStats {
-    /// A pong arrived within the last 3 seconds.
+    /// A pong arrived within the last 3 seconds and the receiver plays us.
     pub connected: AtomicBool,
+    /// A pong arrived within the last 3 seconds.
+    pub answered: AtomicBool,
+    /// The last pong's verdict (`protocol::PONG_*`).
+    pub verdict: AtomicU8,
     pub packets_sent: AtomicU64,
     pub send_errors: AtomicU64,
     /// Samples the send ring could not take (callback) or trimmed (thread).
@@ -430,6 +443,8 @@ pub fn peer_status(
 #[serde(rename_all = "camelCase")]
 pub struct SenderStatus {
     pub connected: bool,
+    /// Why an answering receiver does not play us: "full" or "rate".
+    pub refused: Option<&'static str>,
     pub address: String,
     pub rtt_ms: f32,
     pub packets_sent: u64,
@@ -442,8 +457,18 @@ pub fn sender_status(stats: &SenderStats) -> SenderStatus {
         Ok(guard) => guard.clone(),
         Err(poisoned) => poisoned.into_inner().clone(),
     };
+    let refused = if stats.answered.load(Ordering::Relaxed) {
+        match stats.verdict.load(Ordering::Relaxed) {
+            protocol::PONG_FULL => Some("full"),
+            protocol::PONG_RATE_MISMATCH => Some("rate"),
+            _ => None,
+        }
+    } else {
+        None
+    };
     SenderStatus {
         connected: stats.connected.load(Ordering::Relaxed),
+        refused,
         address,
         rtt_ms: us_to_ms(stats.rtt_us.load(Ordering::Relaxed)),
         packets_sent: stats.packets_sent.load(Ordering::Relaxed),

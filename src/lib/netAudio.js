@@ -18,7 +18,7 @@
 export const DEFAULT_PORT = 47810;
 export const MAX_NET_INPUTS = 4;
 export const DEFAULT_SLOTS = 2;
-export const MIN_BUFFER_MS = 5;
+export const MIN_BUFFER_MS = 15;
 export const MAX_BUFFER_MS = 200;
 export const DEFAULT_BUFFER_MS = 20;
 export const MIN_PASSPHRASE_CHARS = 8;
@@ -97,6 +97,7 @@ function normalizeSending(raw) {
   if (!raw || typeof raw !== 'object') return null;
   return {
     connected: Boolean(raw.connected),
+    refused: raw.refused === 'full' || raw.refused === 'rate' ? raw.refused : null,
     address: typeof raw.address === 'string' ? raw.address : '',
     rttMs: num(raw.rttMs),
     packetsSent: num(raw.packetsSent),

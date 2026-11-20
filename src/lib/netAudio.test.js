@@ -18,7 +18,7 @@ test('sanitizeNetAudio clamps every field like the engine', () => {
     send: { enabled: 1, target: '  church.local:47810\u0007 ', bus: ' STREAM ', stereo: 'yes', name: 'x'.repeat(50) },
     passphrase: ' secret-room ',
   });
-  assert.deepEqual(clean.receive, { enabled: true, port: DEFAULT_PORT, slots: MAX_NET_INPUTS, bufferMs: 5 });
+  assert.deepEqual(clean.receive, { enabled: true, port: DEFAULT_PORT, slots: MAX_NET_INPUTS, bufferMs: 15 });
   assert.equal(clean.send.enabled, true);
   assert.equal(clean.send.target, 'church.local:47810');
   assert.equal(clean.send.bus, 'stream');
@@ -68,6 +68,11 @@ test('netAudioFromEngineStatus reads peers and the sender', () => {
   assert.equal(status.peers[1].latencyMs, 0);
   assert.equal(status.sending.connected, true);
   assert.equal(status.sending.rttMs, 11.5);
+  assert.equal(status.sending.refused, null);
+  const full = netAudioFromEngineStatus({ net_audio: { sending: { connected: false, refused: 'full' } } });
+  assert.equal(full.sending.refused, 'full');
+  const odd = netAudioFromEngineStatus({ net_audio: { sending: { refused: 'other' } } });
+  assert.equal(odd.sending.refused, null);
   const stopped = netAudioFromEngineStatus({ running: false });
   assert.deepEqual(stopped, { receiving: false, port: null, error: null, badPackets: 0, peers: [], sending: null });
 });

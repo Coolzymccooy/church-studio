@@ -52,14 +52,23 @@ fn listen(passphrase: &str, own_session: u32) -> Loopback {
 }
 
 fn send_to(port: u16, passphrase: &str, session: u32) -> (NetSender, HeapProd<f32>, Arc<SenderStats>) {
-    let (producer, consumer) = HeapRb::<f32>::new(ring_capacity(RATE)).split();
+    send_at(port, passphrase, session, RATE)
+}
+
+fn send_at(
+    port: u16,
+    passphrase: &str,
+    session: u32,
+    rate: u32,
+) -> (NetSender, HeapProd<f32>, Arc<SenderStats>) {
+    let (producer, consumer) = HeapRb::<f32>::new(ring_capacity(rate)).split();
     let stats = Arc::new(SenderStats::default());
     let sender = NetSender::start(SendPlan {
         target: format!("127.0.0.1:{port}"),
         name: "Pastor laptop".to_string(),
         stereo: false,
         key: RoomKey::from_passphrase(passphrase),
-        sample_rate: RATE,
+        sample_rate: rate,
         session,
         consumer,
         stats: stats.clone(),
@@ -203,4 +212,56 @@ fn a_remote_strip_sounds_the_same_at_any_block_size() {
         let n = other.len().min(reference.len());
         assert_eq!(&other[..n], &reference[..n], "block {block}");
     }
+}
+
+#[test]
+fn a_burst_after_an_underrun_drains_back_to_the_buffer_target() {
+    // Late packets often arrive together after a dropout, leaving the ring
+    // well above its target. Latency must come back down within seconds.
+    let (mut producer, consumer) = HeapRb::<f32>::new(ring_capacity(RATE) * 2).split();
+    let stats = Arc::new(PeerStats::default());
+    let mut feed = NetInputFeed::new(consumer, RATE, 20, stats.clone());
+    let frames_per_ms = RATE as usize / 1_000;
+    push_tone(&mut producer, frames_per_ms * 60, 0.1);
+    let block = 256;
+    let mut out = vec![0.0f32; block];
+    let seconds = 12;
+    for _ in 0..(RATE as usize * seconds / block) {
+        push_tone(&mut producer, block, 0.1);
+        feed.pull(&mut out);
+    }
+    let fill_ms = stats.fill_frames.load(Ordering::Relaxed) as usize / frames_per_ms;
+    assert!(fill_ms <= 28, "still {fill_ms} ms buffered after {seconds} s");
+    assert_eq!(stats.underruns.load(Ordering::Relaxed), 0);
+}
+
+#[test]
+fn a_sender_learns_when_the_room_is_full() {
+    let rx = listen("full-room-pass", 1);
+    let (_first, mut first_audio, first) = send_to(rx.receiver.port(), "full-room-pass", 2);
+    push_tone(&mut first_audio, PACKET_FRAMES * 4, 0.5);
+    assert!(wait_until(Duration::from_secs(3), || first.connected.load(Ordering::Relaxed)));
+    let (_second, mut second_audio, second) = send_to(rx.receiver.port(), "full-room-pass", 3);
+    push_tone(&mut second_audio, PACKET_FRAMES * 4, 0.5);
+    assert!(wait_until(Duration::from_secs(4), || second.answered.load(Ordering::Relaxed)
+        && second.verdict.load(Ordering::Relaxed) == protocol::PONG_FULL));
+    assert!(!second.connected.load(Ordering::Relaxed));
+    assert_eq!(sender_status(&second).refused, Some("full"));
+}
+
+#[test]
+fn a_sender_at_another_sample_rate_is_told_so() {
+    let rx = listen("rate-room-pass", 1);
+    let (_sender, mut audio, stats) = send_at(rx.receiver.port(), "rate-room-pass", 2, 44_100);
+    // Keep audio flowing until the next ping's pong reports the mismatch.
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(4)
+        && stats.verdict.load(Ordering::Relaxed) != protocol::PONG_RATE_MISMATCH
+    {
+        push_tone(&mut audio, PACKET_FRAMES, 0.5);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(stats.verdict.load(Ordering::Relaxed), protocol::PONG_RATE_MISMATCH);
+    assert!(rx.peer.rate_mismatch_packets.load(Ordering::Relaxed) > 0);
+    assert_eq!(rx.peer_ring.occupied_len(), 0);
 }

@@ -34,11 +34,17 @@ pub fn frames_for_ms(sample_rate: u32, ms: usize) -> usize {
 /// `1 + MAX_NUDGE` (read faster) when fuller and down to `1 − MAX_NUDGE`
 /// when emptier. The full nudge is reached 50 % away from the target.
 pub fn ratio_for_fill(fill_frames: f64, target_frames: f64) -> f64 {
+    ratio_for_fill_with(fill_frames, target_frames, MAX_NUDGE)
+}
+
+/// `ratio_for_fill` with a largest nudge of `max_nudge` instead of
+/// `MAX_NUDGE` (network audio drains bursts faster).
+pub fn ratio_for_fill_with(fill_frames: f64, target_frames: f64, max_nudge: f64) -> f64 {
     if target_frames <= 0.0 || !fill_frames.is_finite() {
         return 1.0;
     }
     let error = (fill_frames - target_frames) / (target_frames * 0.5);
-    1.0 + (error * MAX_NUDGE).clamp(-MAX_NUDGE, MAX_NUDGE)
+    1.0 + (error * max_nudge).clamp(-max_nudge, max_nudge)
 }
 
 /// Smooths the fill level and turns it into a read ratio.
@@ -47,14 +53,20 @@ pub struct DriftController {
     target: f64,
     average: f64,
     primed: bool,
+    max_nudge: f64,
 }
 
 impl DriftController {
     pub fn new(target_frames: usize) -> Self {
+        Self::with_nudge(target_frames, MAX_NUDGE)
+    }
+
+    pub fn with_nudge(target_frames: usize, max_nudge: f64) -> Self {
         DriftController {
             target: target_frames as f64,
             average: target_frames as f64,
             primed: false,
+            max_nudge,
         }
     }
 
@@ -72,7 +84,7 @@ impl DriftController {
         } else {
             self.reset(fill_frames);
         }
-        ratio_for_fill(self.average, self.target)
+        ratio_for_fill_with(self.average, self.target, self.max_nudge)
     }
 }
 
@@ -118,9 +130,14 @@ impl DriftReader {
 
     /// `target` and `high` in stereo frames (`high` > `target`).
     pub fn with_levels(target: usize, high: usize) -> Self {
+        Self::with_settings(target, high, MAX_NUDGE)
+    }
+
+    /// `with_levels` with a largest ratio nudge of `max_nudge`.
+    pub fn with_settings(target: usize, high: usize, max_nudge: f64) -> Self {
         let target = target.max(2);
         DriftReader {
-            controller: DriftController::new(target),
+            controller: DriftController::with_nudge(target, max_nudge),
             target,
             high: high.max(target + 1),
             buffering: true,

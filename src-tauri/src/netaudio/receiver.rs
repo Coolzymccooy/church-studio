@@ -6,9 +6,16 @@
 //! ring producer, so each ring stays single-producer.
 //!
 //! Windows reports an ICMP "port unreachable" from an earlier send as a
-//! `ConnectionReset` on the next receive; that is ignored, not fatal.
+//! `ConnectionReset` on the next receive; that is ignored, not fatal. It
+//! also fails a receive (WSAEMSGSIZE) instead of truncating a datagram
+//! longer than the buffer, so the buffer holds any UDP datagram and an
+//! oversized one is just a bad packet.
+//!
+//! Only signed audio claims a slot, and a session already playing from one
+//! address cannot claim a second slot from another (a replayed packet).
 use super::protocol::{
-    decode, encode, Header, Kind, RoomKey, CODEC_PCM16, MAX_NAME_BYTES, MAX_PACKET,
+    decode, encode, Header, Kind, RoomKey, CODEC_PCM16, MAX_NAME_BYTES, MAX_PACKET, PONG_ACCEPTED,
+    PONG_FULL, PONG_RATE_MISMATCH,
 };
 use super::slots::{Claim, SlotTable};
 use super::stream::PeerStream;
@@ -25,6 +32,12 @@ use std::time::{Duration, Instant};
 const POLL: Duration = Duration::from_millis(5);
 const HOUSEKEEPING_MS: u64 = 100;
 const PING_INTERVAL_MS: u64 = 1_000;
+/// Largest UDP datagram: the receive buffer never truncates.
+const MAX_DATAGRAM: usize = 65_536;
+/// Windows `WSAEMSGSIZE`: the datagram did not fit the buffer.
+const WSAEMSGSIZE: i32 = 10_040;
+/// Back off only after this many unexpected receive errors in a row.
+const ERRORS_BEFORE_BACKOFF: u32 = 3;
 
 /// Everything the receiver thread needs.
 pub struct ReceivePlan {
@@ -120,21 +133,32 @@ impl Receiver {
     }
 
     fn run(mut self, stop: &AtomicBool) {
-        // One spare byte detects datagrams longer than any valid packet.
-        let mut buf = [0u8; MAX_PACKET + 1];
+        // Holds any datagram, so none is truncated (decode rejects the
+        // oversized ones).
+        let mut buf = vec![0u8; MAX_DATAGRAM];
         let mut last_housekeeping = 0u64;
         let mut last_ping = 0u64;
         let mut logged_error = false;
+        let mut errors_in_a_row = 0u32;
         while !stop.load(Ordering::Relaxed) {
             match self.socket.recv_from(&mut buf) {
-                Ok((len, from)) => self.handle(&buf[..len], from),
+                Ok((len, from)) => {
+                    errors_in_a_row = 0;
+                    self.handle(&buf[..len], from);
+                }
                 Err(e) if is_benign(e.kind()) => {}
+                Err(e) if e.raw_os_error() == Some(WSAEMSGSIZE) => {
+                    self.socket_stats.bad_packets.fetch_add(1, Ordering::Relaxed);
+                }
                 Err(e) => {
                     if !logged_error {
                         log::warn!("network audio receive error: {e}");
                         logged_error = true;
                     }
-                    std::thread::sleep(POLL);
+                    errors_in_a_row += 1;
+                    if errors_in_a_row >= ERRORS_BEFORE_BACKOFF {
+                        std::thread::sleep(POLL);
+                    }
                 }
             }
             let now_ms = self.now_us() / 1_000;
@@ -169,9 +193,14 @@ impl Receiver {
         }
     }
 
-    /// The slot for this peer, resetting it when the peer is new.
+    /// The slot for this peer, resetting it when the peer is new. A
+    /// session already playing from another address is a replay: refused.
     fn claim(&mut self, header: &Header, from: SocketAddr) -> Option<usize> {
         let now_ms = self.now_us() / 1_000;
+        if self.table.session_elsewhere(from, header.session) {
+            self.socket_stats.refused_packets.fetch_add(1, Ordering::Relaxed);
+            return None;
+        }
         match self.table.claim(from, header.session, now_ms) {
             Claim::Existing(slot) => Some(slot),
             Claim::New(slot) => {
@@ -219,18 +248,32 @@ impl Receiver {
         stats.jitter_us.store(jitter as u64, Ordering::Relaxed);
     }
 
-    /// A sender's ping names it; answer with a pong.
+    /// A sender's ping names it; the pong says whether it is played. A ping
+    /// never claims a slot: only audio does.
     fn on_ping(&mut self, header: &Header, payload: &[u8], from: SocketAddr) {
-        if let Some(slot) = self.claim(header, from) {
+        let slot = self.table.find(from, header.session);
+        if let Some(slot) = slot {
             let name = clean_name(payload);
             if !name.is_empty() {
                 self.stats[slot].set_name(name);
             }
         }
+        let verdict = match slot {
+            Some(slot) => {
+                let rate = self.stats[slot].sender_rate.load(Ordering::Relaxed);
+                if rate != 0 && rate != self.sample_rate {
+                    PONG_RATE_MISMATCH
+                } else {
+                    PONG_ACCEPTED
+                }
+            }
+            None if self.table.is_full() => PONG_FULL,
+            None => PONG_ACCEPTED,
+        };
         let pong = Header {
             kind: Kind::Pong,
             channels: 0,
-            codec: 0,
+            codec: verdict,
             session: self.own_session,
             seq: header.seq,
             stamp: header.stamp,

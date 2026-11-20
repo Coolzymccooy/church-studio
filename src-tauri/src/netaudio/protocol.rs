@@ -34,6 +34,12 @@ pub const CODEC_PCM16: u8 = 1;
 const PCM16_BYTES: usize = 2;
 pub const MAX_PAYLOAD: usize = PACKET_FRAMES * MAX_CHANNELS * PCM16_BYTES;
 pub const MAX_PACKET: usize = HEADER_LEN + MAX_PAYLOAD + TAG_LEN;
+/// A pong's `codec` byte says whether the receiver plays this peer.
+pub const PONG_ACCEPTED: u8 = 0;
+/// Every Remote strip is taken.
+pub const PONG_FULL: u8 = 1;
+/// The peer's sample rate differs from the receiver's.
+pub const PONG_RATE_MISMATCH: u8 = 2;
 /// Longest peer name carried in a ping, in bytes.
 pub const MAX_NAME_BYTES: usize = 64;
 const KEY_CONTEXT: &[u8] = b"tiwaton-netaudio-v1";

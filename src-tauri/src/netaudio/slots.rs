@@ -1,9 +1,10 @@
 //! Which remote peer feeds which Remote strip (decision 4).
 //!
 //! A peer is one sender run: its address plus its random session id. A new
-//! peer takes the first free slot. A sender that restarts (same IP, new
-//! session) while its old session has been silent for `TAKEOVER_MS` takes
-//! the old slot back, so a remote preacher stays on the same strip. A slot
+//! peer takes the first free slot. Only when no slot is free may a new
+//! session take the slot of one from the same IP that has been silent for
+//! `TAKEOVER_MS` (a sender that restarted without saying `bye`). A live
+//! peer never loses its strip to a neighbour behind the same NAT. A slot
 //! frees on `bye` or after `TIMEOUT_MS` without packets. Times are
 //! milliseconds on any monotonic clock.
 use std::net::SocketAddr;
@@ -12,7 +13,7 @@ use std::net::SocketAddr;
 pub const TIMEOUT_MS: u64 = 3_000;
 /// A restarted sender may take its old slot once the old session is this
 /// quiet.
-pub const TAKEOVER_MS: u64 = 500;
+pub const TAKEOVER_MS: u64 = 2_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Claim {
@@ -53,13 +54,16 @@ impl SlotTable {
             self.touch(index, now_ms);
             return Claim::Existing(index);
         }
-        let takeover = self.slots.iter().position(|slot| {
-            slot.is_some_and(|held| {
-                held.addr.ip() == addr.ip()
-                    && now_ms.saturating_sub(held.last_heard_ms) >= TAKEOVER_MS
+        let free = self.slots.iter().position(Option::is_none);
+        let takeover = || {
+            self.slots.iter().position(|slot| {
+                slot.is_some_and(|held| {
+                    held.addr.ip() == addr.ip()
+                        && now_ms.saturating_sub(held.last_heard_ms) >= TAKEOVER_MS
+                })
             })
-        });
-        let Some(index) = takeover.or_else(|| self.slots.iter().position(Option::is_none)) else {
+        };
+        let Some(index) = free.or_else(takeover) else {
             return Claim::Full;
         };
         self.slots[index] = Some(Holder {
@@ -81,6 +85,18 @@ impl SlotTable {
         if let Some(held) = self.slots[index].as_mut() {
             held.last_heard_ms = now_ms;
         }
+    }
+
+    /// `session` already holds a slot from an address other than `addr`.
+    pub fn session_elsewhere(&self, addr: SocketAddr, session: u32) -> bool {
+        self.slots
+            .iter()
+            .any(|slot| slot.is_some_and(|held| held.session == session && held.addr != addr))
+    }
+
+    /// Every slot is held.
+    pub fn is_full(&self) -> bool {
+        self.slots.iter().all(Option::is_some)
     }
 
     /// The peer said goodbye: free its slot.
@@ -134,13 +150,33 @@ mod tests {
     }
 
     #[test]
-    fn a_restarted_sender_takes_its_old_slot_back() {
+    fn a_restarted_sender_takes_its_old_slot_back_when_none_is_free() {
         let mut table = SlotTable::new(2);
         table.claim(addr("10.0.0.2:5000"), 7, 0);
         table.claim(addr("10.0.0.1:5000"), 1, 0);
+        assert!(table.is_full());
         // Same machine, new port and session, old session quiet.
+        assert_eq!(table.claim(addr("10.0.0.1:6000"), 9, TAKEOVER_MS - 1), Claim::Full);
         assert_eq!(table.claim(addr("10.0.0.1:6000"), 9, TAKEOVER_MS), Claim::New(1));
         assert_eq!(table.find(addr("10.0.0.1:5000"), 1), None);
+    }
+
+    #[test]
+    fn a_free_slot_wins_over_taking_a_quiet_neighbours() {
+        let mut table = SlotTable::new(2);
+        table.claim(addr("10.0.0.1:5000"), 1, 0);
+        // Another person behind the same NAT, while the first is quiet.
+        assert_eq!(table.claim(addr("10.0.0.1:5001"), 2, TAKEOVER_MS * 2), Claim::New(1));
+        assert_eq!(table.find(addr("10.0.0.1:5000"), 1), Some(0));
+    }
+
+    #[test]
+    fn a_session_playing_elsewhere_is_spotted() {
+        let mut table = SlotTable::new(2);
+        table.claim(addr("10.0.0.1:5000"), 1, 0);
+        assert!(table.session_elsewhere(addr("10.0.0.9:7000"), 1));
+        assert!(!table.session_elsewhere(addr("10.0.0.1:5000"), 1));
+        assert!(!table.session_elsewhere(addr("10.0.0.9:7000"), 2));
     }
 
     #[test]

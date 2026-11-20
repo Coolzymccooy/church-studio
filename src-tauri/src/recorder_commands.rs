@@ -243,11 +243,14 @@ pub async fn recorder_start(
             .iter()
             .flat_map(|audio| [audio.strips.0, audio.strips.1])
             .collect();
+        let net_strips: Vec<usize> =
+            running.net_audio.inputs.iter().map(|input| input.strip).collect();
         let names = strip_names(mixer.inner(), running.strip_layout());
         let layout = running.recorder.layout();
         let sources = StripSources {
             ndi: &ndi_strips,
             computer: &computer_strips,
+            net: &net_strips,
         };
         let tracks = build_tracks(layout, &names, sources, &config);
         (tracks, layout, running.recorder.sample_rate(), running.recorder.shared())

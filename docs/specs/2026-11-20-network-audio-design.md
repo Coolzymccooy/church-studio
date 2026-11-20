@@ -43,18 +43,27 @@ bus → [callback → SPSC ring] → sender thread ── UDP ──→ receiver
    come with the internet slice. New Remote strips start with the fader down, like
    every new strip.
 4. **Receive: one UDP socket and one thread, up to 4 peer slots** (1 to 4, set by
-   the operator). The slots are reserved at engine start, after the NDI strips, so
-   the strip count never changes while running (the same rule as NDI). A peer takes
-   the first free slot; a slot frees after a `bye` or 3 s without packets.
+   the operator). The slots are reserved at engine start as Remote strips right after
+   the hardware strips, before the computer pair, so NDI strips stay last and older
+   clients still find every strip. The strip count never changes while running (the
+   same rule as NDI). Only signed audio claims a slot; a peer takes the first free
+   slot, and a slot frees after a `bye` or 3 s without packets. A session already
+   playing from one address cannot claim a second slot from another (a replay). A
+   sender restarted without `bye` may take its old slot only when none is free.
 5. **Jitter buffer, slice 1.** The receiver thread writes each peer's samples into
    its ring in sequence order. A lost packet becomes 5 ms of faded silence so timing
    holds; late and duplicate packets are dropped and counted. The audio callback
    reads the ring with the NDI `DriftReader` held at the peer's buffer target
-   (default 20 ms, 5–200 ms), which also corrects clock drift by ±0.1 %. The
-   adaptive target comes in slice 2; slice 1 measures and shows the jitter so the
-   operator can set it.
+   (default 20 ms, 15–200 ms), which also corrects clock drift. Remote strips use a
+   ±0.5 % nudge (NDI uses ±0.1 %), so a burst of late packets after a dropout drains
+   back to the target within seconds instead of leaving latency high; 80 ms over
+   target, the ring is trimmed back. The adaptive target comes in slice 2; slice 1
+   measures and shows the jitter so the operator can set it.
 6. **Latency is measured and shown.** The receiver pings each peer once a second and
-   the sender answers. Shown latency = packet (5 ms) + half the round trip + current
+   the sender answers. The sender pings too, and the receiver's pong says whether it
+   plays that sender (accepted, room full, or wrong sample rate), so the remote
+   operator never sees "linked" while nothing plays. Both Studios must run at the
+   same sample rate in slice 1. Shown latency = packet (5 ms) + half the round trip + current
    buffer fill + the engine's own latency. The two-machine test also measures the
    true audio round trip (see Test plan).
 7. **Send** copies the chosen bus into a lock-free ring in the callback, as NDI out

@@ -20,6 +20,14 @@ function describeError(err) {
   return 'Could not change network audio.';
 }
 
+/** The sender lamp: tone and word. */
+function sendingLamp(sending) {
+  if (sending.connected) return { tone: 'g', text: `${sending.rttMs.toFixed(0)} ms` };
+  if (sending.refused === 'full') return { tone: 'r', text: 'room full' };
+  if (sending.refused === 'rate') return { tone: 'r', text: 'rate differs' };
+  return { tone: 'a', text: 'no answer' };
+}
+
 /** The value after `current` in `list` (wrapping). */
 function nextIn(list, current) {
   const index = list.indexOf(current);
@@ -226,11 +234,7 @@ function NetworkAudioCard({ isLive }) {
             </div>
             <TextField id="net-send-name" label="Name" value={send.name} placeholder="this computer"
               disabled={busy} onCommit={(name) => setSend({ name })} />
-            {sending && (
-              <Lamp tone={sending.connected ? 'g' : 'a'}>
-                {sending.connected ? `${sending.rttMs.toFixed(0)} ms` : 'no answer'}
-              </Lamp>
-            )}
+            {sending && <Lamp tone={sendingLamp(sending).tone}>{sendingLamp(sending).text}</Lamp>}
           </>
         )}
 
@@ -242,6 +246,11 @@ function NetworkAudioCard({ isLive }) {
           </>
         )}
 
+        {receive.enabled && send.enabled && (
+          <div className="fp-sub fp-caution" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            May echo <InfoTip label="Echo">If the other Studio also sends you its mix, each side hears itself back once its Remote fader is up. Keep Remote strips out of the bus you send, or send the Monitor bus.</InfoTip>
+          </div>
+        )}
         {problem && <div className="fp-sub fp-fault" role="alert">{problem}</div>}
         {notice && !problem && (
           <div className={notice.error ? 'fp-sub fp-fault' : 'fp-sub fp-caution'} role={notice.error ? 'alert' : undefined}>{notice.text}</div>
