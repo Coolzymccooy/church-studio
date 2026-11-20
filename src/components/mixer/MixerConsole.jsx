@@ -8,6 +8,7 @@ import Key from '../faceplate/Key.jsx';
 import Lamp from '../faceplate/Lamp.jsx';
 import { ScaleContext } from '../faceplate/scaleContext.js';
 import RecordPanel from '../recorder/RecordPanel.jsx';
+import DcaBank from './DcaBank.jsx';
 import BusStrip from './BusStrip.jsx';
 import ObsPlate from './ObsPlate.jsx';
 import ScenesPlate from './ScenesPlate.jsx';
@@ -52,7 +53,7 @@ function useStripSize(rowPx) {
   return { size, scale: stripScale(size, height, rowPx), areaRef, cycle };
 }
 
-function BankRow({ banks, bank, onBank, stripCount, demoBanner, sizeLabel, onCycleSize }) {
+function BankRow({ banks, bank, onBank, stripCount, demoBanner, sizeLabel, onCycleSize, groupKey }) {
   return (
     <div className="fp-bar" role="group" aria-label="Strip banks">
       {banks.length > 1 && (
@@ -71,6 +72,7 @@ function BankRow({ banks, bank, onBank, stripCount, demoBanner, sizeLabel, onCyc
           <InfoTip label="Demo mixer">{demoBanner}</InfoTip>
         </span>
       )}
+      {groupKey}
       <div className="fp-bar-end">
         <Key onClick={onCycleSize} aria-label={`strip ${sizeLabel}`}>{sizeLabel}</Key>
       </div>
@@ -85,11 +87,12 @@ function BankRow({ banks, bank, onBank, stripCount, demoBanner, sizeLabel, onCyc
  * Tauri controller and the in-memory demo controller.
  */
 export default function MixerConsole({ controller, refreshKey, demoBanner, onOpenObs }) {
+  const [showGroups, setShowGroups] = useState(false);
   const {
     state, loading, toast, dismissToast, metersRef, currentScene,
     setStripParam, setStripBool, renameStrip,
     setBusParam, setBusBool,
-    saveScene, loadScene, deleteScene,
+    saveScene, loadScene, deleteScene, setGroup,
   } = useMixer(controller, refreshKey);
   const extraMonitors = activeExtraMonitors(state?.buses);
   const { size, scale, areaRef, cycle } = useStripSize(stripRowPx(state?.strips, extraMonitors.length));
@@ -116,17 +119,20 @@ export default function MixerConsole({ controller, refreshKey, demoBanner, onOpe
       <BankRow
         banks={banks}
         bank={bank}
-        onBank={setBankId}
+        onBank={(id) => { setBankId(id); setShowGroups(false); }}
         stripCount={state.strips.length}
         demoBanner={demoBanner}
         sizeLabel={stripSizeLabel(size)}
         onCycleSize={cycle}
+        groupKey={state.groups && <Key lit={showGroups ? 'sel' : null} pressed={showGroups}
+          onClick={() => setShowGroups((open) => !open)}>Groups</Key>}
       />
 
       <div ref={areaRef} className="flex-1 flex overflow-hidden min-h-0">
         <ScaleContext.Provider value={scale}>
           <div className="fp-desk-scale" style={{ zoom: scale }}>
-            <div className="flex-1 flex gap-2 p-2 overflow-x-auto">
+            {showGroups && state.groups && <DcaBank groups={state.groups} strips={state.strips} onChange={setGroup} />}
+            <div className={showGroups ? 'hidden' : 'flex-1 flex gap-2 p-2 overflow-x-auto'}>
               {shown.map((strip) => (
                 <ChannelStrip
                   key={strip.index}

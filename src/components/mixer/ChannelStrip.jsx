@@ -4,7 +4,7 @@ import { faderDbToPosition, formatDb, positionToFaderDb } from '../../lib/mixerE
 import {
   DUCK_KNOB, STRIP_KNOBS, STRIP_ROWS, grText, hasAutomix, reductionText, stripColour, stripGateTone,
 } from '../../lib/faceplateStrip.js';
-import { Fader, Glass, Key, Knob, MeterLadder } from '../faceplate/index.js';
+import { Fader, Glass, InfoTip, Key, Knob, MeterLadder } from '../faceplate/index.js';
 
 const FADER_HEIGHT = 132;
 const LADDER_HEIGHT = FADER_HEIGHT - 18;
@@ -148,7 +148,7 @@ export default function ChannelStrip({ strip, metersRef, onSetParam, onSetBool, 
 
   return (
     <div className="fp-strip" role="group" aria-label={`Channel ${strip.index + 1} ${name}`}>
-      <div className={`fp-scrib fp-c-${stripColour(strip.index)}${strip.mute ? ' fp-dim' : ''}`}>
+      <div className={`fp-scrib fp-c-${stripColour(strip.index)}${strip.mute || strip.group_muted ? ' fp-dim' : ''}`}>
         <span className="fp-no">{String(strip.index + 1).padStart(2, '0')}</span>
         <input
           value={nameDraft}
@@ -177,6 +177,12 @@ export default function ChannelStrip({ strip, metersRef, onSetParam, onSetBool, 
       {hasAutomix(strip) && strip.duck && knobRow(['duck'])}
       <KeyPair>{boolKey('mute', 'mute', 'amber', 'mute')}{boolKey('solo', 'pfl', 'sel', 'listen on monitor')}</KeyPair>
 
+      {strip.group_muted && (
+        <div className="fp-keys items-center">
+          <span className="fp-sub">Group mute</span>
+          <InfoTip label={`${name} group mute`}>A DCA or mute group is muting this channel.</InfoTip>
+        </div>
+      )}
       <StripDyn getMeter={meter} gateEnabled={strip.gate_enabled} />
       {hasAutomix(strip) && (strip.automix || strip.duck) && (
         <StripAuto getMeter={meter} mode={strip.automix ? 'automix' : 'duck'} />

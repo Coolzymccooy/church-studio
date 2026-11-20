@@ -1,13 +1,4 @@
 //! Control side of the live mixer (`docs/specs/2026-09-27-mixer-live-contract.md`).
-//!
-//! `MixerControl` is Tauri-managed state that exists whether or not the audio
-//! engine runs, so the UI can prepare a mix while stopped. It owns:
-//! - the shared `Arc<MixerParams>` (atomics only; the audio thread reads it),
-//! - the index of the strip carrying the voice chain (`AtomicUsize`, read by
-//!   the audio thread),
-//! - strip names (control side only; never touched by the audio thread).
-//!
-//! Everything here is pure (no Tauri, no files) so it can be unit-tested.
 use crate::dsp::mixer::leveler::{
     LEVELER_TARGET_DEFAULT, LEVELER_TARGET_MAX, LEVELER_TARGET_MIN,
 };
@@ -16,6 +7,7 @@ use crate::dsp::mixer::params::{
     BUS_STREAM, DUCK_DEPTH_DEFAULT_DB, DUCK_DEPTH_MAX_DB, NUM_BUSES,
 };
 use crate::dsp::mixer::scene::StripScene;
+use crate::dsp::mixer::groups::{GroupState, Membership};
 use crate::dsp::mixer::{MixerParams, MixerScene};
 use crate::mixer_layout::StripLayout;
 pub use crate::mixer_model::{BusState, MixerState, StoredScene, StripState};
@@ -172,6 +164,7 @@ pub fn default_fader_db(index: usize) -> f32 {
 /// HPF on, gate threshold −45 dB, Monitor send 0 dB pre-fader, and every
 /// strip but the first with its fader off).
 fn reset_strip(index: usize, p: &StripParams) {
+    p.groups.store(Membership::default());
     for spec in STRIP_F32_KEYS.iter() {
         if let Some(field) = strip_f32(p, spec.0) {
             field.store(spec.3, Relaxed);
@@ -650,12 +643,15 @@ impl MixerControl {
         Ok(())
     }
 
-    fn strip_state(&self, index: usize, name: String, running: bool) -> StripState {
+    fn strip_state(&self, index: usize, name: String, running: bool, groups: &GroupState) -> StripState {
         let p = &self.params.strips[index];
         let f = |key: &str| strip_f32(p, key).map(|a| a.load(Relaxed)).unwrap_or(0.0);
         let b = |key: &str| strip_bool(p, key).map(|a| a.load(Relaxed)).unwrap_or(false);
+        let group_membership = p.groups.capture();
         StripState {
             index: index as u32,
+            group_membership,
+            group_muted: groups.muted(group_membership),
             name,
             trim_db: f("trim_db"),
             polarity: b("polarity"),
@@ -688,16 +684,11 @@ impl MixerControl {
         }
     }
 
-    /// Build the `MixerState` JSON model. `input_channels` is the running
-    /// engine's channel count (1 when stopped); one strip is listed per
-    /// input channel, capped at `MAX_STRIPS`.
     #[cfg(test)] // tests only; the app uses `snapshot_layout`
     pub fn snapshot(&self, input_channels: u32, running: bool, scenes: Vec<String>) -> MixerState {
         self.snapshot_with_ndi(input_channels, 0, running, scenes)
     }
 
-    /// `snapshot`, plus one strip per running NDI input after the hardware
-    /// strips (`StripLayout`).
     #[cfg(test)] // tests only; the app uses `snapshot_layout`
     pub fn snapshot_with_ndi(
         &self,
@@ -710,8 +701,6 @@ impl MixerControl {
         self.snapshot_layout(layout, running, scenes)
     }
 
-    /// `MixerState` for the strips of `layout` (hardware, computer, NDI),
-    /// with no bus output devices (every bus `output` is null).
     pub fn snapshot_layout(
         &self,
         layout: StripLayout,
@@ -731,11 +720,12 @@ impl MixerControl {
         outputs: &BusOutputs,
     ) -> MixerState {
         let count = layout.total();
+        let groups = self.params.groups.capture();
         let names: Vec<String> = self.names.lock().clone();
         let strips = (0..count)
             .map(|i| {
                 let name = names.get(i).cloned().unwrap_or_else(|| default_strip_name(i));
-                self.strip_state(i, name, running)
+                self.strip_state(i, name, running, &groups)
             })
             .collect();
         let buses = BUS_IDS
@@ -758,6 +748,7 @@ impl MixerControl {
             ndi_strips: layout.ndi as u32,
             net_strips: layout.net as u32,
             running,
+            groups,
             strips,
             buses,
             scenes,

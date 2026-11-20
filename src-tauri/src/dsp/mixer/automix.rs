@@ -17,6 +17,7 @@
 //! happens at engine start, never when the first talker starts mid-service. All state advances per sample (VAD on fixed 480-sample frames,
 //! noise floor on fixed 10 ms frames), so the block size never changes the
 //! result.
+use super::groups::GroupState;
 use super::params::{clamp_or, StripParams, DUCK_DEPTH_DEFAULT_DB, DUCK_DEPTH_MAX_DB, MIN_DB};
 use nnnoiseless::DenoiseState;
 use std::sync::atomic::Ordering::Relaxed;
@@ -369,12 +370,14 @@ impl AutoMix {
 
     /// Read the strip flags for this block. Muted strips and strips with the
     /// fader off leave the group; `duck` wins over `automix`.
-    fn sync(&mut self, params: &[StripParams]) {
+    fn sync(&mut self, params: &[StripParams], groups: &GroupState) {
         self.any_duck = false;
         self.any_member = false;
         for (slot, p) in self.slots.iter_mut().zip(params.iter()) {
             let duck = p.duck.load(Relaxed);
-            let audible = !p.mute.load(Relaxed) && p.fader_db.load(Relaxed) > MIN_DB;
+            let group = groups.strip_gain(p.groups.capture());
+            let audible = !group.muted && group.level > 0.0
+                && !p.mute.load(Relaxed) && p.fader_db.load(Relaxed) > MIN_DB;
             let automix = p.automix.load(Relaxed) && !duck;
             slot.duck = duck;
             slot.member = automix && audible;
@@ -403,11 +406,12 @@ impl AutoMix {
         params: &[StripParams],
         n: usize,
         detect: impl Fn(usize) -> &'a [f32],
+        groups: &GroupState,
     ) {
         if !self.warmed {
             self.warm_up();
         }
-        self.sync(params);
+        self.sync(params, groups);
         let n = n.min(self.slots.first().map(|s| s.out.len()).unwrap_or(0));
         for t in 0..n {
             self.tick(t, &detect);

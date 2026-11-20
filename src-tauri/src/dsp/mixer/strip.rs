@@ -31,6 +31,7 @@
 //! strip's latency is `latency_samples()`). Trade-off: a gated strip is
 //! 20 ms behind an ungated one, which matters only when two strips carry the
 //! same source.
+use super::groups::StripGroupGain;
 use super::params::{
     clamp_or, fader_db_to_lin, StripParams, BUS_MAIN, BUS_MONITOR, BUS_MONITOR2, BUS_MONITOR3,
     BUS_STREAM, EQ_MAX_DB, NUM_BUSES, PAN_LAW_NORM, TRIM_MAX_DB, TRIM_MIN_DB,
@@ -168,7 +169,7 @@ impl Strip {
 
     /// Update ramp targets from the shared params. `snap` jumps straight to
     /// the targets (first block after construction).
-    fn update_targets(&mut self, p: &StripParams, any_solo: bool, snap: bool) {
+    fn update_targets(&mut self, p: &StripParams, any_solo: bool, snap: bool, group: StripGroupGain) {
         let trim = clamp_or(p.trim_db.load(Relaxed), TRIM_MIN_DB, TRIM_MAX_DB, 0.0);
         let sign = if p.polarity_invert.load(Relaxed) { -1.0 } else { 1.0 };
         let in_gain = sign * 10f32.powf(trim / 20.0);
@@ -177,8 +178,8 @@ impl Strip {
         let angle = (pan + 1.0) * std::f32::consts::FRAC_PI_4;
         let (pan_l, pan_r) = (angle.cos() * PAN_LAW_NORM, angle.sin() * PAN_LAW_NORM);
 
-        let fader = fader_db_to_lin(p.fader_db.load(Relaxed));
-        let mute = if p.mute.load(Relaxed) { 0.0 } else { 1.0 };
+        let fader = fader_db_to_lin(p.fader_db.load(Relaxed)) * group.level;
+        let mute = if p.mute.load(Relaxed) || group.muted { 0.0 } else { 1.0 };
 
         let mut sends = [0.0f32; NUM_BUSES];
         for (dst, src) in sends.iter_mut().zip(p.send_db.iter()) {
@@ -267,7 +268,7 @@ impl Strip {
         snap: bool,
         buses: &mut [StereoBuffer; NUM_BUSES],
     ) {
-        self.process_pre(input, frames, p, any_solo, snap);
+        self.process_pre(input, frames, p, any_solo, snap, StripGroupGain::default());
         self.process_out(&[], buses);
     }
 
@@ -285,9 +286,10 @@ impl Strip {
         p: &StripParams,
         any_solo: bool,
         snap: bool,
+        group: StripGroupGain,
     ) {
         let n = frames.min(self.scratch.len());
-        self.update_targets(p, any_solo, snap);
+        self.update_targets(p, any_solo, snap, group);
         self.update_filters(p);
 
         let hpf_on = p.hpf_enabled.load(Relaxed);

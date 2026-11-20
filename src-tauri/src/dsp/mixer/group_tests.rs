@@ -1,6 +1,4 @@
-use super::{
-    Mixer, MixerParams, MixerScene, BUS_MAIN, BUS_MONITOR, BUS_STREAM,
-};
+use super::{Mixer, MixerParams, MixerScene, BUS_MAIN, BUS_MONITOR, BUS_STREAM};
 use std::sync::{atomic::Ordering::Relaxed, Arc};
 
 fn signal_on(mixer: &mut Mixer, bus: usize) -> f32 {
@@ -12,7 +10,10 @@ fn signal_on(mixer: &mut Mixer, bus: usize) -> f32 {
 }
 
 fn near(value: f32, expected: f32) {
-    assert!((value - expected).abs() < 0.001, "expected {expected}, got {value}");
+    assert!(
+        (value - expected).abs() < 0.001,
+        "expected {expected}, got {value}"
+    );
 }
 
 #[test]
@@ -26,13 +27,19 @@ fn dca_moves_effective_output_while_member_faders_and_prefader_sends_stay_put() 
     p.groups.faders[1].store(-6.0, Relaxed);
 
     let mut mixer = Mixer::new(48_000.0, 512, 2, p.clone());
-    near(signal_on(&mut mixer, BUS_MAIN), 0.2 * 10f32.powf(-12.0 / 20.0));
+    near(
+        signal_on(&mut mixer, BUS_MAIN),
+        0.2 * 10f32.powf(-12.0 / 20.0),
+    );
     near(signal_on(&mut mixer, BUS_STREAM), 0.2);
     near(signal_on(&mut mixer, BUS_MONITOR), 0.2);
     assert_eq!(p.strips[0].fader_db.load(Relaxed), 0.0);
 
     p.strips[0].monitor_post_fader.store(true, Relaxed);
-    near(signal_on(&mut mixer, BUS_MONITOR), 0.2 * 10f32.powf(-12.0 / 20.0));
+    near(
+        signal_on(&mut mixer, BUS_MONITOR),
+        0.2 * 10f32.powf(-12.0 / 20.0),
+    );
     p.groups.faders[0].store(-90.0, Relaxed);
     p.groups.faders[1].store(10.0, Relaxed);
     near(signal_on(&mut mixer, BUS_MAIN), 0.0);

@@ -31,6 +31,7 @@ pub mod params;
 pub mod scene;
 pub mod smooth;
 pub mod strip;
+pub mod groups;
 
 #[cfg(test)]
 mod automix_tests;
@@ -179,16 +180,19 @@ impl Mixer {
         let empty: &[f32] = &[];
 
         // Pass 1: every strip up to the pre-fader point.
+        let groups = params.groups.capture();
         for (i, strip) in self.strips.iter_mut().enumerate() {
             let input = inputs.get(i).copied().unwrap_or(empty);
-            strip.process_pre(input, n, &params.strips[i], any_solo, snap);
+            let params = &params.strips[i];
+            let group_gain = groups.strip_gain(params.groups.capture());
+            strip.process_pre(input, n, params, any_solo, snap, group_gain);
         }
 
         // Automix and ducking gains across the strips, sample by sample.
         let num = self.strips.len();
         let strips = &self.strips;
         self.automix
-            .process(&params.strips[..num], n, |i| strips[i].detection());
+            .process(&params.strips[..num], n, |i| strips[i].detection(), &groups);
 
         // Pass 2: fader × automix × duck, pan, sends → buses.
         for (i, strip) in self.strips.iter_mut().enumerate() {

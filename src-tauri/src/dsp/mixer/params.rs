@@ -3,6 +3,7 @@
 //! stores, the audio thread loads once per block.
 use super::leveler::LEVELER_TARGET_DEFAULT;
 use atomic_float::AtomicF32;
+use super::groups::{GroupParams, StripGroups};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Number of stereo buses (`docs/specs/2026-11-20-monitor-mixes.md`).
@@ -60,6 +61,7 @@ pub fn clamp_or(v: f32, lo: f32, hi: f32, fallback: f32) -> f32 {
 
 /// Controls for one mono input strip.
 pub struct StripParams {
+    pub groups: StripGroups,
     pub trim_db: AtomicF32,
     pub polarity_invert: AtomicBool,
     pub hpf_enabled: AtomicBool,
@@ -124,6 +126,7 @@ impl Default for StripLive {
 impl StripParams {
     pub fn new() -> Self {
         StripParams {
+            groups: StripGroups::default(),
             trim_db: AtomicF32::new(0.0),
             polarity_invert: AtomicBool::new(false),
             hpf_enabled: AtomicBool::new(false),
@@ -196,6 +199,7 @@ impl Default for BusParams {
 /// All mixer controls. Sized once at construction; never resized.
 pub struct MixerParams {
     pub strips: Vec<StripParams>,
+    pub groups: GroupParams,
     pub buses: [BusParams; NUM_BUSES],
 }
 
@@ -203,6 +207,7 @@ impl MixerParams {
     pub fn new(num_strips: usize) -> Self {
         MixerParams {
             strips: (0..num_strips).map(|_| StripParams::new()).collect(),
+            groups: GroupParams::new(),
             buses: std::array::from_fn(|_| BusParams::new()),
         }
     }

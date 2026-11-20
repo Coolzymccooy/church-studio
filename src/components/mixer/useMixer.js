@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { applyStripChange, clampStripValue, createCoalescer } from '../../lib/mixerEngine.js';
 
+import { applyGroupChange, hasGroup } from '../../lib/mixerGroups.js';
+
 const TOAST_MS = 4000;
 
 /**
@@ -213,6 +215,22 @@ export function useMixer(controller, refreshKey) {
     );
   }, [controller, withOptimism]);
 
+  const setGroup = useCallback((change) => {
+    const { type, index, strip, kind } = change;
+    withOptimism(
+      (prev) => applyGroupChange(prev, change),
+      (prev) => {
+        if (type === 'fader') {
+          return (latest) => applyGroupChange(latest, { ...change, db: prev.groups.faders[index] });
+        }
+        const mask = type === 'membership' ? prev.strips.find((s) => s.index === strip)?.group_membership[kind]
+          : type === 'dcaMute' ? prev.groups.dca_muted : prev.groups.mute_active;
+        return (latest) => applyGroupChange(latest, { ...change, enabled: hasGroup(mask, index) });
+      },
+      () => coalesce(`group:${type}:${index}:${strip}:${kind}`, () => controller.setGroup(change)),
+    );
+  }, [controller, coalesce, withOptimism]);
+
   const saveScene = useCallback(async (name) => {
     try {
       await controller.saveScene(name);
@@ -260,6 +278,7 @@ export function useMixer(controller, refreshKey) {
     renameStrip,
     setBusParam,
     setBusBool,
+    setGroup,
     saveScene,
     loadScene,
     deleteScene,

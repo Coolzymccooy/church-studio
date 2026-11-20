@@ -344,9 +344,10 @@ fn mixer_state_json_shape_matches_contract() {
     let v = serde_json::to_value(&state).unwrap();
 
     assert_eq!(
-        keys(&v),
+        keys(&v).into_iter().filter(|key| key != "groups").collect::<BTreeSet<_>>(),
         set(&["inputChannels", "computerStrips", "ndiStrips", "netStrips", "running", "strips", "buses", "scenes"])
     );
+    assert_eq!(v["groups"]["faders"], serde_json::json!([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]));
     assert_eq!(v["ndiStrips"], 0);
     assert_eq!(v["netStrips"], 0);
     assert_eq!(v["inputChannels"], 2);
@@ -358,7 +359,7 @@ fn mixer_state_json_shape_matches_contract() {
     assert_eq!(
         keys(&strips[0]),
         set(&[
-            "index", "name", "trim_db", "polarity", "hpf_enabled", "hpf_hz", "gate_enabled",
+            "index", "name", "group_membership", "group_muted", "trim_db", "polarity", "hpf_enabled", "hpf_hz", "gate_enabled",
             "gate_threshold_db", "eq_low_db", "eq_mid_db", "eq_high_db", "comp_enabled",
             "comp_threshold_db", "comp_ratio", "pan", "mute", "solo", "fader_db",
             "send_main_db", "send_stream_db", "send_monitor_db", "send_monitor2_db",
