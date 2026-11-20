@@ -11,6 +11,7 @@
 use crate::dsp::mixer::params::{
     clamp_or, BusParams, StripParams, BUS_MAIN, BUS_MONITOR, BUS_STREAM, NUM_BUSES,
 };
+use crate::dsp::mixer::scene::StripScene;
 use crate::dsp::mixer::{MixerParams, MixerScene};
 use crate::mixer_layout::StripLayout;
 pub use crate::mixer_model::{BusState, MixerState, StoredScene, StripState};
@@ -371,19 +372,39 @@ impl StripOrigin {
     }
 }
 
+/// Where a source sat at the last engine start, when it is not `index`.
+/// Hardware strips are matched by index only (their identity is shared).
+fn previous_index(origins: &[StripOrigin], identity: &str, index: usize) -> Option<usize> {
+    if identity == HARDWARE_STRIP {
+        return None;
+    }
+    origins
+        .iter()
+        .position(|origin| origin.identity == identity)
+        .filter(|&previous| previous != index)
+}
+
 /// Record what feeds each strip at engine start (`engine_strip_feeds`).
 ///
-/// Strip params are kept by index, so a strip whose feed changed since
-/// the last start (hardware ↔ NDI, or another NDI source) goes back to
-/// the new-strip defaults (fader off above strip 0) and its default name,
-/// and drops the voice chain rather than moving it to another signal.
-/// An automatic label only replaces a default name or the previous
-/// automatic label, never the operator's rename; an invalid label is
-/// ignored. Strips not in `feeds` keep their record. Returns the indices
+/// Strip params are kept by index. A source that moved to another index
+/// (the computer pair or an NDI input, when the input device gains or loses
+/// channels) takes its params, name and voice chain with it. A strip whose
+/// feed is new (hardware ↔ NDI, another NDI source) goes back to the
+/// new-strip defaults (fader off above strip 0) plus its feed's preset and
+/// its default name, and drops the voice chain rather than moving it to
+/// another signal. An automatic label only replaces a default name or the
+/// previous automatic label, never the operator's rename; an invalid label
+/// is ignored. Strips not in `feeds` keep their record. Returns the indices
 /// that were reset.
 fn assign_feeds(link: &MixerLink, feeds: &[StripFeed]) -> Vec<usize> {
     let mut names = link.names.lock();
     let mut origins = link.origins.lock();
+    // Everything as it was, so moves can chain (L 2→3 while R 3→4).
+    let before: Vec<StripScene> = link.params.strips.iter().map(StripScene::capture).collect();
+    let names_before = names.clone();
+    let origins_before = origins.clone();
+    let voice_before = link.voice_strip.load(Relaxed);
+    let mut voice = voice_before;
     let mut reset = Vec::new();
     for feed in feeds {
         let index = feed.index;
@@ -395,13 +416,25 @@ fn assign_feeds(link: &MixerLink, feeds: &[StripFeed]) -> Vec<usize> {
             continue;
         };
         if origin.identity != feed.identity {
-            reset_strip(index, strip);
-            apply_preset(feed.preset, strip);
-            *name = default_strip_name(index);
-            if link.voice_strip.load(Relaxed) == index {
-                link.voice_strip.store(NO_VOICE_STRIP, Relaxed);
+            match previous_index(&origins_before, &feed.identity, index) {
+                Some(previous) => {
+                    before[previous].apply(strip);
+                    *name = names_before[previous].clone();
+                    *origin = origins_before[previous].clone();
+                    if voice_before == previous {
+                        voice = index;
+                    }
+                }
+                None => {
+                    reset_strip(index, strip);
+                    apply_preset(feed.preset, strip);
+                    *name = default_strip_name(index);
+                    if voice_before == index && voice == voice_before {
+                        voice = NO_VOICE_STRIP;
+                    }
+                    reset.push(index);
+                }
             }
-            reset.push(index);
         }
         let label = feed
             .label
@@ -417,6 +450,7 @@ fn assign_feeds(link: &MixerLink, feeds: &[StripFeed]) -> Vec<usize> {
             auto_label: label,
         };
     }
+    link.voice_strip.store(voice, Relaxed);
     reset
 }
 

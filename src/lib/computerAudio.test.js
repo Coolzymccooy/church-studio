@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  computerAudioFromEngineStatus,
   computerAudioLamp,
   createComputerAudioClient,
   normalizeComputerAudio,
@@ -66,4 +67,22 @@ test('client calls the commands and normalizes the results', async () => {
   assert.equal(set.enabled, true);
   assert.equal(set.restartRequired, true);
   assert.deepEqual(calls, [['computer_audio_get', undefined], ['computer_audio_set', { enabled: true }]]);
+});
+
+test('live status reads engine_status.computer_audio', () => {
+  assert.deepEqual(computerAudioFromEngineStatus(undefined), {
+    enabled: false, active: false, mutesSpeakers: false, strips: [], droppedSamples: 0, underruns: 0,
+  });
+  const running = computerAudioFromEngineStatus({
+    computer_audio: {
+      enabled: true, running: true, mutes_original_output: true, strips: [2, 3], dropped_samples: 4, underruns: 1,
+    },
+  });
+  assert.deepEqual(running, {
+    enabled: true, active: true, mutesSpeakers: true, strips: [2, 3], droppedSamples: 4, underruns: 1,
+  });
+  // Enabled but not capturing (engine stopped or capture failed): nothing is muted.
+  const idle = computerAudioFromEngineStatus({ computer_audio: { enabled: true, running: false, mutes_original_output: true } });
+  assert.equal(idle.active, false);
+  assert.equal(idle.mutesSpeakers, false);
 });

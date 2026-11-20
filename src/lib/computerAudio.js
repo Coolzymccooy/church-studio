@@ -38,6 +38,27 @@ export function computerAudioLamp(settings, error = null) {
   return settings?.enabled ? { tone: 'g', word: 'On' } : { tone: 'off', word: 'Off' };
 }
 
+const count = (value) => (Number.isFinite(value) ? value : 0);
+
+/**
+ * Live state from `engine_status.computer_audio`. `active` means the engine
+ * is capturing right now; `mutesSpeakers` means the captured apps are
+ * silent at their own output meanwhile (macOS), so they are heard only
+ * through the mixer's buses.
+ */
+export function computerAudioFromEngineStatus(engineStatus) {
+  const entry = engineStatus?.computer_audio;
+  const active = Boolean(entry?.running);
+  return {
+    enabled: Boolean(entry?.enabled),
+    active,
+    mutesSpeakers: active && Boolean(entry?.mutes_original_output),
+    strips: Array.isArray(entry?.strips) ? entry.strips.filter(Number.isInteger) : [],
+    droppedSamples: count(entry?.dropped_samples),
+    underruns: count(entry?.underruns),
+  };
+}
+
 /** Thin wrapper around the Tauri commands. */
 export function createComputerAudioClient(invoke) {
   return {
@@ -45,5 +66,6 @@ export function createComputerAudioClient(invoke) {
     set: async (enabled) => normalizeComputerAudio(
       await invoke('computer_audio_set', { enabled: Boolean(enabled) }),
     ),
+    getLiveStatus: async () => computerAudioFromEngineStatus(await invoke('engine_status')),
   };
 }

@@ -235,10 +235,19 @@ pub fn permission() -> &'static str {
     }
 }
 
+/// The captured apps go quiet at their own output while capture runs, so
+/// they are heard only through the mixer (macOS); elsewhere they keep
+/// playing.
+pub const MUTES_ORIGINAL_OUTPUT: bool = cfg!(target_os = "macos");
+
 /// The `computer_audio` object of `engine_status`.
 pub fn status_json(applied: bool, handle: Option<&ComputerAudioHandle>, sample_rate: u32) -> serde_json::Value {
     let Some(handle) = handle else {
-        return serde_json::json!({ "enabled": applied, "running": false });
+        return serde_json::json!({
+            "enabled": applied,
+            "running": false,
+            "mutes_original_output": false,
+        });
     };
     let stats = &handle.stats;
     let fill = stats.fill_frames.load(Ordering::Relaxed) as f64;
@@ -253,6 +262,7 @@ pub fn status_json(applied: bool, handle: Option<&ComputerAudioHandle>, sample_r
         "dropped_samples": stats.dropped_samples.load(Ordering::Relaxed),
         "underruns": stats.underruns.load(Ordering::Relaxed),
         "permission": permission(),
+        "mutes_original_output": MUTES_ORIGINAL_OUTPUT,
     })
 }
 
@@ -299,6 +309,8 @@ mod tests {
         assert_eq!(on["strips"], serde_json::json!([2, 3]));
         assert_eq!(on["fill_ms"], 40.0);
         assert_eq!(on["capture_rate"], 44_100);
+        assert_eq!(on["mutes_original_output"], MUTES_ORIGINAL_OUTPUT);
+        assert_eq!(off["mutes_original_output"], false);
     }
 }
 

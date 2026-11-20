@@ -686,3 +686,50 @@ fn a_music_strip_with_its_fader_down_is_silent_in_the_monitor() {
     let (left, _) = mixer.output(BUS_MONITOR);
     assert!(rms(&left[..512]) > 0.1);
 }
+
+#[test]
+fn adding_a_mic_moves_the_computer_pair_with_its_settings() {
+    let m = MixerControl::new();
+    // One mic: Computer L/R on strips 1 and 2, mixed by the operator.
+    m.link().assign_strip_feeds(&engine_strip_feeds(1, Some(1), &[]));
+    m.set_strip_param(1, "fader_db", -8.0).unwrap();
+    m.set_strip_param(2, "fader_db", -9.0).unwrap();
+    m.set_strip_param(2, "eq_low_db", 3.0).unwrap();
+    m.rename_strip(1, "Music L").unwrap();
+    // A second mic: the pair moves to strips 2 and 3 and keeps its mix.
+    let reset = m.link().assign_strip_feeds(&engine_strip_feeds(2, Some(2), &[]));
+    assert_eq!(reset, vec![1], "only the strip that became a mic is reset");
+    let state = m.snapshot_layout(StripLayout::new(2, true, 0), true, Vec::new());
+    assert_eq!(state.strips[2].fader_db, -8.0);
+    assert_eq!(state.strips[2].name, "Music L");
+    assert_eq!(state.strips[3].fader_db, -9.0);
+    assert_eq!(state.strips[3].eq_low_db, 3.0);
+    assert_eq!(state.strips[3].name, COMPUTER_RIGHT_LABEL);
+    assert_eq!((state.strips[2].pan, state.strips[3].pan), (-1.0, 1.0));
+    // The new mic strip starts fresh.
+    assert_eq!(state.strips[1].name, "Ch 2");
+    assert_eq!(state.strips[1].fader_db, OTHER_STRIPS_FADER_DB);
+    assert!(state.strips[1].hpf_enabled);
+    // And back to one mic: the pair returns to strips 1 and 2 as mixed.
+    assert!(m.link().assign_strip_feeds(&engine_strip_feeds(1, Some(1), &[])).is_empty());
+    let state = m.snapshot_layout(StripLayout::new(1, true, 0), true, Vec::new());
+    assert_eq!(state.strips[1].fader_db, -8.0);
+    assert_eq!(state.strips[2].eq_low_db, 3.0);
+}
+
+#[test]
+fn a_moved_source_takes_the_voice_chain_and_ndi_strips_move_too() {
+    let m = MixerControl::new();
+    let keys = |strip| [ndi_feed(strip, "PC (Keys)", "Keys")];
+    m.link().assign_strip_feeds(&engine_strip_feeds(1, None, &keys(1)));
+    m.set_strip_param(1, "fader_db", -4.0).unwrap();
+    m.set_strip_bool(1, "voice_chain", true).unwrap();
+    // Computer audio turned on: the pair takes strips 1–2, Keys moves to 3.
+    let reset = m.link().assign_strip_feeds(&engine_strip_feeds(1, Some(1), &keys(3)));
+    assert_eq!(reset, vec![1, 2], "the pair is new on strips 1 and 2; Keys only moved");
+    let state = m.snapshot_layout(StripLayout::new(1, true, 1), true, Vec::new());
+    assert_eq!(state.strips[3].name, "Keys");
+    assert_eq!(state.strips[3].fader_db, -4.0);
+    assert_eq!(m.voice_strip.load(Relaxed), 3, "the voice chain follows Keys");
+    assert!(!state.strips[1].voice_chain);
+}
