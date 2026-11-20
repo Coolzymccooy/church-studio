@@ -61,6 +61,14 @@ gethostname = "1.1"
 # last stable release (0.3 bundles an unreleased 4.0 snapshot).
 mp3lame-encoder = "0.2.5"
 
+# ── Network audio (docs/specs/2026-11-20-network-audio-design.md) ────────────
+# Packet signing, pure Rust (sha2 is already in the lock file).
+hmac = "0.12"
+sha2 = "0.10"
+# A large UDP receive buffer, so a Wi-Fi burst is not dropped (already in the
+# tree through tokio).
+socket2 = "0.6"
+
 [dev-dependencies]
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "sync", "time"] }
 

@@ -314,6 +314,19 @@ pub fn ndi_strip_identity(source: &str) -> String {
     format!("ndi:{source}")
 }
 
+/// The Remote strips of network audio: `count` strips from `first`, each
+/// named "Remote n" unless the operator renamed it.
+pub fn net_strip_feeds(first: usize, count: usize) -> Vec<StripFeed> {
+    (0..count)
+        .map(|slot| StripFeed {
+            index: first + slot,
+            identity: crate::netaudio::strip_identity(slot),
+            label: Some(crate::netaudio::strip_label(slot)),
+            preset: StripPreset::Standard,
+        })
+        .collect()
+}
+
 /// Identities of the computer-audio strips (left, right).
 pub const COMPUTER_LEFT_STRIP: &str = "computer:left";
 pub const COMPUTER_RIGHT_STRIP: &str = "computer:right";
@@ -743,6 +756,7 @@ impl MixerControl {
             input_channels: layout.hardware as u32,
             computer_strips: layout.computer as u32,
             ndi_strips: layout.ndi as u32,
+            net_strips: layout.net as u32,
             running,
             strips,
             buses,

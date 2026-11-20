@@ -1,12 +1,17 @@
 //! Which mixer strip carries what: the input device's channels first, then
-//! the computer-audio pair (when it is on), then the received NDI® sources
+//! the Remote strips of network audio (when receiving), then the
+//! computer-audio pair (when it is on), then the received NDI® sources
 //! (design decision 5). Shared by the engine (how many strips it runs and
 //! meters) and `mixer_state` (how many it lists), so both always agree.
 //!
 //! The NDI strips stay the last entries, so `ndiStrips` keeps meaning "the
-//! last n strips" for every client that already reads it.
+//! last n strips" for every client that already reads it. Remote strips sit
+//! right after the hardware ones, so a client that does not know them yet
+//! (no `netStrips`) still finds the computer pair right before NDI and treats
+//! Remote strips as inputs.
 use crate::mixer_control::MAX_STRIPS;
 use crate::ndi::receive::MAX_NDI_INPUTS;
+use crate::netaudio::MAX_NET_INPUTS;
 
 /// Strips the computer-audio input takes when it is on: left, then right.
 pub const COMPUTER_STRIPS: usize = 2;
@@ -15,29 +20,45 @@ pub const COMPUTER_STRIPS: usize = 2;
 pub struct StripLayout {
     /// Strips 0..hardware read input channels 0..hardware.
     pub hardware: usize,
-    /// Strips hardware..hardware + computer carry computer audio (0 or 2:
-    /// left, then right).
+    /// The next `net` strips are the Remote strips (network audio).
+    pub net: usize,
+    /// The next strips carry computer audio (0 or 2: left, then right).
     pub computer: usize,
     /// The next `ndi` strips read the NDI inputs, in order.
     pub ndi: usize,
 }
 
 impl StripLayout {
-    /// At least one hardware strip, at most `MAX_STRIPS`. The computer pair
-    /// comes next when it is on and both of its strips fit; NDI strips fill
-    /// what is left, up to `MAX_NDI_INPUTS`.
+    /// No Remote strips: see `with_net`.
     pub fn new(input_channels: usize, computer: bool, ndi_inputs: usize) -> Self {
+        Self::with_net(input_channels, computer, 0, ndi_inputs)
+    }
+
+    /// At least one hardware strip, at most `MAX_STRIPS`. Room goes to the
+    /// computer pair first (when it is on and both strips fit), then to up
+    /// to `MAX_NET_INPUTS` Remote strips, then to up to `MAX_NDI_INPUTS` NDI
+    /// strips.
+    pub fn with_net(
+        input_channels: usize,
+        computer: bool,
+        net_inputs: usize,
+        ndi_inputs: usize,
+    ) -> Self {
         let hardware = input_channels.clamp(1, MAX_STRIPS);
         let computer = if computer && MAX_STRIPS - hardware >= COMPUTER_STRIPS {
             COMPUTER_STRIPS
         } else {
             0
         };
+        let net = net_inputs
+            .min(MAX_NET_INPUTS)
+            .min(MAX_STRIPS - hardware - computer);
         let ndi = ndi_inputs
             .min(MAX_NDI_INPUTS)
-            .min(MAX_STRIPS - hardware - computer);
+            .min(MAX_STRIPS - hardware - computer - net);
         StripLayout {
             hardware,
+            net,
             computer,
             ndi,
         }
@@ -49,22 +70,44 @@ impl StripLayout {
     }
 
     /// NDI inputs that fit after the hardware strips and the computer pair.
+    #[allow(dead_code)] // the engine uses `ndi_room_with_net`
     pub fn ndi_room(input_channels: usize, computer: bool) -> usize {
-        Self::new(input_channels, computer, MAX_NDI_INPUTS).ndi
+        Self::ndi_room_with_net(input_channels, computer, 0)
+    }
+
+    /// NDI inputs that fit after the hardware, Remote and computer strips.
+    pub fn ndi_room_with_net(input_channels: usize, computer: bool, net: usize) -> usize {
+        Self::with_net(input_channels, computer, net, MAX_NDI_INPUTS).ndi
+    }
+
+    /// Remote strips that fit after the hardware strips and the computer pair.
+    pub fn net_room(input_channels: usize, computer: bool) -> usize {
+        Self::with_net(input_channels, computer, MAX_NET_INPUTS, 0).net
     }
 
     pub fn total(&self) -> usize {
-        self.hardware + self.computer + self.ndi
+        self.hardware + self.net + self.computer + self.ndi
+    }
+
+    /// First Remote strip.
+    pub fn first_net_strip(&self) -> usize {
+        self.hardware
+    }
+
+    /// First computer strip (whether or not the pair is on).
+    pub fn first_computer_strip(&self) -> usize {
+        self.hardware + self.net
     }
 
     /// First NDI strip.
     pub fn first_ndi_strip(&self) -> usize {
-        self.hardware + self.computer
+        self.hardware + self.net + self.computer
     }
 
     /// The computer pair's (left, right) strips, when it is on.
     pub fn computer_strips(&self) -> Option<(usize, usize)> {
-        (self.computer == COMPUTER_STRIPS).then_some((self.hardware, self.hardware + 1))
+        let left = self.first_computer_strip();
+        (self.computer == COMPUTER_STRIPS).then_some((left, left + 1))
     }
 
     /// Strip index of NDI input `slot`, if it has one.
@@ -80,7 +123,12 @@ impl StripLayout {
 
     #[allow(dead_code)]
     pub fn is_computer(&self, strip: usize) -> bool {
-        strip >= self.hardware && strip < self.first_ndi_strip()
+        strip >= self.first_computer_strip() && strip < self.first_ndi_strip()
+    }
+
+    #[allow(dead_code)]
+    pub fn is_net(&self, strip: usize) -> bool {
+        strip >= self.first_net_strip() && strip < self.first_computer_strip()
     }
 }
 
@@ -91,7 +139,7 @@ mod tests {
     #[test]
     fn ndi_strips_follow_the_hardware_channels() {
         let layout = StripLayout::new(2, false, 3);
-        assert_eq!(layout, StripLayout { hardware: 2, computer: 0, ndi: 3 });
+        assert_eq!(layout, StripLayout { hardware: 2, net: 0, computer: 0, ndi: 3 });
         assert_eq!(layout.total(), 5);
         assert_eq!(layout.ndi_strip(0), Some(2));
         assert_eq!(layout.ndi_strip(2), Some(4));
@@ -106,7 +154,7 @@ mod tests {
     #[test]
     fn computer_pair_sits_between_hardware_and_ndi() {
         let layout = StripLayout::new(2, true, 2);
-        assert_eq!(layout, StripLayout { hardware: 2, computer: 2, ndi: 2 });
+        assert_eq!(layout, StripLayout { hardware: 2, net: 0, computer: 2, ndi: 2 });
         assert_eq!(layout.total(), 6);
         assert_eq!(layout.computer_strips(), Some((2, 3)));
         assert!(layout.is_computer(2) && layout.is_computer(3));
@@ -126,7 +174,7 @@ mod tests {
         assert!(StripLayout::computer_fits(30));
         assert!(!StripLayout::computer_fits(31));
         // The pair takes room from NDI, never the other way round.
-        assert_eq!(StripLayout::new(28, true, 4), StripLayout { hardware: 28, computer: 2, ndi: 2 });
+        assert_eq!(StripLayout::new(28, true, 4), StripLayout { hardware: 28, net: 0, computer: 2, ndi: 2 });
         assert_eq!(StripLayout::ndi_room(28, true), 2);
         assert_eq!(StripLayout::ndi_room(28, false), MAX_NDI_INPUTS);
     }
@@ -134,8 +182,8 @@ mod tests {
     #[test]
     fn at_most_four_ndi_strips_and_never_past_max_strips() {
         assert_eq!(StripLayout::new(1, false, 9).ndi, MAX_NDI_INPUTS);
-        assert_eq!(StripLayout::new(30, false, 4), StripLayout { hardware: 30, computer: 0, ndi: 2 });
-        assert_eq!(StripLayout::new(64, false, 4), StripLayout { hardware: MAX_STRIPS, computer: 0, ndi: 0 });
+        assert_eq!(StripLayout::new(30, false, 4), StripLayout { hardware: 30, net: 0, computer: 0, ndi: 2 });
+        assert_eq!(StripLayout::new(64, false, 4), StripLayout { hardware: MAX_STRIPS, net: 0, computer: 0, ndi: 0 });
         assert!(StripLayout::new(31, true, 4).total() <= MAX_STRIPS);
         assert_eq!(StripLayout::ndi_room(8, false), MAX_NDI_INPUTS);
         assert_eq!(StripLayout::ndi_room(31, false), 1);
@@ -143,8 +191,32 @@ mod tests {
 
     #[test]
     fn no_device_channels_still_gives_one_strip() {
-        assert_eq!(StripLayout::new(0, false, 0), StripLayout { hardware: 1, computer: 0, ndi: 0 });
+        assert_eq!(StripLayout::new(0, false, 0), StripLayout { hardware: 1, net: 0, computer: 0, ndi: 0 });
         assert_eq!(StripLayout::new(0, false, 2).total(), 3);
         assert_eq!(StripLayout::new(0, true, 0).computer_strips(), Some((1, 2)));
+    }
+
+    #[test]
+    fn remote_strips_sit_between_hardware_and_the_computer_pair() {
+        let layout = StripLayout::with_net(2, true, 2, 1);
+        assert_eq!(layout, StripLayout { hardware: 2, net: 2, computer: 2, ndi: 1 });
+        assert_eq!(layout.total(), 7);
+        assert!(layout.is_net(2) && layout.is_net(3) && !layout.is_net(4));
+        assert_eq!(layout.computer_strips(), Some((4, 5)));
+        assert!(layout.is_computer(4) && layout.is_computer(5));
+        // NDI stays the last strips.
+        assert_eq!(layout.first_ndi_strip(), 6);
+        assert_eq!(layout.ndi_strip(0), Some(6));
+        assert_eq!(StripLayout::with_net(2, false, 3, 0).first_ndi_strip(), 5);
+    }
+
+    #[test]
+    fn remote_strips_are_capped_and_give_way_to_the_computer_pair() {
+        assert_eq!(StripLayout::with_net(1, false, 9, 0).net, MAX_NET_INPUTS);
+        assert_eq!(StripLayout::with_net(29, true, 4, 4), StripLayout { hardware: 29, net: 1, computer: 2, ndi: 0 });
+        assert_eq!(StripLayout::net_room(29, true), 1);
+        assert_eq!(StripLayout::net_room(8, false), MAX_NET_INPUTS);
+        assert_eq!(StripLayout::ndi_room_with_net(26, false, 4), 2);
+        assert!(StripLayout::with_net(31, true, 4, 4).total() <= MAX_STRIPS);
     }
 }

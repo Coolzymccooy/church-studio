@@ -345,9 +345,10 @@ fn mixer_state_json_shape_matches_contract() {
 
     assert_eq!(
         keys(&v),
-        set(&["inputChannels", "computerStrips", "ndiStrips", "running", "strips", "buses", "scenes"])
+        set(&["inputChannels", "computerStrips", "ndiStrips", "netStrips", "running", "strips", "buses", "scenes"])
     );
     assert_eq!(v["ndiStrips"], 0);
+    assert_eq!(v["netStrips"], 0);
     assert_eq!(v["inputChannels"], 2);
     assert_eq!(v["running"], true);
     assert_eq!(v["scenes"], serde_json::json!(["Sermon"]));

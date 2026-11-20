@@ -33,11 +33,14 @@ use crate::ndi::receive::receiver::NdiReceivers;
 use crate::ndi::receive::{NdiInputHandle, NdiInputs};
 use crate::ndi::sender::NdiBusSender;
 use crate::ndi::{NdiEngineConfig, NdiOutputs};
+use crate::netaudio::{NetAudioConfig, NetAudioInfo, NetAudioThreads};
 use crate::recorder::engine::EngineRecorder;
 use crate::recorder::RecordPort;
 
 mod input_proc;
 mod output_claims;
+#[cfg(test)]
+mod net_wiring_tests;
 use input_proc::{InputProcessor, OutputRoute};
 use output_claims::{check_name_free, check_selection_free, OutputClaims};
 
@@ -82,6 +85,9 @@ pub struct AudioEngine {
     _ndi_receivers: NdiReceivers,
     ndi_inputs: Vec<NdiInputHandle>,
     ndi_inputs_applied: NdiInputs,
+    /// Network-audio threads; like NDI they stop after the input callback.
+    _net_threads: NetAudioThreads,
+    net_audio: NetAudioInfo,
     /// Computer-audio capture; on macOS dropping it removes the tap and
     /// unmutes the tapped apps.
     _computer_capture: Option<ComputerAudioCapture>,
@@ -136,6 +142,9 @@ pub struct RunningEngine {
     pub ndi_inputs: Vec<NdiInputHandle>,
     /// The NDI input settings this engine was started with.
     pub ndi_inputs_applied: NdiInputs,
+    /// Network audio: the Remote strips right after the hardware ones, and
+    /// the sender.
+    pub net_audio: NetAudioInfo,
     /// Computer audio, when it runs: the pair of strips right after the
     /// hardware ones.
     pub computer_audio: Option<ComputerAudioHandle>,
@@ -166,6 +175,7 @@ struct EngineInfo {
     ndi_applied: NdiOutputs,
     ndi_inputs: Vec<NdiInputHandle>,
     ndi_inputs_applied: NdiInputs,
+    net_audio: NetAudioInfo,
     computer_audio: Option<ComputerAudioHandle>,
     computer_audio_applied: bool,
 }
@@ -278,6 +288,7 @@ impl AudioEngine {
             ndi_applied: self.ndi_applied.clone(),
             ndi_inputs: self.ndi_inputs.clone(),
             ndi_inputs_applied: self.ndi_inputs_applied.clone(),
+            net_audio: self.net_audio.clone(),
             computer_audio: self.computer_audio.clone(),
             computer_audio_applied: self.computer_audio_applied,
         }
@@ -291,6 +302,7 @@ impl AudioEngine {
         mixer: MixerLink,
         devices: DeviceSelection,
         ndi: NdiEngineConfig,
+        net: NetAudioConfig,
         computer_audio_on: bool,
     ) -> Result<Self, String> {
         let host = cpal::default_host();
@@ -480,22 +492,33 @@ impl AudioEngine {
         if computer_audio_on && !computer_on {
             log::warn!("computer audio not started: no room for its two strips after {in_channels} input channels");
         }
+        // Network audio: Remote strips right after the hardware ones (before
+        // the computer pair), one ring each, filled by the receiver thread.
+        let net_started = crate::netaudio::start(
+            &net,
+            sr,
+            StripLayout::new(in_channels, computer_on, 0).first_net_strip(),
+            StripLayout::net_room(in_channels, computer_on),
+        );
+        let net_count = net_started.feeds.len();
         let (pending_computer, computer_feed) =
-            match StripLayout::new(in_channels, computer_on, 0).computer_strips() {
+            match StripLayout::with_net(in_channels, computer_on, net_count, 0).computer_strips() {
                 Some(strips) => {
                     let (pending, feed) = computer_audio::prepare(sr, strips);
                     (Some(pending), Some(feed))
                 }
                 None => (None, None),
             };
-        let first_ndi_strip = StripLayout::new(in_channels, computer_on, 0).first_ndi_strip();
+        let first_ndi_strip =
+            StripLayout::with_net(in_channels, computer_on, net_count, 0).first_ndi_strip();
         let ndi_in = crate::ndi::receive::start_receivers(
             &receivable,
             sr,
             first_ndi_strip,
-            StripLayout::ndi_room(in_channels, computer_on),
+            StripLayout::ndi_room_with_net(in_channels, computer_on, net_count),
         );
-        let layout = StripLayout::new(in_channels, computer_on, ndi_in.feeds.len());
+        let layout =
+            StripLayout::with_net(in_channels, computer_on, net_count, ndi_in.feeds.len());
         // Record what feeds each strip before the stream plays: a strip whose
         // feed changed since the last start is reset to the new-strip
         // defaults (fader off) before any audio passes through it. NDI strips
@@ -505,11 +528,16 @@ impl AudioEngine {
             .iter()
             .map(|input| (input.strip, input.source.clone(), input.label.clone()))
             .collect();
-        let feeds = crate::mixer_control::engine_strip_feeds(
+        let mut feeds = crate::mixer_control::engine_strip_feeds(
             layout.hardware,
             layout.computer_strips().map(|(left, _)| left),
             &ndi_strips,
         );
+        feeds.extend(crate::mixer_control::net_strip_feeds(
+            layout.first_net_strip(),
+            layout.net,
+        ));
+        feeds.sort_by_key(|feed| feed.index);
         let reset = mixer.assign_strip_feeds(&feeds);
         if !reset.is_empty() {
             log::info!("mixer strips {reset:?} have a new source; reset to defaults");
@@ -545,6 +573,10 @@ impl AudioEngine {
             ndi_routes,
             computer_feed,
             ndi_in.feeds,
+            input_proc::NetIo {
+                inputs: net_started.feeds,
+                send: net_started.send_route,
+            },
             record_tap,
             meters_tx,
         );
@@ -653,6 +685,8 @@ impl AudioEngine {
             _ndi_receivers: NdiReceivers(ndi_in.receivers),
             ndi_inputs: ndi_in.handles,
             ndi_inputs_applied: ndi.inputs,
+            _net_threads: net_started.threads,
+            net_audio: net_started.info,
             _computer_capture: computer_capture,
             computer_audio: computer_handle,
             computer_audio_applied: computer_audio_on,
@@ -811,6 +845,7 @@ impl RunningEngine {
         mixer: MixerLink,
         devices: DeviceSelection,
         ndi: NdiEngineConfig,
+        net: NetAudioConfig,
         computer_audio_on: bool,
     ) -> Result<Self, String> {
         let (ready_tx, ready_rx) =
@@ -826,6 +861,7 @@ impl RunningEngine {
             mixer,
             devices,
             ndi,
+            net,
             computer_audio_on,
         ) {
             Ok(mut engine) => {
@@ -873,6 +909,7 @@ impl RunningEngine {
             ndi_applied: info.ndi_applied,
             ndi_inputs: info.ndi_inputs,
             ndi_inputs_applied: info.ndi_inputs_applied,
+            net_audio: info.net_audio,
             computer_audio: info.computer_audio,
             computer_audio_applied: info.computer_audio_applied,
             recorder: EngineRecorder::new(record_port),
@@ -983,12 +1020,13 @@ impl RunningEngine {
         self.shared.dropped_output_samples.load(Ordering::Relaxed)
     }
 
-    /// Mixer strips: input channels, the computer-audio pair, then NDI
-    /// inputs.
+    /// Mixer strips: input channels, the Remote strips, the computer-audio
+    /// pair, then NDI inputs.
     pub fn strip_layout(&self) -> StripLayout {
-        StripLayout::new(
+        StripLayout::with_net(
             self.input_channels as usize,
             self.computer_audio.is_some(),
+            self.net_audio.inputs.len(),
             self.ndi_inputs.len(),
         )
     }
