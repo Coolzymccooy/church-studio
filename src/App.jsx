@@ -41,6 +41,7 @@ import {
   resolveBroadcastLabel,
   resolveDeviceLabel,
 } from './lib/audioRouting';
+import { newNoiseProfileId, nextNoiseProfileNumber } from './lib/noiseProfiles.js';
 import { SNAPSHOTS_KEY, nextSnapshotId, parseSnapshots, serializeSnapshots } from './lib/voiceSnapshots.js';
 import {
   captureNativeNoiseProfile,
@@ -329,7 +330,7 @@ const AudioProcessor = ({ goHome }) => {
   const [roomName, setRoomName] = useState(() => {
     return window.localStorage.getItem('tiwaton:roomName') || 'Main Sanctuary';
   });
-  const noiseProfileCounterRef = useRef(1);
+  const noiseProfileCounterRef = useRef(nextNoiseProfileNumber(noiseProfiles));
   const latestSpectrumRef = useRef(null);
   const noiseFloorThresholdRef = useRef(noiseFloorThreshold);
   const featuresRef = useRef(features);
@@ -3155,7 +3156,7 @@ const AudioProcessor = ({ goHome }) => {
       Math.max(min, Math.min(max, val));
     const lowReduction = -normalize(lowEnergy / 18, 3, 12);
     const highReduction = -normalize(highEnergy / 16, 3, 14);
-    const profileId = `profile-${noiseProfileCounterRef.current}`;
+    const profileId = newNoiseProfileId();
     const label = `Noise Profile ${noiseProfileCounterRef.current}`;
     noiseProfileCounterRef.current += 1;
 
