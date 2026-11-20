@@ -1,4 +1,6 @@
 mod audio;
+#[cfg(test)]
+mod soundcheck_tests;
 mod computer_audio;
 mod computer_audio_commands;
 mod dsp;
