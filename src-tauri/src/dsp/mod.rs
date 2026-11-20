@@ -4,6 +4,7 @@ pub mod compressor;
 pub mod desser;
 pub mod dereverb;
 pub mod gate;
+pub mod hypergate;
 pub mod lufs;
 pub mod mixer;
 pub mod neural;
@@ -28,6 +29,8 @@ pub struct DspParams {
     // Gate
     pub gate_enabled:       AtomicBool,
     pub gate_threshold_db:  AtomicF32,
+    /// Hyper gate mode, learn-mic handshake and fingerprint.
+    pub hyper:              hypergate::HyperGateParams,
     // Noise reduction
     pub noise_enabled:      AtomicBool,
     pub noise_alpha:        AtomicF32,

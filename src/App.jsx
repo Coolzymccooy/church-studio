@@ -23,6 +23,7 @@ import DesktopRecordButton from './components/recorder/DesktopRecordButton.jsx';
 import InputRack from './components/desk/InputRack.jsx';
 import MixerConsole from './components/mixer/MixerConsole';
 import { createMixerController, createMockMixerController } from './lib/mixerEngine';
+import { syncStreamLeveler } from './lib/streamLeveler';
 import { getExportAvailability } from './lib/exportFlow';
 import { loadRnnoiseAssets } from './lib/rnnoise';
 import { pickVideoMimeType } from './lib/mediaFormats';
@@ -43,6 +44,7 @@ import {
   captureNativeNoiseProfile,
   describeNativeEngineError,
   getNativeEngineStatus,
+  learnNativeMicFingerprint,
   startNativeEngine,
   stopNativeEngine,
   subscribeToNativeMeters,
@@ -356,6 +358,14 @@ const AudioProcessor = ({ goHome }) => {
     featuresRef.current = features;
     try { window.localStorage.setItem('tiwaton:features', JSON.stringify(features)); } catch { /* Ignore local persistence failures. */ }
   }, [features]);
+
+  // "Stream safe" and the loudness target drive the native Stream bus leveler.
+  const streamSafeOn = Boolean(features.streamingSafe);
+  useEffect(() => {
+    void syncStreamLeveler(mixerController, { on: streamSafeOn, target: loudnessTarget }).then((error) => {
+      if (error) console.warn('[TIWATON] Stream leveler not updated:', error);
+    });
+  }, [mixerController, streamSafeOn, loudnessTarget]);
 
   useEffect(() => {
     gateModeRef.current = gateMode;
@@ -1426,7 +1436,22 @@ const AudioProcessor = ({ goHome }) => {
   const [isMicLearning, setIsMicLearning] = useState(false);
   const [micLearned, setMicLearned] = useState(false);
 
-  const startMicLearn = () => {
+  const startMicLearn = async () => {
+    // Desktop: the native Hyper gate learns from the voice strip (5 s).
+    if (isTauri && isLive) {
+      setIsMicLearning(true);
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        await learnNativeMicFingerprint(invoke);
+        setMicLearned(true);
+        setAudioEngineError(null);
+      } catch (err) {
+        setAudioEngineError(describeNativeEngineError(err, 'Could not learn the mic.'));
+      } finally {
+        setIsMicLearning(false);
+      }
+      return;
+    }
     if (!processingRefs.current.analyser || !audioContext) {
       alert('Go Live first so I can learn your mic\'s spectral signature.');
       return;
@@ -2967,11 +2992,12 @@ const AudioProcessor = ({ goHome }) => {
         isBypassed,
         noiseFloorThreshold,
         inputGainValue,
+        gateMode,
       }).catch(() => {});
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLive, features.denoise, features.dereverb, features.dynamicDeEsser,
-      isBypassed, noiseFloorThreshold, inputGainValue]);
+      isBypassed, noiseFloorThreshold, inputGainValue, gateMode]);
 
   // The status poll calls the latest cleanupAudio without re-subscribing on every render.
   const cleanupAudioRef = useRef(cleanupAudio);

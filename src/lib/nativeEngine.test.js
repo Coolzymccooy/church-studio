@@ -6,6 +6,7 @@ import {
   createNativeEngineController,
   describeNativeEngineError,
   getNativeEngineStatus,
+  learnNativeMicFingerprint,
   subscribeToNativeMeters,
   syncNativeParams,
 } from './nativeEngine.js';
@@ -24,7 +25,7 @@ test('syncNativeParams writes the expected native DSP contract', async () => {
     inputGainValue: 2,
   });
 
-  assert.equal(calls.length, 9);
+  assert.equal(calls.length, 10);
   assert.deepEqual(calls[0], {
     command: 'set_param_bool',
     payload: { key: 'gate_enabled', value: true },
@@ -50,6 +51,45 @@ test('syncNativeParams turns neural denoise on for Voice Pattern Cleanse and off
 
   assert.equal(await sent({ denoise: false, voicePattern: true }), true);
   assert.equal(await sent({ denoise: false, voicePattern: false }), false);
+});
+
+test('syncNativeParams sends the Hyper gate mode: speech only or balanced', async () => {
+  const sent = async (gateMode) => {
+    const calls = [];
+    await syncNativeParams(async (command, payload) => { calls.push({ command, payload }); }, {
+      features: { denoise: true },
+      isBypassed: false,
+      noiseFloorThreshold: -45,
+      inputGainValue: 1,
+      gateMode,
+    });
+    return calls.find((c) => c.payload.key === 'gate_speech_only');
+  };
+
+  assert.deepEqual(await sent('speech'), {
+    command: 'set_param_bool',
+    payload: { key: 'gate_speech_only', value: true },
+  });
+  assert.equal((await sent('balanced')).payload.value, false);
+  assert.equal((await sent(undefined)).payload.value, false);
+});
+
+test('learn mic calls the native learn command and passes its error through', async () => {
+  const calls = [];
+  await learnNativeMicFingerprint(async (command, payload) => { calls.push({ command, payload }); });
+  assert.deepEqual(calls, [{ command: 'learn_mic_fingerprint', payload: undefined }]);
+
+  await assert.rejects(
+    learnNativeMicFingerprint(async () => { throw 'Not enough speech heard.'; }),
+    (err) => err === 'Not enough speech heard.',
+  );
+
+  const controller = createNativeEngineController({
+    invoke: async (command) => { calls.push({ command }); },
+    listen: async () => () => {},
+  });
+  await controller.learnMicFingerprint();
+  assert.equal(calls.at(-1).command, 'learn_mic_fingerprint');
 });
 
 test('native engine controller restarts through stop then start', async () => {

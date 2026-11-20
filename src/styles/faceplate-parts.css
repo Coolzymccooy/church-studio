@@ -47,29 +47,49 @@
 .fp-glass-dim { color: var(--fp-glass-dim); }
 
 /* ---------- knob ---------- */
+/* A raised synth cap: dark knurled skirt with a face coloured by job, lit from above. The depth is
+   flat layers (an offset shadow disc, a light bevel arc on top, a dark one below), not gradients. */
 .fp-kc { display: flex; flex-direction: column; align-items: center; gap: 1px; min-width: 0; }
 .fp-knob {
   position: relative; padding: 0; border: 0; background: none; border-radius: 50%;
-  cursor: ns-resize; touch-action: none; width: 34px; height: 34px;
+  cursor: ns-resize; touch-action: none; user-select: none; width: 34px; height: 34px;
 }
 .fp-kc-s .fp-knob { width: 26px; height: 26px; }
 .fp-knob:focus-visible { outline: 2px solid var(--fp-focus); outline-offset: 2px; }
 .fp-knob[aria-disabled="true"] { cursor: not-allowed; }
 .fp-ring { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
-.fp-ring circle { fill: none; stroke-width: 3; }
+.fp-ring .fp-trk, .fp-ring .fp-val { fill: none; stroke-width: 3; }
 .fp-ring .fp-trk { stroke: var(--fp-ring-trk); transform: rotate(135deg); transform-origin: 20px 20px; }
 .fp-ring .fp-val { stroke: var(--fp-arc); transform-origin: 20px 20px; }
-.fp-cap { position: absolute; inset: 6px; border-radius: 50%; background: var(--fp-capc); border: 1px solid var(--fp-cap-rim); }
-.fp-kc-s .fp-cap { inset: 5px; }
-.fp-ptr { position: absolute; left: 50%; top: 2px; width: 2px; height: 40%; margin-left: -1px; border-radius: 1px; background: var(--fp-ptrc); }
+.fp-shadow { fill: var(--fp-slot); opacity: 0.55; }
+.fp-skirt { fill: var(--fp-knob-skirt); stroke: var(--fp-cap-rim); stroke-width: 0.8; }
+.fp-knurl { fill: none; stroke: var(--fp-knob-knurl); stroke-width: 1; stroke-linecap: round; transition: stroke var(--fp-motion-fast); }
+.fp-knob:hover .fp-knurl, .fp-knob.fp-turning .fp-knurl { stroke: var(--fp-key-edge); }
+.fp-face { fill: var(--fp-capc); stroke: var(--fp-cap-rim); stroke-width: 0.6; }
+.fp-ptr { stroke: var(--fp-ptrc); stroke-width: 2; stroke-linecap: round; }
+.fp-ptr-skirt { stroke: var(--fp-ptr-light); stroke-width: 1.8; stroke-linecap: round; }
+.fp-bevel { fill: none; stroke-width: 1.2; stroke-linecap: round; }
+.fp-bevel-hi { stroke: var(--fp-ptr-light); opacity: 0.45; }
+.fp-bevel-lo { stroke: var(--fp-ink); opacity: 0.3; }
 .fp-cap-trim { --fp-capc: var(--fp-cap-trim); --fp-arc: var(--fp-cap-trim); --fp-ptrc: var(--fp-ptr-light); }
 .fp-cap-hpf { --fp-capc: var(--fp-cap-hpf); --fp-arc: var(--fp-cap-hpf); --fp-ptrc: var(--fp-ptr-light); }
 .fp-cap-dyn { --fp-capc: var(--fp-cap-dyn); --fp-arc: var(--fp-cap-dyn); --fp-ptrc: var(--fp-ptr-light); }
 .fp-cap-eq { --fp-capc: var(--fp-cap-eq); --fp-arc: var(--fp-eq-arc); --fp-ptrc: var(--fp-ink); }
 .fp-cap-pan { --fp-capc: var(--fp-cap-pan); --fp-arc: var(--fp-cap-pan); --fp-ptrc: var(--fp-ink); }
 .fp-cap-send { --fp-capc: var(--fp-cap-send); --fp-arc: var(--fp-cap-send); --fp-ptrc: var(--fp-ink); }
-.fp-kc.fp-off .fp-cap, .fp-kc.fp-off .fp-val { opacity: 0.35; }
-.fp-kv { font: var(--fp-weight-regular) var(--fp-text-xs)/1.15 var(--fp-font-mono); font-variant-numeric: tabular-nums; color: var(--fp-legend); }
+.fp-kc.fp-off .fp-face, .fp-kc.fp-off .fp-ptr, .fp-kc.fp-off .fp-val { opacity: 0.35; }
+.fp-kv {
+  font: var(--fp-weight-regular) var(--fp-text-xs)/1.15 var(--fp-font-mono); font-variant-numeric: tabular-nums;
+  color: var(--fp-legend); border-radius: var(--fp-radius-led); cursor: text;
+  transition: background-color var(--fp-motion-fast), color var(--fp-motion-fast);
+}
+/* While a knob turns, its value reads as a lit glass window. */
+.fp-kv-live { background: var(--fp-glass); color: var(--fp-glass-text); box-shadow: 0 0 0 2px var(--fp-glass); }
+.fp-kv-edit {
+  width: 5ch; padding: 0; border: 0; text-align: center;
+  background: var(--fp-glass); color: var(--fp-glass-text); box-shadow: 0 0 0 2px var(--fp-glass);
+}
+.fp-kv-edit:focus-visible { outline: 2px solid var(--fp-focus); outline-offset: 2px; }
 .fp-kl { font: var(--fp-weight-medium) var(--fp-text-xs)/1.15 var(--fp-font-legend); color: var(--fp-muted); }
 
 /* ---------- fader ---------- */

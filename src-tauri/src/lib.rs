@@ -3,6 +3,9 @@ mod computer_audio;
 mod computer_audio_commands;
 mod dsp;
 mod engine_stopping;
+mod export;
+mod export_commands;
+mod gate_commands;
 mod history;
 mod link;
 mod mixer_commands;
@@ -278,6 +281,7 @@ fn set_param_bool(params: State<'_, SharedParams>, key: String, value: bool) {
     let p = &params.0;
     match key.as_str() {
         "gate_enabled" => p.gate_enabled.store(value, Ordering::Relaxed),
+        "gate_speech_only" => p.hyper.speech_only.store(value, Ordering::Relaxed),
         "noise_enabled" => p.noise_enabled.store(value, Ordering::Relaxed),
         "neural_denoise" => p.neural_enabled.store(value, Ordering::Relaxed),
         "comp_enabled" => p.comp_enabled.store(value, Ordering::Relaxed),
@@ -389,6 +393,7 @@ pub fn run() {
             set_param,
             set_param_bool,
             capture_noise_profile,
+            gate_commands::learn_mic_fingerprint,
             engine_status,
             mixer_commands::mixer_state,
             mixer_commands::mixer_set_strip_param,
@@ -434,6 +439,8 @@ pub fn run() {
             recorder_commands::recorder_stop,
             recorder_commands::recorder_add_marker,
             recorder_commands::recorder_open_folder,
+            export_commands::recorder_export,
+            export_commands::editor_export,
         ])
         .setup(|app| {
             // Load the NDI runtime off the main thread; ndi_status reports

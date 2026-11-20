@@ -2,6 +2,8 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { readEditorPalette } from '../lib/editorPalette.js';
 import InfoTip from './faceplate/InfoTip.jsx';
 import Key from './faceplate/Key.jsx';
+import EditorExportKeys from './EditorExportKeys.jsx';
+import { encodeWavPcm16 } from '../lib/audioExport.js';
 
 /**
  * WaveformEditor — Audacity-style waveform editor
@@ -976,40 +978,9 @@ export default function WaveformEditor({ audioContext, onExport }) {
   // --- Export ---
   const exportWav = useCallback(() => {
     if (!audioBuffer) return;
-    const nch = audioBuffer.numberOfChannels;
-    const sr = audioBuffer.sampleRate;
-    const length = audioBuffer.length;
-    const bytesPerSample = 2;
-    const blockAlign = nch * bytesPerSample;
-    const dataSize = length * blockAlign;
-    const buffer = new ArrayBuffer(44 + dataSize);
-    const view = new DataView(buffer);
-
-    const writeStr = (o, s) => { for (let i = 0; i < s.length; i++) view.setUint8(o + i, s.charCodeAt(i)); };
-    writeStr(0, 'RIFF');
-    view.setUint32(4, 36 + dataSize, true);
-    writeStr(8, 'WAVE');
-    writeStr(12, 'fmt ');
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, nch, true);
-    view.setUint32(24, sr, true);
-    view.setUint32(28, sr * blockAlign, true);
-    view.setUint16(32, blockAlign, true);
-    view.setUint16(34, 16, true);
-    writeStr(36, 'data');
-    view.setUint32(40, dataSize, true);
-
-    let offset = 44;
     const channels = [];
-    for (let ch = 0; ch < nch; ch++) channels.push(audioBuffer.getChannelData(ch));
-    for (let i = 0; i < length; i++) {
-      for (let ch = 0; ch < nch; ch++) {
-        const s = Math.max(-1, Math.min(1, channels[ch][i]));
-        view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
-        offset += 2;
-      }
-    }
+    for (let ch = 0; ch < audioBuffer.numberOfChannels; ch++) channels.push(audioBuffer.getChannelData(ch));
+    const buffer = encodeWavPcm16(channels, audioBuffer.sampleRate);
 
     const blob = new Blob([buffer], { type: 'audio/wav' });
     const url = URL.createObjectURL(blob);
@@ -1070,6 +1041,7 @@ export default function WaveformEditor({ audioContext, onExport }) {
           <Key onClick={() => fileInputRef.current?.click()}>import</Key>
           <input ref={fileInputRef} type="file" accept="audio/*" className="hidden" onChange={(e) => { if (e.target.files[0]) handleFileLoad(e.target.files[0]); e.target.value = ''; }} />
           <Key onClick={exportWav} disabled={noBuffer}>export wav</Key>
+          <EditorExportKeys audioBuffer={audioBuffer} />
         </div>
 
         <Key lit={isPlaying ? 'green' : null} pressed={isPlaying} onClick={isPlaying ? stopAudio : playAudio} disabled={noBuffer}>

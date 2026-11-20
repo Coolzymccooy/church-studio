@@ -29,17 +29,24 @@ export async function captureNativeNoiseProfile(invoke) {
   return invoke('capture_noise_profile');
 }
 
+export async function learnNativeMicFingerprint(invoke) {
+  return invoke('learn_mic_fingerprint');
+}
+
 export function syncNativeParams(invoke, {
   features,
   isBypassed,
   noiseFloorThreshold,
   inputGainValue,
+  gateMode,
 }) {
   const setParam = (key, value) => invoke('set_param', { key, value });
   const setParamBool = (key, value) => invoke('set_param_bool', { key, value });
 
   return Promise.allSettled([
     setParamBool('gate_enabled', features.denoise),
+    // Hyper gate: 'speech' = speech only, anything else = balanced.
+    setParamBool('gate_speech_only', gateMode === 'speech'),
     setParamBool('noise_enabled', features.denoise),
     // RNNoise follows the same features as in the browser engine.
     setParamBool('neural_denoise', Boolean(features.denoise || features.voicePattern)),
@@ -94,6 +101,9 @@ export function createNativeEngineController({ invoke, listen }) {
     },
     captureNoiseProfile() {
       return captureNativeNoiseProfile(invoke);
+    },
+    learnMicFingerprint() {
+      return learnNativeMicFingerprint(invoke);
     },
     syncParams(params) {
       return syncNativeParams(invoke, params);

@@ -20,17 +20,31 @@ export function pressTwoPress(state, now, timeoutMs = ARM_TIMEOUT_MS) {
 
 // ---------- knobs ----------
 // The ring sweeps 270 degrees, from 7 o'clock to 5 o'clock. Ring radius 17 in a 40-unit box.
+// A range is { min, max, step, bipolar?, detent?, taper? }. A taper maps a value onto the knob's
+// turn (0..1) and back; the default is linear. Drag, wheel and typed entry live in knobTravel.js.
 
 const RING_CIRCUMFERENCE = 2 * Math.PI * 17;
 export const RING_SWEEP = RING_CIRCUMFERENCE * 0.75;
 export const RING_DASH_GAP = RING_CIRCUMFERENCE;
-const DRAG_FULL_RANGE_PX = 150;
 
-const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+export const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
-export function knobFraction(value, { min, max }) {
-  if (!Number.isFinite(value) || max === min) return 0;
-  return clamp((value - min) / (max - min), 0, 1);
+export const LINEAR_TAPER = Object.freeze({
+  toUnit: (v, { min, max }) => (v - min) / (max - min),
+  fromUnit: (u, { min, max }) => min + u * (max - min),
+});
+
+/** Equal turns per octave, for frequency knobs. Needs min > 0. */
+export const LOG_TAPER = Object.freeze({
+  toUnit: (v, { min, max }) => Math.log(Math.max(v, min) / min) / Math.log(max / min),
+  fromUnit: (u, { min, max }) => min * (max / min) ** u,
+});
+
+export const taperOf = (range) => range.taper ?? LINEAR_TAPER;
+
+export function knobFraction(value, range) {
+  if (!Number.isFinite(value) || range.max === range.min) return 0;
+  return clamp(taperOf(range).toUnit(clamp(value, range.min, range.max), range), 0, 1);
 }
 
 export function clampToStep(value, { min, max, step }) {
@@ -59,8 +73,7 @@ export function knobKeyStep(value, range, key, shift = false) {
   return next === undefined ? null : clampToStep(next, range);
 }
 
-/** Value after a vertical drag of dy pixels (negative is up) from where the drag started. */
-export function knobDragValue(startValue, dy, range) {
-  const delta = (-dy / DRAG_FULL_RANGE_PX) * (range.max - range.min);
-  return clampToStep(startValue + delta, range);
+/** The value a double-click returns to: the default, else the detent, else the bottom stop. */
+export function knobResetValue(range, defaultValue) {
+  return clampToStep(defaultValue ?? range.detent ?? range.min, range);
 }

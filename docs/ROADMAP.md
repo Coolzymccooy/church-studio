@@ -55,6 +55,8 @@ Loopback (routing).
 - Auto-ducking: music channels dip when a voice channel is active. Built with a
   Dugan-style automixer for several mics (`docs/specs/2026-11-19-automix-ducking-design.md`).
 - Mixer UI in the desktop app with meters per strip.
+- Stream loudness leveler in the desktop engine: "Stream safe" steers the Stream bus
+  toward the loudness target (±6 dB, 3 dB/s, frozen in silence) before the bus limiter.
 
 ### Phase 2 — Routing and I/O
 - NDI audio out (clean stream mix straight into vMix/OBS/Aethercast) and NDI in.

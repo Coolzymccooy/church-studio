@@ -8,6 +8,9 @@
 //! - strip names (control side only; never touched by the audio thread).
 //!
 //! Everything here is pure (no Tauri, no files) so it can be unit-tested.
+use crate::dsp::mixer::leveler::{
+    LEVELER_TARGET_DEFAULT, LEVELER_TARGET_MAX, LEVELER_TARGET_MIN,
+};
 use crate::dsp::mixer::params::{
     clamp_or, BusParams, StripParams, BUS_MAIN, BUS_MONITOR, BUS_STREAM, DUCK_DEPTH_DEFAULT_DB,
     DUCK_DEPTH_MAX_DB, NUM_BUSES,
@@ -69,6 +72,12 @@ const STRIP_BOOL_KEYS: [(&str, bool); 9] = [
 const BUS_F32_KEYS: &[F32Key] = &[
     ("fader_db", -90.0, 10.0, 0.0),
     ("limiter_ceiling_db", -12.0, 0.0, -1.0),
+    (
+        "leveler_target_lufs",
+        LEVELER_TARGET_MIN,
+        LEVELER_TARGET_MAX,
+        LEVELER_TARGET_DEFAULT,
+    ),
 ];
 
 fn f32_spec(specs: &[F32Key], key: &str) -> Option<F32Key> {
@@ -121,6 +130,7 @@ fn bus_f32<'a>(p: &'a BusParams, key: &str) -> Option<&'a AtomicF32> {
     match key {
         "fader_db" => Some(&p.fader_db),
         "limiter_ceiling_db" => Some(&p.limiter_ceiling_db),
+        "leveler_target_lufs" => Some(&p.leveler_target_lufs),
         _ => None,
     }
 }
@@ -188,6 +198,8 @@ fn reset_bus(p: &BusParams) {
     p.mute.store(false, Relaxed);
     p.limiter_enabled.store(true, Relaxed);
     p.limiter_ceiling_db.store(-1.0, Relaxed);
+    p.leveler_enabled.store(false, Relaxed);
+    p.leveler_target_lufs.store(LEVELER_TARGET_DEFAULT, Relaxed);
 }
 
 /// Re-clamp every value (used after loading a scene file, which may carry
@@ -621,13 +633,13 @@ impl MixerControl {
 
     pub fn set_bus_bool(&self, bus: &str, key: &str, value: bool) -> Result<(), String> {
         let p = &self.params.buses[bus_index(bus)?];
-        match key {
-            "mute" => {
-                p.mute.store(value, Relaxed);
-                Ok(())
-            }
-            _ => Err(format!("unknown bus key '{key}'")),
-        }
+        let field = match key {
+            "mute" => &p.mute,
+            "leveler_enabled" => &p.leveler_enabled,
+            _ => return Err(format!("unknown bus key '{key}'")),
+        };
+        field.store(value, Relaxed);
+        Ok(())
     }
 
     fn strip_state(&self, index: usize, name: String, running: bool) -> StripState {
@@ -711,6 +723,8 @@ impl MixerControl {
                 fader_db: p.fader_db.load(Relaxed),
                 mute: p.mute.load(Relaxed),
                 limiter_ceiling_db: p.limiter_ceiling_db.load(Relaxed),
+                leveler_enabled: p.leveler_enabled.load(Relaxed),
+                leveler_target_lufs: p.leveler_target_lufs.load(Relaxed),
             })
             .collect();
         MixerState {

@@ -176,6 +176,40 @@ fn bus_keys_dispatch_and_clamp() {
 }
 
 #[test]
+fn leveler_keys_dispatch_and_clamp() {
+    let m = MixerControl::new();
+    let stream = &m.params.buses[BUS_STREAM];
+    assert!(!stream.leveler_enabled.load(Relaxed), "leveler starts off");
+    assert_eq!(stream.leveler_target_lufs.load(Relaxed), -14.0);
+
+    m.set_bus_bool("stream", "leveler_enabled", true).unwrap();
+    assert!(stream.leveler_enabled.load(Relaxed));
+    m.set_bus_param("stream", "leveler_target_lufs", -16.0).unwrap();
+    assert_eq!(stream.leveler_target_lufs.load(Relaxed), -16.0);
+    m.set_bus_param("stream", "leveler_target_lufs", -50.0).unwrap();
+    assert_eq!(stream.leveler_target_lufs.load(Relaxed), -30.0);
+    m.set_bus_param("stream", "leveler_target_lufs", 0.0).unwrap();
+    assert_eq!(stream.leveler_target_lufs.load(Relaxed), -10.0);
+    m.set_bus_param("stream", "leveler_target_lufs", f32::NAN).unwrap();
+    assert_eq!(stream.leveler_target_lufs.load(Relaxed), -14.0);
+    // Other buses keep their own setting.
+    assert!(!m.params.buses[BUS_MAIN].leveler_enabled.load(Relaxed));
+}
+
+#[test]
+fn scene_recall_leaves_the_leveler_alone() {
+    let m = MixerControl::new();
+    let scene = m.capture_scene("Defaults");
+    m.set_bus_bool("stream", "leveler_enabled", true).unwrap();
+    m.set_bus_param("stream", "leveler_target_lufs", -16.0).unwrap();
+    m.apply_scene(&scene);
+    assert!(m.params.buses[BUS_STREAM].leveler_enabled.load(Relaxed));
+    assert_eq!(m.params.buses[BUS_STREAM].leveler_target_lufs.load(Relaxed), -16.0);
+    let json = serde_json::to_string(&scene).unwrap();
+    assert!(!json.contains("leveler"), "scenes do not carry the leveler");
+}
+
+#[test]
 fn rename_trims_bounds_and_defaults() {
     let m = MixerControl::new();
     m.rename_strip(1, "  Pastor  ").unwrap();
@@ -348,8 +382,13 @@ fn mixer_state_json_shape_matches_contract() {
     let buses = v["buses"].as_array().unwrap();
     let ids: Vec<&str> = buses.iter().map(|b| b["id"].as_str().unwrap()).collect();
     assert_eq!(ids, vec!["main", "stream", "monitor"]);
-    assert_eq!(keys(&buses[0]), set(&["id", "fader_db", "mute", "limiter_ceiling_db"]));
+    assert_eq!(
+        keys(&buses[0]),
+        set(&["id", "fader_db", "mute", "limiter_ceiling_db", "leveler_enabled", "leveler_target_lufs"])
+    );
     assert_eq!(buses[2]["limiter_ceiling_db"], -1.0);
+    assert_eq!(buses[1]["leveler_enabled"], false);
+    assert_eq!(buses[1]["leveler_target_lufs"], -14.0);
 
     // Stopped: one channel, strips capped by the channel count.
     let stopped = serde_json::to_value(m.snapshot(1, false, Vec::new())).unwrap();
@@ -383,7 +422,7 @@ fn mixer_meters_json_shape_and_clamping() {
             speech: false,
         },
     ];
-    let bus = BusMeters { peak_l_db: -12.0, peak_r_db: -14.0, rms_l_db: -20.0, rms_r_db: -130.0 };
+    let bus = BusMeters { peak_l_db: -12.0, peak_r_db: -14.0, rms_l_db: -20.0, rms_r_db: -130.0, leveler_db: 2.5 };
     slots.publish(&strips, &[bus, bus, bus]);
     // A quieter later block does not lower the held peak.
     let quieter = StripMeters { pre_fader_peak_db: -50.0, ..strips[0] };
@@ -411,8 +450,9 @@ fn mixer_meters_json_shape_and_clamping() {
     assert_eq!(b.len(), 3);
     assert_eq!(
         keys(&b[0]),
-        set(&["id", "peak_l_db", "peak_r_db", "rms_l_db", "rms_r_db"])
+        set(&["id", "peak_l_db", "peak_r_db", "rms_l_db", "rms_r_db", "leveler_db"])
     );
+    assert_eq!(b[1]["leveler_db"], 2.5);
     assert_eq!(b[0]["id"], "main");
     assert_eq!(b[2]["id"], "monitor");
     assert_eq!(b[1]["peak_r_db"], -14.0);
