@@ -3,8 +3,9 @@
 //!
 //! Strips with `automix` on form one group that shares a constant total
 //! power gain: `g_i = sqrt(w_i / Σ w_j)`, where `w_i` is the strip's smoothed
-//! power times its speech factor (RNNoise VAD side-chain at 48 kHz, analysis
-//! only). While no group strip is 15 dB over its own noise floor the shares
+//! power times its speech factor (RNNoise VAD side-chain, analysis only; the
+//! detector signal is resampled to RNNoise's 48 kHz from any engine rate
+//! between 8 and 192 kHz). While no group strip is 15 dB over its own noise floor the shares
 //! are frozen: last-mic hold. Strips with `duck` on dip by
 //! `duck_depth_db` while any group strip is speaking.
 //!
@@ -22,7 +23,11 @@ use std::sync::atomic::Ordering::Relaxed;
 
 /// RNNoise frame (10 ms at 48 kHz).
 const VAD_FRAME: usize = 480;
+/// RNNoise is trained at 48 kHz; other engine rates are resampled to it
+/// (linear interpolation, analysis only) within this range.
 const VAD_SAMPLE_RATE: f64 = 48_000.0;
+const VAD_MIN_ENGINE_RATE: f64 = 8_000.0;
+const VAD_MAX_ENGINE_RATE: f64 = 192_000.0;
 const I16_SCALE: f32 = 32_768.0;
 /// VAD probability above which a frame counts as speech.
 const VAD_SPEECH: f32 = 0.5;
@@ -109,6 +114,12 @@ struct Detector {
     vad_in: Vec<f32>,
     vad_out: Vec<f32>,
     vad_pos: usize,
+    /// Linear resampler to 48 kHz: input samples per VAD sample, the
+    /// position of the next VAD sample past `rs_prev` (in input samples),
+    /// and the previous input sample. Exactly 48 kHz skips it.
+    rs_step: f64,
+    rs_pos: f64,
+    rs_prev: f32,
     /// Test hook: a fixed VAD probability instead of the network.
     vad_override: Option<f32>,
     speech_hold: u32,
@@ -117,7 +128,7 @@ struct Detector {
 
 impl Detector {
     fn new(sr: f64) -> Self {
-        let vad = if (sr - VAD_SAMPLE_RATE).abs() < 0.5 {
+        let vad = if (VAD_MIN_ENGINE_RATE..=VAD_MAX_ENGINE_RATE).contains(&sr) {
             Some(DenoiseState::new())
         } else {
             None
@@ -138,6 +149,13 @@ impl Detector {
             vad_in: vec![0.0; VAD_FRAME],
             vad_out: vec![0.0; VAD_FRAME],
             vad_pos: 0,
+            rs_step: if (VAD_MIN_ENGINE_RATE..=VAD_MAX_ENGINE_RATE).contains(&sr) {
+                sr / VAD_SAMPLE_RATE
+            } else {
+                1.0
+            },
+            rs_pos: 1.0,
+            rs_prev: 0.0,
             vad_override: None,
             speech_hold: 0,
             speech_hold_len: samples(SPEECH_HOLD_S, sr),
@@ -167,12 +185,35 @@ impl Detector {
             self.speech_hold -= 1;
         }
         if run_vad && self.has_vad() {
-            self.vad_in[self.vad_pos] = x * I16_SCALE;
-            self.vad_pos += 1;
-            if self.vad_pos == VAD_FRAME {
-                self.vad_pos = 0;
-                self.end_vad_frame();
-            }
+            self.feed_vad(x);
+        }
+    }
+
+    /// Feed one engine-rate sample to the VAD, resampled to 48 kHz. Per
+    /// sample, so any block size gives the same frames.
+    #[inline]
+    fn feed_vad(&mut self, x: f32) {
+        if self.rs_step == 1.0 {
+            self.push_vad(x);
+            return;
+        }
+        let prev = self.rs_prev;
+        while self.rs_pos <= 1.0 {
+            let y = prev + (x - prev) * self.rs_pos as f32;
+            self.push_vad(y);
+            self.rs_pos += self.rs_step;
+        }
+        self.rs_pos -= 1.0;
+        self.rs_prev = x;
+    }
+
+    #[inline]
+    fn push_vad(&mut self, y: f32) {
+        self.vad_in[self.vad_pos] = y * I16_SCALE;
+        self.vad_pos += 1;
+        if self.vad_pos == VAD_FRAME {
+            self.vad_pos = 0;
+            self.end_vad_frame();
         }
     }
 
@@ -474,5 +515,55 @@ impl AutoMix {
             },
             None => AutoReadout::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod resample_tests {
+    use super::*;
+
+    /// Feed `len` samples of a sine at `sr` and collect what reaches the VAD.
+    fn resampled(sr: f64, len: usize, freq: f32) -> Vec<f32> {
+        let mut det = Detector::new(sr);
+        det.vad_override = Some(0.0);
+        let mut out = Vec::new();
+        for i in 0..len {
+            let x = (2.0 * std::f32::consts::PI * freq * i as f32 / sr as f32).sin();
+            let before = det.vad_pos;
+            det.feed_vad(x);
+            // Read back the samples this input produced (frames wrap at 480).
+            let mut k = before;
+            while k != det.vad_pos {
+                out.push(det.vad_in[k] / I16_SCALE);
+                k = (k + 1) % VAD_FRAME;
+            }
+        }
+        out
+    }
+
+    fn zero_crossings(v: &[f32]) -> usize {
+        v.windows(2).filter(|w| (w[0] < 0.0) != (w[1] < 0.0)).count()
+    }
+
+    #[test]
+    fn every_supported_rate_gets_a_vad_at_48k() {
+        for sr in [16_000.0, 24_000.0, 44_100.0, 48_000.0, 96_000.0] {
+            assert!(Detector::new(sr).vad.is_some(), "{sr} Hz should run the VAD");
+            // One second in → one second (48 000 samples) out, give or take
+            // the first input sample's phase.
+            let out = resampled(sr, sr as usize, 1_000.0);
+            assert!((out.len() as i64 - 48_000).abs() <= 3, "{sr}: {} samples", out.len());
+            // A 1 kHz tone stays 1 kHz: about 2000 zero crossings per second.
+            let zc = zero_crossings(&out);
+            assert!((zc as i64 - 2_000).abs() <= 4, "{sr}: {zc} crossings");
+        }
+        assert!(Detector::new(4_000.0).vad.is_none());
+    }
+
+    #[test]
+    fn exactly_48k_passes_samples_through() {
+        let out = resampled(48_000.0, 1_000, 440.0);
+        let want = (2.0 * std::f32::consts::PI * 440.0 * 10.0 / 48_000.0).sin();
+        assert!((out[10] - want).abs() < 1e-6);
     }
 }

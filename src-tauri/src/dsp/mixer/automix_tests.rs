@@ -413,3 +413,36 @@ fn muting_a_member_freezes_its_gain_instead_of_swelling() {
     let (b_least, _) = gr_range(&blocks, 1, 1.0, false);
     assert!(b_least > 10.0, "unmuted member came back at {b_least} dB");
 }
+
+#[test]
+fn block_size_does_not_change_the_output_at_44k1_with_the_resampled_vad() {
+    const SR44: f64 = 44_100.0;
+    let len = 44_100;
+    let inputs = vec![
+        add(&talker(len, 21, 0.3), &room(len, 22), 1.0),
+        add(&talker(len, 23, 0.1), &room(len, 24), 1.0),
+        music(len),
+    ];
+    let render = |block: usize| -> Vec<f32> {
+        let params = Arc::new(MixerParams::new(3));
+        let mut mixer = Mixer::new(SR44, 1024, 3, params.clone());
+        params.strips[0].automix.store(true, Relaxed);
+        params.strips[1].automix.store(true, Relaxed);
+        params.strips[2].duck.store(true, Relaxed);
+        let mut out = Vec::with_capacity(len);
+        let mut pos = 0;
+        while pos < len {
+            let end = (pos + block).min(len);
+            let slices: Vec<&[f32]> = inputs.iter().map(|v| &v[pos..end]).collect();
+            mixer.process(&slices, end - pos);
+            out.extend_from_slice(mixer.output(BUS_STREAM).0);
+            pos = end;
+        }
+        out
+    };
+    let reference = render(441);
+    for block in [64, 1024, 333] {
+        let diff = max_abs_diff(&reference, &render(block));
+        assert!(diff < 1e-6, "block {block}: max diff {diff}");
+    }
+}

@@ -14,12 +14,14 @@ keys and readouts below.
    constant (no NOM build-up). After someone has spoken, the last-mic hold below applies instead.
    A group of one strip is always at unity.
 2. **Speech weighting.** `w_i = P_i × s_i`: `P_i` is the strip's smoothed power, `s_i` its speech
-   factor. At 48 kHz each automix strip runs an RNNoise VAD side-chain (the same `nnnoiseless`
+   factor. Each automix strip runs an RNNoise VAD side-chain (the same `nnnoiseless`
    network as the voice chain, analysis only: its audio output is discarded, so it adds **no
    audio latency**). `s_i` goes from 0.2 (no speech) to 1 (speech), held for 300 ms after speech
    so the gaps between words are not penalised. Music bleed and noise therefore need about 7 dB
-   more level than a talker to take the gain. At other sample rates there is no VAD and `s_i = 1`
-   (pure level-based Dugan).
+   more level than a talker to take the gain. RNNoise is trained at 48 kHz, so at any other engine
+   rate from 8 to 192 kHz (44.1 kHz interfaces, 24/16 kHz Bluetooth mics) the detector signal is
+   resampled to 48 kHz by per-sample linear interpolation, for analysis only. Outside that range
+   there is no VAD and `s_i = 1` (pure level-based Dugan).
 3. **Last-mic hold.** The shares follow the mics only while some automix strip is 15 dB over its
    own noise floor (a 2-second rolling-minimum tracker, so steady hum or constant music bleed
    raises the floor and stops counting). Below that, in the fading tail of the last word and in
@@ -62,7 +64,7 @@ trim/HPF ─┬─ gate → EQ → comp → [pre-fader] → fader × automix × 
 ## Real-time rules (ROADMAP decisions 2 and 3)
 
 - Everything is sized in `Mixer::new` (control thread): detector state, one RNNoise state per strip
-  (48 kHz only), and a per-strip gain buffer of `max_block`. The callback never allocates or locks,
+  (8–192 kHz engines), and a per-strip gain buffer of `max_block`. The callback never allocates or locks,
   with one caveat: nnnoiseless's FFT library (easyfft) sets up its planner per thread on the first
   frame. The mixer runs one silent VAD frame in the engine's first block, so that one-time set-up
   happens at engine start, not when the first talker starts. (The voice chain's denoiser had the
