@@ -39,6 +39,8 @@ mod leveler_tests;
 #[cfg(test)]
 mod monitor_mix_tests;
 #[cfg(test)]
+mod group_tests;
+#[cfg(test)]
 mod tests;
 
 pub use automix::{AutoMix, AutoReadout};
