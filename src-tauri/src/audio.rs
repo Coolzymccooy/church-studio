@@ -27,6 +27,7 @@ use crate::dsp::noise::compute_noise_profile;
 use crate::dsp::{AudioDeviceInfo, DspChain, DspParams, MetersPayload};
 use crate::history::HistoryRing;
 use crate::mixer_control::{BusOutputs, MixerLink};
+use crate::soundcheck::{playback_channel, PlaybackPort};
 use crate::mixer_layout::StripLayout;
 use crate::mixer_meters::MixerMeterSlots;
 use crate::ndi::receive::receiver::NdiReceivers;
@@ -95,6 +96,7 @@ pub struct AudioEngine {
     computer_audio_applied: bool,
     /// Control side of the record ring; handed to `RunningEngine`.
     record_port: Option<RecordPort>,
+    playback_port: Option<PlaybackPort>,
     /// Control side of the record-preview ring; handed to `RunningEngine`.
     preview_player: Option<crate::preview::PreviewPlayer>,
     pub sample_rate: u32,
@@ -154,6 +156,7 @@ pub struct RunningEngine {
     pub computer_audio_applied: bool,
     /// Multitrack recording; stopped (and finalized) before the engine.
     pub recorder: EngineRecorder,
+    pub playback: PlaybackPort,
     /// Plays the last recording into the Monitor output.
     pub preview: crate::preview::PreviewPlayer,
 }
@@ -565,6 +568,7 @@ impl AudioEngine {
         // Record ring: every strip + Stream + Main, preallocated here.
         let (record_tap, record_port) =
             crate::recorder::record_ring(layout.total(), sr, MAX_CALLBACK_FRAMES);
+        let (playback_tap, playback_port) = playback_channel(sr, layout.total())?;
         let (preview_tap, preview_player) = crate::preview::preview_ring(sr);
         let mut processor = InputProcessor::new(
             sr,
@@ -585,7 +589,7 @@ impl AudioEngine {
             record_tap,
             preview_tap,
             meters_tx,
-        );
+        ).with_playback(playback_tap);
 
         let in_stream = match in_cfg.sample_format() {
             SampleFormat::F32 => in_dev
@@ -697,6 +701,7 @@ impl AudioEngine {
             computer_audio: computer_handle,
             computer_audio_applied: computer_audio_on,
             record_port: Some(record_port),
+            playback_port: Some(playback_port),
             preview_player: Some(preview_player),
             sample_rate: sr,
             buffer_frames: buf_frames,
@@ -856,7 +861,9 @@ impl RunningEngine {
         computer_audio_on: bool,
     ) -> Result<Self, String> {
         let (ready_tx, ready_rx) =
-            mpsc::sync_channel::<Result<(EngineInfo, RecordPort, crate::preview::PreviewPlayer), String>>(1);
+            mpsc::sync_channel::<
+                Result<(EngineInfo, RecordPort, PlaybackPort, crate::preview::PreviewPlayer), String>,
+            >(1);
         let (stop_tx, stop_rx) = mpsc::channel::<EngineCommand>();
         let shared = Arc::new(EngineShared::new(48_000 * 2));
         let thread_shared = shared.clone();
@@ -879,7 +886,11 @@ impl RunningEngine {
                     let _ = ready_tx.send(Err("The record ring was not created".to_string()));
                     return;
                 };
-                if ready_tx.send(Ok((info, port, preview))).is_err() {
+                let Some(playback) = engine.playback_port.take() else {
+                    let _ = ready_tx.send(Err("The soundcheck ring was not created".to_string()));
+                    return;
+                };
+                if ready_tx.send(Ok((info, port, playback, preview))).is_err() {
                     return;
                 }
 
@@ -895,7 +906,7 @@ impl RunningEngine {
             }
         });
 
-        let (info, record_port, preview) = ready_rx
+        let (info, record_port, playback, preview) = ready_rx
             .recv()
             .map_err(|_| "Audio thread exited before initialization completed".to_string())??;
 
@@ -922,6 +933,7 @@ impl RunningEngine {
             computer_audio: info.computer_audio,
             computer_audio_applied: info.computer_audio_applied,
             recorder: EngineRecorder::new(record_port),
+            playback,
             preview,
         })
     }

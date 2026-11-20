@@ -6,7 +6,7 @@ import { knobFraction } from './faceplateControls.js';
 import { knobDragValue } from './knobTravel.js';
 import {
   STRIP_KNOBS, STRIP_ROWS, STRIP_COLOURS, stripColour, stripGateTone, grText, panText, sendText, compactDb,
-  DUCK_KNOB, hasAutomix, reductionText, activeExtraMonitors, EXTRA_MONITORS,
+  DUCK_KNOB, hasAutomix, reductionText, activeExtraMonitors, EXTRA_MONITORS, FX_SEND_KNOBS,
   BUS_LIMITER, busLabel,
 } from './faceplateStrip.js';
 
@@ -29,7 +29,7 @@ test('knob defaults match the engine defaults', () => {
 
 test('the strip layout lists every knob exactly once', () => {
   // mon 2 / mon 3 live in their own row, shown only when that mix has a device.
-  const used = [...STRIP_ROWS.flat(), ...EXTRA_MONITORS.map((m) => m.knob)];
+  const used = [...STRIP_ROWS.flat(), ...FX_SEND_KNOBS, ...EXTRA_MONITORS.map((m) => m.knob)];
   assert.deepEqual([...used].sort(), Object.keys(STRIP_KNOBS).sort());
   assert.equal(new Set(used).size, used.length);
 });

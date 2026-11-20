@@ -20,6 +20,7 @@ import OutputRouter from './components/desk/OutputRouter.jsx';
 import LiveView from './components/desk/LiveView.jsx';
 import DesktopRecordButton from './components/recorder/DesktopRecordButton.jsx';
 import InputRack from './components/desk/InputRack.jsx';
+import { useSoundcheckSignal } from './components/soundcheck/useSoundcheckSignal.js';
 import MixerConsole from './components/mixer/MixerConsole';
 import { createMixerController, createMockMixerController } from './lib/mixerEngine';
 import { syncStreamLeveler } from './lib/streamLeveler';
@@ -98,6 +99,7 @@ const MAIN_TABS = [
 
 const AudioProcessor = ({ goHome }) => {
   const [isLive, setIsLive] = useState(false);
+  const soundcheckSignal = useSoundcheckSignal(isLive);
   const [isPlayingFile, setIsPlayingFile] = useState(false);
   const [audioContext, setAudioContext] = useState(null);
   const [mode, setMode] = useState('live');
@@ -121,6 +123,8 @@ const AudioProcessor = ({ goHome }) => {
   const [voiceActive, setVoiceActive] = useState(false);
   const [isAutoCalibrating, setIsAutoCalibrating] = useState(false);
   const [audioEngineError, setAudioEngineError] = useState(null);
+  // True while the desktop engine is opening its devices, so "start" shows it is working.
+  const [engineStarting, setEngineStarting] = useState(false);
   const [chainReady, setChainReady] = useState(0); // increments when audio chain is fully built
   const [mainTab, setMainTab] = useState('live'); // 'live' | 'editor' | 'mixer'
   // Mixer console: real Tauri controller (invoke/listen loaded lazily, same
@@ -1276,7 +1280,10 @@ const AudioProcessor = ({ goHome }) => {
     // In the desktop app "start" always means the native engine. From file mode it first returns
     // the rack to live; the browser microphone path does not work in the desktop webview.
     if (isTauri) {
+      if (engineStarting) return;
       if (mode !== 'live') setMode('live');
+      setEngineStarting(true);
+      setAudioEngineError(null);
       try {
         const { invoke } = await import('@tauri-apps/api/core');
         // The engine may already be running while this screen thinks it is off (a reload, or an
@@ -1304,6 +1311,8 @@ const AudioProcessor = ({ goHome }) => {
       } catch (err) {
         console.error('Tauri engine start failed', err);
         setAudioEngineError(describeNativeEngineError(err));
+      } finally {
+        setEngineStarting(false);
       }
       return;
     }
@@ -3271,6 +3280,8 @@ const AudioProcessor = ({ goHome }) => {
       <div className="flex-1 flex overflow-hidden min-h-0">
 
         <InputRack
+          mixer={mixerController}
+          soundcheckSignal={soundcheckSignal}
           mode={mode}
           onModeSwitch={handleModeSwitch}
           core={{
@@ -3376,6 +3387,7 @@ const AudioProcessor = ({ goHome }) => {
               playbackDuration,
               formatTime,
               engineError: audioEngineError,
+              engineStarting,
               onErrorBack: () => { cleanupAudio(); setIsLive(false); },
               onGoLive: toggleLive,
               loudness: { m: lufsM, st: lufsST, i: lufsI, target: loudnessTarget, limiterOn: Boolean(features.streamingSafe) },
@@ -3406,6 +3418,7 @@ const AudioProcessor = ({ goHome }) => {
           {mainTab === 'mixer' && (
             <MixerConsole
               controller={mixerController}
+              soundcheckSignal={soundcheckSignal}
               refreshKey={mixerRefreshKey(audioStats.state, nativeRouteStatus)}
               onOpenObs={() => setShowObs(true)}
               demoBanner={isTauri ? null : 'Demo mixer — live multichannel mixing runs in the desktop app'}

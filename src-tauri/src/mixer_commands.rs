@@ -11,7 +11,7 @@ use crate::mixer_layout::StripLayout;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 const SCENES_DIR: &str = "scenes";
 
@@ -159,11 +159,14 @@ pub fn mixer_set_strip_bool(
 
 #[tauri::command]
 pub fn mixer_rename_strip(
+    app: AppHandle,
     mixer: State<'_, MixerControl>,
     index: u32,
     name: String,
 ) -> Result<(), String> {
-    mixer.rename_strip(index, &name)
+    mixer.rename_strip(index, &name)?;
+    let _ = app.emit("mixer-strip-renamed", index);
+    Ok(())
 }
 
 #[tauri::command]
