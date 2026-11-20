@@ -20,7 +20,7 @@ use tokio_rustls::TlsAcceptor;
 
 const MAX_CONNECTIONS: usize = 64;
 const RESERVED_CONNECTIONS: usize = 16;
-const PER_IP: usize = 4;
+const PER_IP: usize = 8;
 const MAX_PEM_BYTES: u64 = 1024 * 1024;
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -219,21 +219,35 @@ mod tests {
     fn one_ip_is_capped_and_paired_clients_have_reserved_slots() {
         let mut connections = Connections::default();
         let address = |last| IpAddr::V4(Ipv4Addr::new(192, 168, 0, last));
-        for last in 1..=12 {
+        let public_ips = (MAX_CONNECTIONS - RESERVED_CONNECTIONS) as u8 / PER_IP as u8;
+        let paired_ips = RESERVED_CONNECTIONS as u8 / PER_IP as u8;
+        for last in 1..=public_ips {
             for _ in 0..PER_IP {
                 assert!(connections.acquire(address(last), false));
             }
             assert!(!connections.acquire(address(last), true));
         }
-        assert!(!connections.acquire(address(13), false));
-        for last in 13..=16 {
+        let first_paired = public_ips + 1;
+        let extra = public_ips + paired_ips + 1;
+        assert!(!connections.acquire(address(first_paired), false));
+        for last in first_paired..extra {
             for _ in 0..PER_IP {
                 assert!(connections.acquire(address(last), true));
             }
         }
-        assert!(!connections.acquire(address(17), true));
-        connections.release(address(13));
-        assert!(connections.acquire(address(17), true));
-        assert!(!connections.acquire(address(18), false));
+        assert!(!connections.acquire(address(extra), true));
+        connections.release(address(first_paired));
+        assert!(connections.acquire(address(extra), true));
+        assert!(!connections.acquire(address(extra + 1), false));
+    }
+
+    #[test]
+    fn each_device_can_open_six_asset_connections_and_a_live_event_stream() {
+        let mut connections = Connections::default();
+        let ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        for _ in 0..8 {
+            assert!(connections.acquire(ip, true));
+        }
+        assert!(!connections.acquire(ip, true));
     }
 }

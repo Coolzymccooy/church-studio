@@ -74,8 +74,9 @@ export default function RemoteMixerPanel() {
 
   const running = Boolean(status?.url);
   const pairing = status?.pairing?.state;
-  const activeCode = code && (pairing === 'ready' || pairing === 'locked');
-  const pairingLabel = { ready: 'Ready', locked: 'IP locked', expired: 'Expired' }[pairing];
+  const activeCode = code && pairing === 'ready';
+  const pairingLabel = { ready: 'Ready', expired: 'Expired' }[pairing];
+  const blocked = status?.pairing?.lockedClients ?? 0;
   const complete = settings.ip && settings.host && settings.certificate && settings.privateKey && settings.port > 0 && settings.port <= 65535;
 
   return (
@@ -121,7 +122,9 @@ export default function RemoteMixerPanel() {
           {pairingLabel && (
             <div className="fp-row">
               <Lamp tone={pairing === 'ready' ? 'g' : 'a'}>{pairingLabel}</Lamp>
-              <InfoTip label="Pairing status">Pairing attempts are limited per IP address. Other addresses may still use this code until it expires.</InfoTip>
+              {blocked > 0 && <InfoTip label="Pairing backoff">
+                {blocked} {blocked === 1 ? 'address is' : 'addresses are'} in backoff. Other devices can still use the active code.
+              </InfoTip>}
             </div>
           )}
           {activeCode && <PairQr url={pairUrl(status.url, code)} />}

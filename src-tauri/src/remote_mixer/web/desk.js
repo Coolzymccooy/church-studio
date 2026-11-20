@@ -1,4 +1,4 @@
-import { changeBody, dbLabel, pairCodeFromHash } from './protocol.js';
+import { changeBody, dbLabel, CONTROL_RETRY_WINDOW_MS, drainControlQueue, pairCodeFromHash } from './protocol.js';
 
 const el = (id) => document.getElementById(id);
 const names = { desk: 'Desk', monitor1: 'Mon 1', monitor2: 'Mon 2', monitor3: 'Mon 3' };
@@ -221,46 +221,53 @@ function disconnect() {
 function write(key, target, kind, value) {
   if (!view?.running) return;
   const id = `${key}:${kind}`;
-  queue.set(id, changeBody(view.layout, target, kind, value));
+  queue.set(id, {
+    change: changeBody(view.layout, target, kind, value),
+    retryUntil: performance.now() + CONTROL_RETRY_WINDOW_MS,
+  });
   if (!sending) void flush();
+}
+
+async function postControl(change) {
+  const response = await fetch('/api/control', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(change),
+  });
+  return response.status;
+}
+
+function controlResult(status) {
+  if (status === 401) {
+    unpair();
+    showError('Pair again');
+  } else if (status === 409) {
+    queue.clear();
+    showError('Mixer layout changed');
+    void connect();
+  } else if (status >= 200 && status < 300) {
+    showError('');
+  } else {
+    showError(status === 423 ? 'Fader in use' : 'Control unavailable');
+    if (view) render(view);
+  }
 }
 
 async function flush() {
   sending = true;
-  while (queue.size) {
-    const [id, change] = queue.entries().next().value;
-    queue.delete(id);
-    active.add(id);
-    try {
-      const response = await fetch('/api/control', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(change),
-      });
-      if (response.status === 401) {
-        unpair();
-        showError('Pair again');
-      } else if (response.status === 429) {
-        if (!queue.has(id)) queue.set(id, change);
-        await new Promise((resolve) => window.setTimeout(resolve, 40));
-      } else if (!response.ok) {
-        queue.clear();
-        const errors = { 409: 'Mixer layout changed', 423: 'Fader in use' };
-        showError(errors[response.status] ?? 'Control unavailable');
-        if (view) {
-          active.delete(id);
-          render(view);
-        }
-        if (response.status === 409) void connect();
-      } else {
-        showError('');
-      }
-    } catch {
-      queue.clear();
-      disconnect();
-    } finally {
-      active.delete(id);
-    }
+  const generation = connectGeneration;
+  try {
+    await drainControlQueue({
+      queue, active, post: postControl, respond: controlResult,
+      wait: (ms) => new Promise((resolve) => window.setTimeout(resolve, ms)),
+      now: () => performance.now(),
+      isCurrent: (change) => generation === connectGeneration && change.layout === view?.layout,
+    });
+  } catch {
+    queue.clear();
+    disconnect();
+  } finally {
+    sending = false;
+    if (queue.size) void flush();
   }
-  sending = false;
 }
 
 el('pair').onsubmit = async (event) => {

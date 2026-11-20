@@ -143,14 +143,7 @@ impl Auth {
         let (state, remaining) = match &self.pair {
             None => ("idle", Duration::ZERO),
             Some(code) if code.expires <= now => ("expired", Duration::ZERO),
-            Some(code) => (
-                if locked_clients == 0 {
-                    "ready"
-                } else {
-                    "locked"
-                },
-                code.expires - now,
-            ),
+            Some(code) => ("ready", code.expires - now),
         };
         PairStatus {
             state,
@@ -186,9 +179,6 @@ impl Auth {
             .get(&ip)
             .is_some_and(|entry| entry.until > now)
         {
-            return Err(PairError::Backoff);
-        }
-        if !self.failures.contains_key(&ip) && self.failures.len() >= MAX_FAILURE_RECORDS {
             return Err(PairError::Backoff);
         }
         let valid = self
@@ -237,6 +227,16 @@ impl Auth {
     }
 
     fn record_failure(&mut self, ip: IpAddr, now: Instant) {
+        if self.failures.len() >= MAX_FAILURE_RECORDS && !self.failures.contains_key(&ip) {
+            if let Some(oldest) = self
+                .failures
+                .iter()
+                .min_by_key(|(_, entry)| entry.last)
+                .map(|(ip, _)| *ip)
+            {
+                self.failures.remove(&oldest);
+            }
+        }
         let entry = self.failures.entry(ip).or_insert(Failure {
             strikes: 0,
             until: now,
@@ -305,7 +305,8 @@ mod tests {
                 Err(PairError::Code)
             );
         }
-        assert_eq!(auth.pair_status().state, "locked");
+        assert_eq!(auth.pair_status().state, "ready");
+        assert_eq!(auth.pair_status().locked_clients, 1);
         let code = auth.issue(Role::Monitor2).unwrap();
         assert_eq!(
             auth.pair(&code, "Fixture", ip, false),
@@ -337,5 +338,29 @@ mod tests {
         let code = auth.issue(Role::Desk).unwrap();
         let cookie = auth.pair(&code, "Fixture", ip, false).unwrap();
         assert!(auth.renew(&cookie, ip).is_none());
+    }
+
+    #[test]
+    fn a_full_failure_table_still_accepts_new_clients_and_evicts_the_oldest_failure() {
+        use std::net::Ipv4Addr;
+        let mut auth = Auth::default();
+        let code = auth.issue(Role::Desk).unwrap();
+        let now = Instant::now();
+        let ip =
+            |index: usize| IpAddr::V4(Ipv4Addr::new(192, 168, (index / 256) as u8, index as u8));
+        for index in 0..MAX_FAILURE_RECORDS {
+            auth.record_failure(ip(index), now + Duration::from_nanos(index as u64));
+        }
+        let next = ip(MAX_FAILURE_RECORDS);
+        assert_eq!(
+            auth.pair("invalid", "Fixture", next, false),
+            Err(PairError::Code)
+        );
+        assert_eq!(auth.failures.len(), MAX_FAILURE_RECORDS);
+        assert!(!auth.failures.contains_key(&ip(0)));
+        assert!(auth.failures.contains_key(&next));
+        assert!(auth
+            .pair(&code, "Fixture", ip(MAX_FAILURE_RECORDS + 1), false)
+            .is_ok());
     }
 }

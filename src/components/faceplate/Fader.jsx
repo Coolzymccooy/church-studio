@@ -16,7 +16,9 @@ export default function Fader({
   const startTouch = () => {
     if (!onTouch || endTouch.current) return;
     onTouch(true);
+    const refresh = window.setInterval(() => onTouch(true), 500);
     const end = () => {
+      window.clearInterval(refresh);
       endTouch.current = null;
       window.removeEventListener('pointerup', end);
       window.removeEventListener('pointercancel', end);

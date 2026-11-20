@@ -9,9 +9,10 @@ use crate::mixer_control::{bus_index, MixerControl};
 use crate::mixer_layout::StripLayout;
 use parking_lot::Mutex;
 use serde::Serialize;
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 #[derive(Default)]
@@ -19,7 +20,27 @@ pub struct RemoteMixer {
     listener: Mutex<Option<Listening>>,
     last_settings: Mutex<Option<ListenerSettings>>,
     start: tokio::sync::Mutex<()>,
-    held_faders: Mutex<HashSet<String>>,
+    held_faders: Mutex<FaderHolds>,
+}
+
+const FADER_HOLD_TTL: Duration = Duration::from_secs(2);
+
+#[derive(Default)]
+struct FaderHolds(HashMap<String, Instant>);
+
+impl FaderHolds {
+    fn set(&mut self, id: String, down: bool, now: Instant) {
+        if down {
+            self.0.retain(|_, until| *until > now);
+            self.0.insert(id, now + FADER_HOLD_TTL);
+        } else {
+            self.0.remove(&id);
+        }
+    }
+
+    fn contains(&self, id: &str, now: Instant) -> bool {
+        self.0.get(id).is_some_and(|until| *until > now)
+    }
 }
 
 impl RemoteMixer {
@@ -183,7 +204,7 @@ impl Board for DesktopBoard {
             };
             let remote = self.0.state::<RemoteMixer>();
             let held = remote.held_faders.lock();
-            if held.contains(&fader) {
+            if held.contains(&fader, Instant::now()) {
                 return Err(Status::LOCKED);
             }
             return write_control(&mixer, layout, role, control);
@@ -261,12 +282,7 @@ pub fn remote_mixer_fader_touch(remote: State<'_, RemoteMixer>, id: String, down
         _ => false,
     };
     if valid {
-        let mut held = remote.held_faders.lock();
-        if down {
-            held.insert(id);
-        } else {
-            held.remove(&id);
-        }
+        remote.held_faders.lock().set(id, down, Instant::now());
     }
 }
 
@@ -493,5 +509,20 @@ mod tests {
                 .iter()
                 .any(|view| matches!(&view.target, Target::Dca { index: 0 }))
         );
+    }
+
+    #[test]
+    fn fader_hold_expires_without_refresh_and_refresh_keeps_it_protected() {
+        use std::time::{Duration, Instant};
+        let now = Instant::now();
+        let mut holds = super::FaderHolds::default();
+        holds.set("strip:0".into(), true, now);
+        holds.set("strip:1".into(), true, now);
+        assert!(holds.contains("strip:0", now + Duration::from_secs(1)));
+        holds.set("strip:0".into(), true, now + Duration::from_millis(1_500));
+        assert!(!holds.contains("strip:1", now + Duration::from_secs(2)));
+        assert!(holds.contains("strip:0", now + Duration::from_secs(2)));
+        holds.set("strip:0".into(), false, now + Duration::from_secs(2));
+        assert!(!holds.contains("strip:0", now + Duration::from_secs(2)));
     }
 }
