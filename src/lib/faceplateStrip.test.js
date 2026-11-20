@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { paramRange } from './mixerEngine.js';
+import { knobFraction } from './faceplateControls.js';
+import { knobDragValue } from './knobTravel.js';
 import {
   STRIP_KNOBS, STRIP_ROWS, STRIP_COLOURS, stripColour, stripGateTone, grText, panText, sendText, compactDb,
   DUCK_KNOB, hasAutomix, reductionText,
@@ -121,4 +123,14 @@ test('hasAutomix only when the engine reports both keys', () => {
 
 test('duck knob uses the contract range', () => {
   assert.deepEqual([DUCK_KNOB.min, DUCK_KNOB.max, DUCK_KNOB.defaultValue], [0, 40, 12]);
+});
+
+test('knob definitions: sends turn like faders, hz turns by octaves, 0 dB and centre are detents', () => {
+  const { main, hz, trim, pan, mid } = STRIP_KNOBS;
+  assert.equal(knobFraction(0, main), 0.75);
+  assert.equal(knobFraction(10, main), 1);
+  assert.equal(knobFraction(40, hz).toFixed(3), '0.231');
+  for (const k of [main, trim, pan, mid]) assert.equal(k.detent, 0, k.label);
+  assert.equal(knobDragValue(0, -3, main), 0, 'a send rests at 0 dB');
+  assert.equal(knobDragValue(-90, -100, main), -30);
 });
