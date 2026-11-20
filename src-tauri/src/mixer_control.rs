@@ -686,8 +686,7 @@ impl MixerControl {
             duck_gr_db: live_gr(&p.live.duck_gr_db, running),
         }
     }
-
-    #[cfg(test)] // tests only; the app uses `snapshot_layout`
+    #[cfg(test)]
     pub fn snapshot(&self, input_channels: u32, running: bool, scenes: Vec<String>) -> MixerState {
         self.snapshot_with_ndi(input_channels, 0, running, scenes)
     }
