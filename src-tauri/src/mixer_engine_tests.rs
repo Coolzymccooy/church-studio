@@ -6,8 +6,10 @@ use crate::dsp::mixer::{BusMeters, Mixer, StripMeters, BUS_MAIN, BUS_MONITOR, BU
 use crate::dsp::test_util::{rms, sine};
 use crate::mixer_control::{
     engine_strip_feeds, name_is_automatic, ndi_strip_identity, scene_slug, MixerControl,
-    StoredScene, HARDWARE_STRIP, MAX_STRIPS, NO_VOICE_STRIP, OTHER_STRIPS_FADER_DB,
+    StoredScene, COMPUTER_LEFT_LABEL, COMPUTER_LEFT_STRIP, COMPUTER_RIGHT_LABEL,
+    COMPUTER_RIGHT_STRIP, HARDWARE_STRIP, MUSIC_TRIM_DB, MAX_STRIPS, NO_VOICE_STRIP, OTHER_STRIPS_FADER_DB,
 };
+use crate::mixer_layout::StripLayout;
 use crate::mixer_meters::{MixerMeterSlots, METER_FLOOR_DB};
 use crate::routing::{deinterleave, device_sample, push_stereo};
 use ringbuf::traits::{Consumer, Split};
@@ -309,7 +311,7 @@ fn mixer_state_json_shape_matches_contract() {
 
     assert_eq!(
         keys(&v),
-        set(&["inputChannels", "ndiStrips", "running", "strips", "buses", "scenes"])
+        set(&["inputChannels", "computerStrips", "ndiStrips", "running", "strips", "buses", "scenes"])
     );
     assert_eq!(v["ndiStrips"], 0);
     assert_eq!(v["inputChannels"], 2);
@@ -459,7 +461,7 @@ fn ndi_inputs_add_strips_after_the_hardware_channels() {
         (2, "PC (Keys)".to_string(), "Keys".to_string()),
         (3, "PC (Bell)".to_string(), "\u{7}".to_string()),
     ];
-    m.link().assign_strip_feeds(&engine_strip_feeds(2, &ndi));
+    m.link().assign_strip_feeds(&engine_strip_feeds(2, None, &ndi));
     let state = m.snapshot_with_ndi(2, 2, true, Vec::new());
     assert_eq!(state.input_channels, 2);
     assert_eq!(state.ndi_strips, 2);
@@ -489,7 +491,7 @@ fn ndi_feed(strip: usize, source: &str, label: &str) -> (usize, String, String) 
 
 #[test]
 fn engine_feeds_list_hardware_then_ndi_strips() {
-    let feeds = engine_strip_feeds(2, &[ndi_feed(2, "PC (Keys)", "Keys")]);
+    let feeds = engine_strip_feeds(2, None, &[ndi_feed(2, "PC (Keys)", "Keys")]);
     assert_eq!(feeds.len(), 3);
     assert_eq!(feeds[1].identity, HARDWARE_STRIP);
     assert_eq!(feeds[1].label, None);
@@ -512,16 +514,16 @@ fn only_default_or_previous_automatic_names_are_replaced() {
 fn a_strip_whose_feed_changes_is_reset_and_loses_the_voice_chain() {
     let m = MixerControl::new();
     // 4 hardware channels; strip 2 raised, renamed and carrying the voice chain.
-    m.link().assign_strip_feeds(&engine_strip_feeds(4, &[]));
+    m.link().assign_strip_feeds(&engine_strip_feeds(4, None, &[]));
     m.set_strip_param(2, "fader_db", 0.0).unwrap();
     m.set_strip_bool(2, "voice_chain", true).unwrap();
     m.rename_strip(2, "Pastor").unwrap();
     // Same layout again: nothing changes.
-    assert!(m.link().assign_strip_feeds(&engine_strip_feeds(4, &[])).is_empty());
+    assert!(m.link().assign_strip_feeds(&engine_strip_feeds(4, None, &[])).is_empty());
     assert_eq!(m.voice_strip.load(Relaxed), 2);
     // A 2-channel device: strip 2 becomes an NDI source.
     let keys = [ndi_feed(2, "PC (Keys)", "Keys")];
-    assert_eq!(m.link().assign_strip_feeds(&engine_strip_feeds(2, &keys)), vec![2]);
+    assert_eq!(m.link().assign_strip_feeds(&engine_strip_feeds(2, None, &keys)), vec![2]);
     let state = m.snapshot_with_ndi(2, 1, true, Vec::new());
     assert_eq!(state.strips[2].fader_db, OTHER_STRIPS_FADER_DB);
     assert_eq!(state.strips[2].name, "Keys");
@@ -529,13 +531,13 @@ fn a_strip_whose_feed_changes_is_reset_and_loses_the_voice_chain() {
     // Another source on the same strip is reset too.
     m.set_strip_param(2, "fader_db", 0.0).unwrap();
     let bell = [ndi_feed(2, "PC (Bell)", "Bell")];
-    assert_eq!(m.link().assign_strip_feeds(&engine_strip_feeds(2, &bell)), vec![2]);
+    assert_eq!(m.link().assign_strip_feeds(&engine_strip_feeds(2, None, &bell)), vec![2]);
     let state = m.snapshot_with_ndi(2, 1, true, Vec::new());
     assert_eq!(state.strips[2].fader_db, OTHER_STRIPS_FADER_DB);
     assert_eq!(state.strips[2].name, "Bell");
     // And back to hardware: reset, with the default name.
     m.set_strip_param(2, "fader_db", 0.0).unwrap();
-    assert_eq!(m.link().assign_strip_feeds(&engine_strip_feeds(4, &[])), vec![2]);
+    assert_eq!(m.link().assign_strip_feeds(&engine_strip_feeds(4, None, &[])), vec![2]);
     let state = m.snapshot(4, true, Vec::new());
     assert_eq!(state.strips[2].fader_db, OTHER_STRIPS_FADER_DB);
     assert_eq!(state.strips[2].name, "Ch 3");
@@ -545,15 +547,15 @@ fn a_strip_whose_feed_changes_is_reset_and_loses_the_voice_chain() {
 fn same_source_keeps_its_mix_and_the_operators_name() {
     let m = MixerControl::new();
     let keys = [ndi_feed(2, "PC (Keys)", "Keys")];
-    m.link().assign_strip_feeds(&engine_strip_feeds(2, &keys));
+    m.link().assign_strip_feeds(&engine_strip_feeds(2, None, &keys));
     m.set_strip_param(2, "fader_db", -6.0).unwrap();
     m.set_strip_bool(2, "voice_chain", true).unwrap();
     m.rename_strip(2, "Piano").unwrap();
     // A start without the input leaves strip 2's record alone…
-    assert!(m.link().assign_strip_feeds(&engine_strip_feeds(2, &[])).is_empty());
+    assert!(m.link().assign_strip_feeds(&engine_strip_feeds(2, None, &[])).is_empty());
     // …so the same source on the next start keeps its fader, voice chain
     // and the operator's name.
-    assert!(m.link().assign_strip_feeds(&engine_strip_feeds(2, &keys)).is_empty());
+    assert!(m.link().assign_strip_feeds(&engine_strip_feeds(2, None, &keys)).is_empty());
     let state = m.snapshot_with_ndi(2, 1, true, Vec::new());
     assert_eq!(state.strips[2].fader_db, -6.0);
     assert_eq!(state.strips[2].name, "Piano");
@@ -561,7 +563,173 @@ fn same_source_keeps_its_mix_and_the_operators_name() {
     // An unrenamed strip follows a new automatic label for the same source.
     m.rename_strip(2, "").unwrap();
     let keys2 = [ndi_feed(2, "PC (Keys)", "Keys 2")];
-    assert!(m.link().assign_strip_feeds(&engine_strip_feeds(2, &keys2)).is_empty());
+    assert!(m.link().assign_strip_feeds(&engine_strip_feeds(2, None, &keys2)).is_empty());
     let state = m.snapshot_with_ndi(2, 1, true, Vec::new());
     assert_eq!(state.strips[2].name, "Keys 2");
+}
+
+// ── Computer-audio strips ───────────────────────────────────────────────────
+
+#[test]
+fn computer_audio_adds_a_music_pair_between_hardware_and_ndi() {
+    let m = MixerControl::new();
+    // Strip 2 was a hardware channel with the voice chain on it.
+    m.link().assign_strip_feeds(&engine_strip_feeds(4, None, &[]));
+    m.set_strip_bool(2, "voice_chain", true).unwrap();
+    let layout = StripLayout::new(2, true, 1);
+    let ndi = [ndi_feed(4, "PC (Keys)", "Keys")];
+    let feeds = engine_strip_feeds(2, layout.computer_strips().map(|(l, _)| l), &ndi);
+    assert_eq!(feeds.len(), 5);
+    assert_eq!(feeds[2].identity, COMPUTER_LEFT_STRIP);
+    assert_eq!(feeds[3].identity, COMPUTER_RIGHT_STRIP);
+    assert_eq!(feeds[4].identity, ndi_strip_identity("PC (Keys)"));
+    assert_eq!(m.link().assign_strip_feeds(&feeds), vec![2, 3, 4]);
+
+    let state = m.snapshot_layout(layout, true, Vec::new());
+    assert_eq!(state.input_channels, 2);
+    assert_eq!(state.computer_strips, 2);
+    assert_eq!(state.ndi_strips, 1);
+    assert_eq!(state.strips.len(), 5);
+    let (left, right) = (&state.strips[2], &state.strips[3]);
+    assert_eq!(left.name, COMPUTER_LEFT_LABEL);
+    assert_eq!(right.name, COMPUTER_RIGHT_LABEL);
+    for strip in [left, right] {
+        // Music never goes through the speech chain, the gate or the HPF.
+        assert!(!strip.voice_chain && !strip.gate_enabled && !strip.hpf_enabled);
+        // Fader off until the operator raises it, like every new strip,
+        // and the Monitor follows the fader.
+        assert_eq!(strip.fader_db, OTHER_STRIPS_FADER_DB);
+        assert!(strip.monitor_post_fader);
+    }
+    assert_eq!((left.pan, right.pan), (-1.0, 1.0));
+    // The hard pan's +3 dB is taken back off, so full-scale music stays
+    // under the bus limiters.
+    assert_eq!((left.trim_db, right.trim_db), (MUSIC_TRIM_DB, MUSIC_TRIM_DB));
+    assert_eq!(m.voice_strip.load(Relaxed), NO_VOICE_STRIP);
+    // The NDI strip keeps the standard defaults.
+    assert!(state.strips[4].hpf_enabled);
+    assert!(!state.strips[4].monitor_post_fader);
+    assert_eq!(state.strips[4].pan, 0.0);
+    assert_eq!(state.strips[4].trim_db, 0.0);
+}
+
+#[test]
+fn computer_strips_keep_the_operators_mix_across_restarts() {
+    let m = MixerControl::new();
+    let feeds = engine_strip_feeds(2, Some(2), &[]);
+    m.link().assign_strip_feeds(&feeds);
+    m.set_strip_param(2, "fader_db", -10.0).unwrap();
+    m.set_strip_bool(3, "hpf_enabled", true).unwrap();
+    // Same feeds on the next start: nothing is reset.
+    assert!(m.link().assign_strip_feeds(&feeds).is_empty());
+    let state = m.snapshot_layout(StripLayout::new(2, true, 0), true, Vec::new());
+    assert_eq!(state.strips[2].fader_db, -10.0);
+    assert!(state.strips[3].hpf_enabled);
+    // Turned off, then a 4-channel device: strips 2 and 3 are hardware again,
+    // reset to the standard defaults (HPF on, centred).
+    assert_eq!(m.link().assign_strip_feeds(&engine_strip_feeds(4, None, &[])), vec![2, 3]);
+    let state = m.snapshot(4, true, Vec::new());
+    assert!(state.strips[2].hpf_enabled);
+    assert_eq!(state.strips[2].pan, 0.0);
+    assert_eq!(state.strips[2].name, "Ch 3");
+}
+
+#[test]
+fn mixer_state_json_lists_computer_strips() {
+    let m = MixerControl::new();
+    let json = serde_json::to_value(m.snapshot_layout(StripLayout::new(1, true, 0), false, Vec::new()))
+        .unwrap();
+    assert_eq!(json["computerStrips"], 2);
+    assert_eq!(json["ndiStrips"], 0);
+    assert_eq!(json["strips"].as_array().unwrap().len(), 3);
+}
+
+#[test]
+fn a_hard_panned_music_pair_passes_full_scale_at_unity() {
+    let m = MixerControl::new();
+    m.link().assign_strip_feeds(&engine_strip_feeds(1, Some(1), &[]));
+    m.set_strip_param(1, "fader_db", 0.0).unwrap();
+    m.set_strip_param(2, "fader_db", 0.0).unwrap();
+    let mut mixer = Mixer::new(48_000.0, 512, 3, m.link().params.clone());
+    let silent = vec![0.0f32; 512];
+    let left = sine(512, 1_000.0, 48_000.0, 0.5);
+    let right = sine(512, 500.0, 48_000.0, 0.5);
+    for _ in 0..40 {
+        mixer.process(&[&silent, &left, &right], 512);
+    }
+    let (out_l, out_r) = mixer.output(BUS_MONITOR);
+    let ratio_l = rms(&out_l[256..512]) / rms(&left[256..512]);
+    let ratio_r = rms(&out_r[256..512]) / rms(&right[256..512]);
+    assert!((ratio_l - 1.0).abs() < 0.02, "left {ratio_l}");
+    assert!((ratio_r - 1.0).abs() < 0.02, "right {ratio_r}");
+}
+
+#[test]
+fn a_music_strip_with_its_fader_down_is_silent_in_the_monitor() {
+    let m = MixerControl::new();
+    m.link().assign_strip_feeds(&engine_strip_feeds(1, Some(1), &[]));
+    // Faders stay at their new-strip default: off.
+    let mut mixer = Mixer::new(48_000.0, 512, 3, m.link().params.clone());
+    let silent = vec![0.0f32; 512];
+    let music = sine(512, 1_000.0, 48_000.0, 0.5);
+    for _ in 0..40 {
+        mixer.process(&[&silent, &music, &music], 512);
+    }
+    let (left, right) = mixer.output(BUS_MONITOR);
+    assert!(rms(&left[..512]) < 1e-4 && rms(&right[..512]) < 1e-4);
+    // Raising the faders brings the music into the Monitor.
+    m.set_strip_param(1, "fader_db", 0.0).unwrap();
+    m.set_strip_param(2, "fader_db", 0.0).unwrap();
+    for _ in 0..40 {
+        mixer.process(&[&silent, &music, &music], 512);
+    }
+    let (left, _) = mixer.output(BUS_MONITOR);
+    assert!(rms(&left[..512]) > 0.1);
+}
+
+#[test]
+fn adding_a_mic_moves_the_computer_pair_with_its_settings() {
+    let m = MixerControl::new();
+    // One mic: Computer L/R on strips 1 and 2, mixed by the operator.
+    m.link().assign_strip_feeds(&engine_strip_feeds(1, Some(1), &[]));
+    m.set_strip_param(1, "fader_db", -8.0).unwrap();
+    m.set_strip_param(2, "fader_db", -9.0).unwrap();
+    m.set_strip_param(2, "eq_low_db", 3.0).unwrap();
+    m.rename_strip(1, "Music L").unwrap();
+    // A second mic: the pair moves to strips 2 and 3 and keeps its mix.
+    let reset = m.link().assign_strip_feeds(&engine_strip_feeds(2, Some(2), &[]));
+    assert_eq!(reset, vec![1], "only the strip that became a mic is reset");
+    let state = m.snapshot_layout(StripLayout::new(2, true, 0), true, Vec::new());
+    assert_eq!(state.strips[2].fader_db, -8.0);
+    assert_eq!(state.strips[2].name, "Music L");
+    assert_eq!(state.strips[3].fader_db, -9.0);
+    assert_eq!(state.strips[3].eq_low_db, 3.0);
+    assert_eq!(state.strips[3].name, COMPUTER_RIGHT_LABEL);
+    assert_eq!((state.strips[2].pan, state.strips[3].pan), (-1.0, 1.0));
+    // The new mic strip starts fresh.
+    assert_eq!(state.strips[1].name, "Ch 2");
+    assert_eq!(state.strips[1].fader_db, OTHER_STRIPS_FADER_DB);
+    assert!(state.strips[1].hpf_enabled);
+    // And back to one mic: the pair returns to strips 1 and 2 as mixed.
+    assert!(m.link().assign_strip_feeds(&engine_strip_feeds(1, Some(1), &[])).is_empty());
+    let state = m.snapshot_layout(StripLayout::new(1, true, 0), true, Vec::new());
+    assert_eq!(state.strips[1].fader_db, -8.0);
+    assert_eq!(state.strips[2].eq_low_db, 3.0);
+}
+
+#[test]
+fn a_moved_source_takes_the_voice_chain_and_ndi_strips_move_too() {
+    let m = MixerControl::new();
+    let keys = |strip| [ndi_feed(strip, "PC (Keys)", "Keys")];
+    m.link().assign_strip_feeds(&engine_strip_feeds(1, None, &keys(1)));
+    m.set_strip_param(1, "fader_db", -4.0).unwrap();
+    m.set_strip_bool(1, "voice_chain", true).unwrap();
+    // Computer audio turned on: the pair takes strips 1–2, Keys moves to 3.
+    let reset = m.link().assign_strip_feeds(&engine_strip_feeds(1, Some(1), &keys(3)));
+    assert_eq!(reset, vec![1, 2], "the pair is new on strips 1 and 2; Keys only moved");
+    let state = m.snapshot_layout(StripLayout::new(1, true, 1), true, Vec::new());
+    assert_eq!(state.strips[3].name, "Keys");
+    assert_eq!(state.strips[3].fader_db, -4.0);
+    assert_eq!(m.voice_strip.load(Relaxed), 3, "the voice chain follows Keys");
+    assert!(!state.strips[1].voice_chain);
 }
