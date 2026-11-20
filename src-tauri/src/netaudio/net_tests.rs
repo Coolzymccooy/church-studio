@@ -135,6 +135,19 @@ fn free_port() -> u16 {
 }
 
 #[test]
+fn every_send_bus_name_maps_to_its_mixer_bus() {
+    use crate::dsp::mixer::{BUS_MAIN, BUS_MONITOR, BUS_MONITOR2, BUS_MONITOR3, BUS_STREAM};
+    assert_eq!(bus_index("main"), BUS_MAIN);
+    assert_eq!(bus_index("stream"), BUS_STREAM);
+    assert_eq!(bus_index("monitor"), BUS_MONITOR);
+    assert_eq!(bus_index("monitor2"), BUS_MONITOR2);
+    assert_eq!(bus_index("monitor3"), BUS_MONITOR3);
+    for name in settings::BUSES {
+        assert!(crate::mixer_control::BUS_IDS.contains(&name), "{name}");
+    }
+}
+
+#[test]
 fn start_reserves_strips_only_when_receiving() {
     let mut config = NetAudioConfig::fresh();
     let started = start(&config, RATE, 4, 4);

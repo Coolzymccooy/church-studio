@@ -1,7 +1,8 @@
 /// CPAL audio engine that owns the native input/output streams.
 /// Every input channel feeds its own mixer strip; the voice chain runs on the
-/// `voice_chain` strip; the Main, Stream and Monitor buses go to the main,
-/// broadcast and monitor devices (see `input_proc` and `routing`).
+/// `voice_chain` strip; the Main, Stream, Monitor, Monitor 2 and Monitor 3
+/// buses go to the main, broadcast, monitor, monitor 2 and monitor 3 devices
+/// (see `input_proc` and `routing`).
 /// The streams stay on dedicated audio callbacks; Tauri only stores a Send-safe
 /// controller that can stop the engine, report status, and request noise
 /// profile capture from recent input audio.
@@ -21,11 +22,11 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
 use crate::computer_audio::{self, ComputerAudioCapture, ComputerAudioHandle, OwnOutputs};
-use crate::dsp::mixer::{BUS_MAIN, BUS_MONITOR, BUS_STREAM};
+use crate::dsp::mixer::{BUS_MAIN, BUS_MONITOR, BUS_MONITOR2, BUS_MONITOR3, BUS_STREAM};
 use crate::dsp::noise::compute_noise_profile;
 use crate::dsp::{AudioDeviceInfo, DspChain, DspParams, MetersPayload};
 use crate::history::HistoryRing;
-use crate::mixer_control::MixerLink;
+use crate::mixer_control::{BusOutputs, MixerLink};
 use crate::mixer_layout::StripLayout;
 use crate::mixer_meters::MixerMeterSlots;
 use crate::ndi::receive::receiver::NdiReceivers;
@@ -37,7 +38,11 @@ use crate::recorder::engine::EngineRecorder;
 use crate::recorder::RecordPort;
 
 mod input_proc;
+mod output_claims;
+#[cfg(test)]
+mod net_wiring_tests;
 use input_proc::{InputProcessor, OutputRoute};
+use output_claims::{check_name_free, check_selection_free, OutputClaims};
 
 /// Largest number of frames the input callback processes in one pass. Longer
 /// device buffers are split into chunks of this size so the preallocated
@@ -50,12 +55,16 @@ const MIXER_METERS_INTERVAL_MS: u64 = 50;
 
 /// Which devices to open. Ids are the names/ids from `list_devices`;
 /// `None` means the default device (monitor, input) or "not opened"
-/// (broadcast, main).
+/// (broadcast, main, monitor 2, monitor 3).
 pub struct DeviceSelection {
     pub input_id: Option<String>,
     pub monitor_output_id: Option<String>,
     pub broadcast_output_id: Option<String>,
     pub main_output_id: Option<String>,
+    /// Mon 2 / mon 3. Unlike broadcast and main, a device another output
+    /// already uses is refused with an error, not skipped.
+    pub monitor2_output_id: Option<String>,
+    pub monitor3_output_id: Option<String>,
 }
 
 /// Minimum history needed to compute a noise profile (one FFT frame).
@@ -94,6 +103,9 @@ pub struct AudioEngine {
     pub broadcast_output_name: Option<String>,
     /// Main (PA) output, when one was selected and opened.
     pub main_output_name: Option<String>,
+    /// Mon 2 / mon 3 outputs, when selected and opened.
+    pub monitor2_output_name: Option<String>,
+    pub monitor3_output_name: Option<String>,
     /// RNNoise stage usable (engine at 48 kHz).
     pub neural_available: bool,
     /// Input channels of the open input device (one mixer strip each).
@@ -114,6 +126,9 @@ pub struct RunningEngine {
     pub broadcast_output_name: Option<String>,
     /// Main (PA) output, when one was selected and opened.
     pub main_output_name: Option<String>,
+    /// Mon 2 / mon 3 outputs, when selected and opened.
+    pub monitor2_output_name: Option<String>,
+    pub monitor3_output_name: Option<String>,
     /// RNNoise stage usable (engine at 48 kHz).
     pub neural_available: bool,
     /// Input channels of the open input device (one mixer strip each).
@@ -152,6 +167,8 @@ struct EngineInfo {
     monitor_output_name: String,
     broadcast_output_name: Option<String>,
     main_output_name: Option<String>,
+    monitor2_output_name: Option<String>,
+    monitor3_output_name: Option<String>,
     neural_available: bool,
     input_channels: u32,
     ndi_sending: Vec<String>,
@@ -259,6 +276,8 @@ impl AudioEngine {
             monitor_output_name: self.monitor_output_name.clone(),
             broadcast_output_name: self.broadcast_output_name.clone(),
             main_output_name: self.main_output_name.clone(),
+            monitor2_output_name: self.monitor2_output_name.clone(),
+            monitor3_output_name: self.monitor3_output_name.clone(),
             neural_available: self.neural_available,
             input_channels: self.input_channels,
             ndi_sending: self
@@ -340,6 +359,41 @@ impl AudioEngine {
         )?;
         let main_output_name = main.as_ref().map(|(_, name)| name.clone());
 
+        // Mon 2 and mon 3 never share a device with another output: a
+        // duplicate is refused (naming both outputs) rather than skipped.
+        let mut claims = OutputClaims::new();
+        claims.claim(
+            "monitor output",
+            devices.monitor_output_id.as_ref(),
+            &monitor_output_name,
+        );
+        if let Some(name) = broadcast_output_name.as_ref() {
+            claims.claim("broadcast output", devices.broadcast_output_id.as_ref(), name);
+        }
+        if let Some(name) = main_output_name.as_ref() {
+            claims.claim("main output", devices.main_output_id.as_ref(), name);
+        }
+        let monitor2 = pick_exclusive_output(
+            &host,
+            &devices.monitor2_output_id,
+            "monitor 2 output",
+            &claims,
+        )?;
+        let monitor2_output_name = monitor2.as_ref().map(|(_, name)| name.clone());
+        if let Some(name) = monitor2_output_name.as_ref() {
+            claims.claim("monitor 2 output", devices.monitor2_output_id.as_ref(), name);
+        }
+        let monitor3 = pick_exclusive_output(
+            &host,
+            &devices.monitor3_output_id,
+            "monitor 3 output",
+            &claims,
+        )?;
+        let monitor3_output_name = monitor3.as_ref().map(|(_, name)| name.clone());
+        if let Some(name) = monitor3_output_name.as_ref() {
+            claims.claim("monitor 3 output", devices.monitor3_output_id.as_ref(), name);
+        }
+
         let mut output_devices = vec![monitor_out_dev];
         let mut output_buses = vec![BUS_MONITOR];
         if let Some((device, _)) = broadcast {
@@ -349,6 +403,14 @@ impl AudioEngine {
         if let Some((device, _)) = main {
             output_devices.push(device);
             output_buses.push(BUS_MAIN);
+        }
+        if let Some((device, _)) = monitor2 {
+            output_devices.push(device);
+            output_buses.push(BUS_MONITOR2);
+        }
+        if let Some((device, _)) = monitor3 {
+            output_devices.push(device);
+            output_buses.push(BUS_MONITOR3);
         }
 
         let (in_cfg, out_cfgs) = negotiate_stream_configs(&in_dev, &output_devices)?;
@@ -602,14 +664,7 @@ impl AudioEngine {
         // operator turned it on and must hear why it is silent.
         let (computer_capture, computer_handle) = match pending_computer {
             Some(pending) => {
-                let own_names: Vec<String> = [
-                    Some(monitor_output_name.clone()),
-                    broadcast_output_name.clone(),
-                    main_output_name.clone(),
-                ]
-                .into_iter()
-                .flatten()
-                .collect();
+                let own_names = claims.names();
                 let (capture, handle) = pending.start(&OwnOutputs {
                     device_names: &own_names,
                 })?;
@@ -643,6 +698,8 @@ impl AudioEngine {
             monitor_output_name,
             broadcast_output_name,
             main_output_name,
+            monitor2_output_name,
+            monitor3_output_name,
             neural_available,
             input_channels: in_channels as u32,
         })
@@ -758,6 +815,29 @@ fn pick_extra_output(
     Ok(Some((device, name)))
 }
 
+/// Resolve the optional mon 2 / mon 3 output. Unlike `pick_extra_output`, a
+/// device another output already plays on (by selection or by resolved
+/// name) is an error naming both outputs, not a silent skip.
+fn pick_exclusive_output(
+    host: &cpal::Host,
+    selection: &Option<String>,
+    label: &'static str,
+    claims: &OutputClaims,
+) -> Result<Option<(Device, String)>, String> {
+    let Some(selected) = selection.as_ref() else {
+        return Ok(None);
+    };
+    check_selection_free(claims, label, Some(selected))?;
+    let devices: Vec<Device> = host
+        .output_devices()
+        .map_err(|e| e.to_string())?
+        .collect();
+    let device = pick_device(devices, selection, || host.default_output_device(), label)?;
+    let name = device_name(&device).unwrap_or_else(|_| format!("Unknown {label}"));
+    check_name_free(claims, label, &name)?;
+    Ok(Some((device, name)))
+}
+
 impl RunningEngine {
     pub fn spawn(
         app: AppHandle,
@@ -821,6 +901,8 @@ impl RunningEngine {
             monitor_output_name: info.monitor_output_name,
             broadcast_output_name: info.broadcast_output_name,
             main_output_name: info.main_output_name,
+            monitor2_output_name: info.monitor2_output_name,
+            monitor3_output_name: info.monitor3_output_name,
             neural_available: info.neural_available,
             input_channels: info.input_channels,
             ndi_sending: info.ndi_sending,
@@ -947,6 +1029,18 @@ impl RunningEngine {
             self.net_audio.inputs.len(),
             self.ndi_inputs.len(),
         )
+    }
+
+    /// The device each bus plays on, in `BUS_*` order (`mixer_state`
+    /// `buses[].output`). A bus whose device was not opened is `None`.
+    pub fn bus_outputs(&self) -> BusOutputs {
+        let mut outputs = BusOutputs::default();
+        outputs[BUS_MAIN] = self.main_output_name.clone();
+        outputs[BUS_STREAM] = self.broadcast_output_name.clone();
+        outputs[BUS_MONITOR] = Some(self.monitor_output_name.clone());
+        outputs[BUS_MONITOR2] = self.monitor2_output_name.clone();
+        outputs[BUS_MONITOR3] = self.monitor3_output_name.clone();
+        outputs
     }
 
     pub fn ndi_dropped_samples(&self) -> u64 {
@@ -1141,7 +1235,7 @@ fn negotiate_stream_configs(
     }
 
     Err(
-        "No common sample rate is available between the selected input and output (monitor, broadcast, main) devices"
+        "No common sample rate is available between the selected input and output (monitor, broadcast, main, monitor 2, monitor 3) devices"
             .to_string(),
     )
 }

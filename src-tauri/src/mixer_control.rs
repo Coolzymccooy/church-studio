@@ -12,8 +12,8 @@ use crate::dsp::mixer::leveler::{
     LEVELER_TARGET_DEFAULT, LEVELER_TARGET_MAX, LEVELER_TARGET_MIN,
 };
 use crate::dsp::mixer::params::{
-    clamp_or, BusParams, StripParams, BUS_MAIN, BUS_MONITOR, BUS_STREAM, DUCK_DEPTH_DEFAULT_DB,
-    DUCK_DEPTH_MAX_DB, NUM_BUSES,
+    clamp_or, BusParams, StripParams, BUS_MAIN, BUS_MONITOR, BUS_MONITOR2, BUS_MONITOR3,
+    BUS_STREAM, DUCK_DEPTH_DEFAULT_DB, DUCK_DEPTH_MAX_DB, NUM_BUSES,
 };
 use crate::dsp::mixer::scene::StripScene;
 use crate::dsp::mixer::{MixerParams, MixerScene};
@@ -27,7 +27,10 @@ use std::sync::Arc;
 /// Strips the mixer is sized for (inputs beyond this are ignored).
 pub const MAX_STRIPS: usize = 32;
 /// Bus ids in `BUS_*` index order.
-pub const BUS_IDS: [&str; NUM_BUSES] = ["main", "stream", "monitor"];
+pub const BUS_IDS: [&str; NUM_BUSES] = ["main", "stream", "monitor", "monitor2", "monitor3"];
+
+/// The output device each bus plays on (`BUS_*` order), or `None`.
+pub type BusOutputs = [Option<String>; NUM_BUSES];
 pub const MAX_STRIP_NAME_CHARS: usize = 24;
 pub const MAX_SCENE_NAME_CHARS: usize = 40;
 /// `voice_strip` value meaning "no strip runs the voice chain".
@@ -52,6 +55,9 @@ const STRIP_F32_KEYS: &[F32Key] = &[
     ("send_main_db", -90.0, 10.0, 0.0),
     ("send_stream_db", -90.0, 10.0, 0.0),
     ("send_monitor_db", -90.0, 10.0, 0.0),
+    // Mon 2 / mon 3: off by default, so a new monitor mix starts silent.
+    ("send_monitor2_db", -90.0, 10.0, -90.0),
+    ("send_monitor3_db", -90.0, 10.0, -90.0),
     ("duck_depth_db", 0.0, DUCK_DEPTH_MAX_DB, DUCK_DEPTH_DEFAULT_DB),
 ];
 
@@ -104,6 +110,8 @@ fn strip_f32<'a>(p: &'a StripParams, key: &str) -> Option<&'a AtomicF32> {
         "send_main_db" => &p.send_db[BUS_MAIN],
         "send_stream_db" => &p.send_db[BUS_STREAM],
         "send_monitor_db" => &p.send_db[BUS_MONITOR],
+        "send_monitor2_db" => &p.send_db[BUS_MONITOR2],
+        "send_monitor3_db" => &p.send_db[BUS_MONITOR3],
         "duck_depth_db" => &p.duck_depth_db,
         _ => return None,
     };
@@ -135,12 +143,12 @@ fn bus_f32<'a>(p: &'a BusParams, key: &str) -> Option<&'a AtomicF32> {
     }
 }
 
-/// Bus id ("main" | "stream" | "monitor") → `BUS_*` index.
+/// Bus id ("main" | "stream" | "monitor" | "monitor2" | "monitor3") →
+/// `BUS_*` index.
 pub fn bus_index(id: &str) -> Result<usize, String> {
-    BUS_IDS
-        .iter()
-        .position(|b| *b == id)
-        .ok_or_else(|| format!("unknown bus '{id}' (expected main, stream or monitor)"))
+    BUS_IDS.iter().position(|b| *b == id).ok_or_else(|| {
+        format!("unknown bus '{id}' (expected main, stream, monitor, monitor2 or monitor3)")
+    })
 }
 
 pub fn default_strip_name(index: usize) -> String {
@@ -668,6 +676,8 @@ impl MixerControl {
             send_main_db: f("send_main_db"),
             send_stream_db: f("send_stream_db"),
             send_monitor_db: f("send_monitor_db"),
+            send_monitor2_db: f("send_monitor2_db"),
+            send_monitor3_db: f("send_monitor3_db"),
             monitor_post_fader: b("monitor_post_fader"),
             voice_chain: self.voice_strip.load(Relaxed) == index,
             automix: b("automix"),
@@ -700,12 +710,25 @@ impl MixerControl {
         self.snapshot_layout(layout, running, scenes)
     }
 
-    /// `MixerState` for the strips of `layout` (hardware, computer, NDI).
+    /// `MixerState` for the strips of `layout` (hardware, computer, NDI),
+    /// with no bus output devices (every bus `output` is null).
     pub fn snapshot_layout(
         &self,
         layout: StripLayout,
         running: bool,
         scenes: Vec<String>,
+    ) -> MixerState {
+        self.snapshot_outputs(layout, running, scenes, &BusOutputs::default())
+    }
+
+    /// `snapshot_layout`, plus the device each bus plays on (`outputs`, in
+    /// `BUS_*` order; the running engine's `bus_outputs`).
+    pub fn snapshot_outputs(
+        &self,
+        layout: StripLayout,
+        running: bool,
+        scenes: Vec<String>,
+        outputs: &BusOutputs,
     ) -> MixerState {
         let count = layout.total();
         let names: Vec<String> = self.names.lock().clone();
@@ -718,8 +741,10 @@ impl MixerControl {
         let buses = BUS_IDS
             .iter()
             .zip(self.params.buses.iter())
-            .map(|(id, p)| BusState {
+            .zip(outputs.iter())
+            .map(|((id, p), output)| BusState {
                 id: (*id).to_string(),
+                output: output.clone(),
                 fader_db: p.fader_db.load(Relaxed),
                 mute: p.mute.load(Relaxed),
                 limiter_ceiling_db: p.limiter_ceiling_db.load(Relaxed),

@@ -117,6 +117,8 @@ test('native engine controller restarts through stop then start', async () => {
     monitorOutputDevice: 'monitor-1',
     broadcastOutputDevice: 'broadcast-1',
     mainOutputId: null,
+    monitor2OutputId: null,
+    monitor3OutputId: null,
   });
 });
 

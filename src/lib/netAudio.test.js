@@ -37,6 +37,7 @@ test('sanitizeNetAudio fills defaults for missing or bad input', () => {
   assert.deepEqual(clean.send, { enabled: false, target: '', bus: 'main', stereo: false, name: '' });
   assert.equal(clean.passphrase, '');
   assert.equal(sanitizeNetAudio({ send: { bus: 'aux' } }).send.bus, 'main');
+  assert.equal(sanitizeNetAudio({ send: { bus: 'Monitor3' } }).send.bus, 'monitor3');
   assert.equal(sanitizeNetAudio({ receive: { port: 70000 } }).receive.port, DEFAULT_PORT);
 });
 

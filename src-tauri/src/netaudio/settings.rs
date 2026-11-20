@@ -21,7 +21,7 @@ pub const MIN_PASSPHRASE_CHARS: usize = 8;
 pub const MAX_PASSPHRASE_CHARS: usize = 128;
 pub const MAX_TARGET_CHARS: usize = 255;
 pub const MAX_NAME_CHARS: usize = 32;
-pub const BUSES: [&str; 3] = ["main", "stream", "monitor"];
+pub const BUSES: [&str; 5] = ["main", "stream", "monitor", "monitor2", "monitor3"];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -51,7 +51,7 @@ pub struct SendConfig {
     pub enabled: bool,
     /// "host:port" of the receiving Studio.
     pub target: String,
-    /// "main", "stream" or "monitor".
+    /// "main", "stream", "monitor", "monitor2" or "monitor3".
     pub bus: String,
     pub stereo: bool,
     /// Shown on the receiving side; empty = this machine's name.
@@ -248,6 +248,10 @@ mod tests {
         let unknown_bus = SendConfig { bus: "aux".to_string(), ..SendConfig::default() };
         let config = NetAudioConfig { send: unknown_bus, ..NetAudioConfig::default() };
         assert_eq!(config.sanitized().send.bus, "main");
+        // A monitor mix is the echo-free send for a remote person.
+        let mon = SendConfig { bus: "Monitor2".to_string(), ..SendConfig::default() };
+        let config = NetAudioConfig { send: mon, ..NetAudioConfig::default() };
+        assert_eq!(config.sanitized().send.bus, "monitor2");
     }
 
     #[test]

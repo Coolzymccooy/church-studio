@@ -6,7 +6,9 @@ const saved = { inputId: 'mic', outputId: 'jabra', broadcastBus: 'Not set', main
 
 test('draftFrom copies only the setup keys and is a new object', () => {
   const d = draftFrom(saved);
-  assert.deepEqual(d, { inputId: 'mic', outputId: 'jabra', broadcastBus: 'Not set', mainOutputId: null });
+  assert.deepEqual(d, {
+    inputId: 'mic', outputId: 'jabra', broadcastBus: 'Not set', mainOutputId: null, monitor2OutputId: null, monitor3OutputId: null,
+  });
   assert.notEqual(d, saved);
 });
 

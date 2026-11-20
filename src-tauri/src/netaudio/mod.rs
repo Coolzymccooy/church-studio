@@ -262,10 +262,12 @@ pub struct StartedNet {
 
 /// Bus index of a settings bus name.
 pub fn bus_index(name: &str) -> usize {
-    use crate::dsp::mixer::{BUS_MAIN, BUS_MONITOR, BUS_STREAM};
+    use crate::dsp::mixer::{BUS_MAIN, BUS_MONITOR, BUS_MONITOR2, BUS_MONITOR3, BUS_STREAM};
     match name {
         "stream" => BUS_STREAM,
         "monitor" => BUS_MONITOR,
+        "monitor2" => BUS_MONITOR2,
+        "monitor3" => BUS_MONITOR3,
         _ => BUS_MAIN,
     }
 }

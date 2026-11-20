@@ -35,6 +35,8 @@ import {
 } from './lib/liveScope.js';
 import {
   describeBroadcastRoute,
+  devicesEqual,
+  mixerRefreshKey,
   normalizeTauriDevices,
   reconcileSelectedDevices,
   resolveBroadcastLabel,
@@ -98,6 +100,15 @@ const TiwatonApp = () => {
 };
 
 // --- STUDIO COMPONENT ---
+const DEFAULT_DEVICES = {
+  inputId: 'default',
+  outputId: 'default',
+  broadcastBus: 'Not set',
+  mainOutputId: 'Not set',
+  monitor2OutputId: 'Not set',
+  monitor3OutputId: 'Not set',
+};
+
 const MAIN_TABS = [
   { id: 'live', label: 'live' },
   { id: 'editor', label: 'editor' },
@@ -201,8 +212,8 @@ const AudioProcessor = ({ goHome }) => {
   const [selectedDevices, setSelectedDevices] = useState(() => {
     try {
       const saved = window.localStorage.getItem('tiwaton:devices');
-      return saved ? JSON.parse(saved) : { inputId: 'default', outputId: 'default', broadcastBus: 'Not set', mainOutputId: 'Not set' };
-    } catch { return { inputId: 'default', outputId: 'default', broadcastBus: 'Not set', mainOutputId: 'Not set' }; }
+      return { ...DEFAULT_DEVICES, ...(saved ? JSON.parse(saved) : {}) };
+    } catch { return { ...DEFAULT_DEVICES }; }
   });
 
   const [audioStats, setAudioStats] = useState({
@@ -414,12 +425,7 @@ const AudioProcessor = ({ goHome }) => {
 
   const resetDeviceState = useCallback(() => {
     setAvailableDevices({ inputs: [], outputs: [] });
-    setSelectedDevices({
-      inputId: 'default',
-      outputId: 'default',
-      broadcastBus: 'Not set',
-      mainOutputId: 'Not set',
-    });
+    setSelectedDevices({ ...DEFAULT_DEVICES });
   }, []);
 
   const getDevices = useCallback(async () => {
@@ -456,12 +462,7 @@ const AudioProcessor = ({ goHome }) => {
   useEffect(() => {
     setSelectedDevices((prev) => {
       const next = reconcileSelectedDevices(prev, availableDevices);
-      return (
-        next.inputId === prev.inputId
-        && next.outputId === prev.outputId
-        && next.broadcastBus === prev.broadcastBus
-        && next.mainOutputId === prev.mainOutputId
-      ) ? prev : next;
+      return devicesEqual(next, prev) ? prev : next;
     });
   }, [availableDevices]);
 
@@ -1247,6 +1248,8 @@ const AudioProcessor = ({ goHome }) => {
       input: info.input_device_name || info.device_name || null,
       monitor: info.monitor_output_name || null,
       broadcast: info.broadcast_output_name || null,
+      monitor2: info.monitor2_output_name || null,
+      monitor3: info.monitor3_output_name || null,
     });
     setNativeNoiseProfileCaptured(false);
 
@@ -1300,12 +1303,7 @@ const AudioProcessor = ({ goHome }) => {
         cleanupAudio({ stopNative: false });
         const latestDevices = await getDevices();
         const resolvedDevices = reconcileSelectedDevices(selectedDevices, latestDevices);
-        if (
-          resolvedDevices.inputId !== selectedDevices.inputId
-          || resolvedDevices.outputId !== selectedDevices.outputId
-          || resolvedDevices.broadcastBus !== selectedDevices.broadcastBus
-          || resolvedDevices.mainOutputId !== selectedDevices.mainOutputId
-        ) {
+        if (!devicesEqual(resolvedDevices, selectedDevices)) {
           setSelectedDevices(resolvedDevices);
         }
 
@@ -3042,6 +3040,8 @@ const AudioProcessor = ({ goHome }) => {
             input: status.input_device_name || status.device_name || null,
             monitor: status.monitor_output_name || null,
             broadcast: status.broadcast_output_name || null,
+            monitor2: status.monitor2_output_name || null,
+            monitor3: status.monitor3_output_name || null,
           });
         } catch {
           // Ignore transient polling failures while the engine is being restarted.
@@ -3418,6 +3418,7 @@ const AudioProcessor = ({ goHome }) => {
           {mainTab === 'mixer' && (
             <MixerConsole
               controller={mixerController}
+              refreshKey={mixerRefreshKey(audioStats.state, nativeRouteStatus)}
               onOpenObs={() => setShowObs(true)}
               demoBanner={isTauri ? null : 'Demo mixer — live multichannel mixing runs in the desktop app'}
             />

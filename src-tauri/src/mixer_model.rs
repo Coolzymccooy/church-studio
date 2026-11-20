@@ -27,6 +27,9 @@ pub struct StripState {
     pub send_main_db: f32,
     pub send_stream_db: f32,
     pub send_monitor_db: f32,
+    /// Mon 2 / mon 3 sends (always pre-fader; -90 = off).
+    pub send_monitor2_db: f32,
+    pub send_monitor3_db: f32,
     pub monitor_post_fader: bool,
     pub voice_chain: bool,
     pub automix: bool,
@@ -42,6 +45,9 @@ pub struct StripState {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct BusState {
     pub id: String,
+    /// Name of the output device this bus plays on; null while the engine
+    /// is stopped or no device is set for it.
+    pub output: Option<String>,
     pub fader_db: f32,
     pub mute: bool,
     pub limiter_ceiling_db: f32,

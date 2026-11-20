@@ -15,6 +15,8 @@ mod mixer_layout;
 mod automix_control_tests;
 #[cfg(test)]
 mod mixer_engine_tests;
+#[cfg(test)]
+mod monitor_mixes_tests;
 mod mixer_meters;
 mod mixer_model;
 mod obs;
@@ -158,6 +160,7 @@ async fn check_for_app_update(app: AppHandle) {
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // one optional arg per device, as Tauri maps them
 async fn start_audio_engine(
     app: AppHandle,
     state: State<'_, EngineState>,
@@ -172,6 +175,8 @@ async fn start_audio_engine(
     monitor_output_device: Option<String>,
     broadcast_output_device: Option<String>,
     main_output_id: Option<String>,
+    monitor2_output_id: Option<String>,
+    monitor3_output_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let mut guard = state.inner().lock().unwrap();
     if guard.is_some() {
@@ -191,6 +196,8 @@ async fn start_audio_engine(
             monitor_output_id: monitor_output_device,
             broadcast_output_id: broadcast_output_device,
             main_output_id,
+            monitor2_output_id,
+            monitor3_output_id,
         },
         NdiEngineConfig {
             outputs: ndi.snapshot(),
@@ -213,6 +220,8 @@ async fn start_audio_engine(
         "monitor_output_name": engine.monitor_output_name,
         "broadcast_output_name": engine.broadcast_output_name,
         "main_output_name": engine.main_output_name,
+        "monitor2_output_name": engine.monitor2_output_name,
+        "monitor3_output_name": engine.monitor3_output_name,
         "inputChannels": engine.input_channels,
         "computerStrips": engine.strip_layout().computer,
         "ndiStrips": engine.ndi_inputs.len(),
@@ -316,6 +325,8 @@ fn serialize_engine_status(engine: &RunningEngine) -> serde_json::Value {
         "monitor_output_name": engine.monitor_output_name,
         "broadcast_output_name": engine.broadcast_output_name,
         "main_output_name": engine.main_output_name,
+        "monitor2_output_name": engine.monitor2_output_name,
+        "monitor3_output_name": engine.monitor3_output_name,
         "inputChannels": engine.input_channels,
         "noise_profile_ready": engine.noise_profile_ready(),
         "neural_available": engine.neural_available,
@@ -352,6 +363,8 @@ fn engine_status(state: State<'_, EngineState>) -> serde_json::Value {
             "monitor_output_name": null,
             "broadcast_output_name": null,
             "main_output_name": null,
+            "monitor2_output_name": null,
+            "monitor3_output_name": null,
             "inputChannels": 1,
             "noise_profile_ready": false,
             "neural_available": false,

@@ -249,7 +249,7 @@ function NetworkAudioCard({ isLive }) {
 
         {receive.enabled && send.enabled && (
           <div className="fp-sub fp-caution" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            May echo <InfoTip label="Echo">If the other Studio also sends you its mix, each side hears itself back once its Remote fader is up. Keep Remote strips out of the bus you send, or send the Monitor bus.</InfoTip>
+            May echo <InfoTip label="Echo">If the other Studio also sends you its mix, each side hears itself back once its Remote fader is up. Send a monitor mix without the Remote strips to avoid it.</InfoTip>
           </div>
         )}
         {problem && <div className="fp-sub fp-fault" role="alert">{problem}</div>}

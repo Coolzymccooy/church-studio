@@ -44,6 +44,8 @@ export const STRIP_KNOBS = {
   main: knob('send_main_db', 'main', 'send', 0.5, 0, sendText, { taper: SEND_TAPER, detent: 0 }),
   strm: knob('send_stream_db', 'strm', 'send', 0.5, 0, sendText, { taper: SEND_TAPER, detent: 0 }),
   mon: knob('send_monitor_db', 'mon', 'send', 0.5, 0, sendText, { taper: SEND_TAPER, detent: 0 }),
+  mon2: knob('send_monitor2_db', 'mon2', 'send', 0.5, -90, sendText, { taper: SEND_TAPER, detent: 0 }),
+  mon3: knob('send_monitor3_db', 'mon3', 'send', 0.5, -90, sendText, { taper: SEND_TAPER, detent: 0 }),
   pan: knob('pan', 'pan', 'pan', 0.05, 0, panText, { bipolar: true, detent: 0 }),
 };
 
@@ -91,7 +93,19 @@ export function grText(grDb) {
 /** The bus limiter ceiling knob. The limiter itself is always on; only its ceiling moves. */
 export const BUS_LIMITER = knob('limiter_ceiling_db', 'lim', 'dyn', 0.5, -1, (v) => compactDb(v));
 
-const BUS_LABELS = { main: 'main', stream: 'stream', monitor: 'mon' };
+const BUS_LABELS = { main: 'main', stream: 'stream', monitor: 'mon', monitor2: 'mon 2', monitor3: 'mon 3' };
+
+/** The extra monitor mixes (mon 2, mon 3) with their strip knob, kept in bus order. */
+export const EXTRA_MONITORS = [
+  { bus: 'monitor2', knob: 'mon2', send: 'send_monitor2_db' },
+  { bus: 'monitor3', knob: 'mon3', send: 'send_monitor3_db' },
+];
+
+/** Extra monitor mixes that have a device: the UI shows only these. */
+export function activeExtraMonitors(buses) {
+  const withOutput = new Set((buses || []).filter((b) => b && b.output).map((b) => b.id));
+  return EXTRA_MONITORS.filter((m) => withOutput.has(m.bus));
+}
 
 export function busLabel(id) {
   return BUS_LABELS[id] ?? String(id);

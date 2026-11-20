@@ -49,3 +49,8 @@ test('fitScale uses the given row height', () => {
   assert.equal(fitScale(694, 694), 1);
   assert.ok(fitScale(600, 694) * 694 <= 600);
 });
+
+test('stripRowPx adds a knob row for the mon 2 / mon 3 sends', () => {
+  assert.equal(stripRowPx([], 1), STRIP_ROW_PX + EXTRA_ROW_PX.knob);
+  assert.equal(stripRowPx([], 2), STRIP_ROW_PX + EXTRA_ROW_PX.knob);
+});

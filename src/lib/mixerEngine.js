@@ -63,6 +63,8 @@ const PARAM_RANGES = {
   send_main_db: [FADER_MIN_DB, FADER_MAX_DB],
   send_stream_db: [FADER_MIN_DB, FADER_MAX_DB],
   send_monitor_db: [FADER_MIN_DB, FADER_MAX_DB],
+  send_monitor2_db: [FADER_MIN_DB, FADER_MAX_DB],
+  send_monitor3_db: [FADER_MIN_DB, FADER_MAX_DB],
   limiter_ceiling_db: [-12, 0],
   leveler_target_lufs: [-30, -10],
   duck_depth_db: [0, 40],
@@ -247,6 +249,9 @@ function defaultStrip(index, name, overrides = {}) {
     send_main_db: 0,
     send_stream_db: 0,
     send_monitor_db: 0,
+    // mon 2 / mon 3 start silent so a new monitor mix is built up on purpose.
+    send_monitor2_db: -90,
+    send_monitor3_db: -90,
     monitor_post_fader: false,
     voice_chain: false,
     automix: false,
@@ -258,12 +263,15 @@ function defaultStrip(index, name, overrides = {}) {
   };
 }
 
-function defaultBus(id) {
+function defaultBus(id, output = null) {
   return {
     id, fader_db: 0, mute: false, limiter_ceiling_db: -1,
-    leveler_enabled: false, leveler_target_lufs: -14,
+    leveler_enabled: false, leveler_target_lufs: -14, output,
   };
 }
+
+/** Bus ids in engine order: main, stream, then the three monitor mixes. */
+export const BUS_IDS = ['main', 'stream', 'monitor', 'monitor2', 'monitor3'];
 
 function createInitialMockState() {
   return {
@@ -271,7 +279,8 @@ function createInitialMockState() {
     running: true,
     strips: MOCK_STRIP_NAMES.map((name, index) =>
       defaultStrip(index, name, index === 0 ? { voice_chain: true } : {})),
-    buses: ['main', 'stream', 'monitor'].map(defaultBus),
+    // The demo plays mon 2 on a pretend device so the browser build shows a second monitor mix.
+    buses: BUS_IDS.map((id) => defaultBus(id, id === 'monitor2' ? 'Demo headphones 2' : null)),
   };
 }
 

@@ -13,10 +13,11 @@
 //! 2. The strip holding `voice_chain` runs the `DspChain` in place on its
 //!    buffer (history for noise-profile capture, noise-profile install,
 //!    params sync, spectrum and `audio-meters` all follow that strip).
-//! 3. `Mixer::process` sums the strips into Main, Stream and Monitor; the
-//!    strip and bus meters are published to lock-free slots.
+//! 3. `Mixer::process` sums the strips into Main, Stream, Monitor (mon 1),
+//!    Monitor 2 and Monitor 3; the strip and bus meters are published to
+//!    lock-free slots.
 //! 4. Each output device gets its bus as stereo (see `routing`); the
-//!    Monitor bus is still scaled by `monitor_gain_db`.
+//!    Monitor (mon 1) bus alone is still scaled by `monitor_gain_db`.
 //! 5. Each NDI output gets its bus as interleaved stereo at unity gain, in
 //!    its own ring; the NDI sender thread does the rest (`crate::ndi`). The
 //!    network send gets its bus the same way (`crate::netaudio::sender`).
