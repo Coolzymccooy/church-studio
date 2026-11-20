@@ -39,39 +39,109 @@ impl Board for TestBoard {
 }
 
 async fn send(
-    app: &Router, method: &str, path: &str, host: &str, origin: Option<&str>,
-    cookie: Option<&str>, data: String,
+    app: &Router,
+    method: &str,
+    path: &str,
+    host: &str,
+    origin: Option<&str>,
+    cookie: Option<&str>,
+    data: String,
 ) -> axum::response::Response {
-    let mut request = Request::builder().method(method).uri(path).header(header::HOST, host);
+    let mut request = Request::builder()
+        .method(method)
+        .uri(path)
+        .header(header::HOST, host);
     if let Some(origin) = origin {
         request = request.header(header::ORIGIN, origin);
     }
     if let Some(cookie) = cookie {
         request = request.header(header::COOKIE, cookie);
     }
-    app.clone().oneshot(request.header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(data)).unwrap()).await.unwrap()
+    app.clone()
+        .oneshot(
+            request
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(data))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
 }
 
 #[tokio::test]
 async fn protected_state_enforces_host_origin_and_pairing() {
     let auth = Arc::new(Mutex::new(Auth::default()));
     let app = router(Arc::new(TestBoard::default()), auth.clone(), HOST);
-    assert_eq!(send(&app, "GET", "/api/state", HOST, None, None, "".into()).await.status(), StatusCode::UNAUTHORIZED);
-    assert_eq!(send(&app, "GET", "/", "other.example.test", None, None, "".into()).await.status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        send(&app, "GET", "/api/state", HOST, None, None, "".into())
+            .await
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        send(
+            &app,
+            "GET",
+            "/",
+            "other.example.test",
+            None,
+            None,
+            "".into()
+        )
+        .await
+        .status(),
+        StatusCode::FORBIDDEN
+    );
     let code = auth.lock().issue(Role::Monitor2).unwrap();
     let body = serde_json::json!({ "name": "Rehearsal phone", "code": code }).to_string();
-    assert_eq!(send(&app, "POST", "/api/pair", HOST, Some("https://other.example.test"), None, body.clone()).await.status(), StatusCode::FORBIDDEN);
-    let paired = send(&app, "POST", "/api/pair", HOST, Some(ORIGIN), None, body.clone()).await;
+    assert_eq!(
+        send(
+            &app,
+            "POST",
+            "/api/pair",
+            HOST,
+            Some("https://other.example.test"),
+            None,
+            body.clone()
+        )
+        .await
+        .status(),
+        StatusCode::FORBIDDEN
+    );
+    let paired = send(
+        &app,
+        "POST",
+        "/api/pair",
+        HOST,
+        Some(ORIGIN),
+        None,
+        body.clone(),
+    )
+    .await;
     assert_eq!(paired.status(), StatusCode::NO_CONTENT);
     let cookie = paired.headers()[header::SET_COOKIE].to_str().unwrap();
     for attr in ["Secure", "HttpOnly", "SameSite=Strict", "Path=/"] {
         assert!(cookie.contains(attr));
     }
     let cookie = cookie.split(';').next().unwrap();
-    assert_eq!(send(&app, "POST", "/api/pair", HOST, Some(ORIGIN), None, body).await.status(), StatusCode::UNAUTHORIZED);
-    let state = send(&app, "GET", "/api/state", HOST, None, Some(cookie), "".into()).await;
-    let snapshot: serde_json::Value = serde_json::from_slice(&to_bytes(state.into_body(), 4096).await.unwrap()).unwrap();
+    assert_eq!(
+        send(&app, "POST", "/api/pair", HOST, Some(ORIGIN), None, body)
+            .await
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let state = send(
+        &app,
+        "GET",
+        "/api/state",
+        HOST,
+        None,
+        Some(cookie),
+        "".into(),
+    )
+    .await;
+    let snapshot: serde_json::Value =
+        serde_json::from_slice(&to_bytes(state.into_body(), 4096).await.unwrap()).unwrap();
     assert_eq!(snapshot["role"], "monitor2");
     assert!(snapshot["controls"][0].get("muted").is_none());
 
@@ -83,16 +153,65 @@ async fn protected_state_enforces_host_origin_and_pairing() {
         data.to_string()
     };
     let mute = control("mute", "muted", true.into());
-    assert_eq!(send(&app, "POST", "/api/control", HOST, Some(ORIGIN), Some(cookie), mute).await.status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        send(
+            &app,
+            "POST",
+            "/api/control",
+            HOST,
+            Some(ORIGIN),
+            Some(cookie),
+            mute
+        )
+        .await
+        .status(),
+        StatusCode::FORBIDDEN
+    );
     let now = Instant::now();
     let level = control("level", "db", (-15.0).into());
-    assert_eq!(send(&app, "POST", "/api/control", HOST, Some(ORIGIN), Some(cookie), level).await.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        send(
+            &app,
+            "POST",
+            "/api/control",
+            HOST,
+            Some(ORIGIN),
+            Some(cookie),
+            level
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
     assert!(now.elapsed() < Duration::from_millis(100));
-    let updated = send(&app, "GET", "/api/state", HOST, None, Some(cookie), "".into()).await;
-    let snapshot: serde_json::Value = serde_json::from_slice(&to_bytes(updated.into_body(), 4096).await.unwrap()).unwrap();
+    let updated = send(
+        &app,
+        "GET",
+        "/api/state",
+        HOST,
+        None,
+        Some(cookie),
+        "".into(),
+    )
+    .await;
+    let snapshot: serde_json::Value =
+        serde_json::from_slice(&to_bytes(updated.into_body(), 4096).await.unwrap()).unwrap();
     assert_eq!(snapshot["controls"][0]["db"], -15.0);
 
     let id = auth.lock().devices()[0].id;
     auth.lock().revoke(id);
-    assert_eq!(send(&app, "GET", "/api/state", HOST, None, Some(cookie), "".into()).await.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        send(
+            &app,
+            "GET",
+            "/api/state",
+            HOST,
+            None,
+            Some(cookie),
+            "".into()
+        )
+        .await
+        .status(),
+        StatusCode::UNAUTHORIZED
+    );
 }

@@ -115,6 +115,7 @@ pub struct AudioEngine {
 pub type EngineState = std::sync::Mutex<Option<RunningEngine>>;
 
 pub struct RunningEngine {
+    pub remote_layout_generation: u64,
     stop_tx: mpsc::Sender<EngineCommand>,
     join_handle: Option<JoinHandle<()>>,
     shared: Arc<EngineShared>,
@@ -890,7 +891,9 @@ impl RunningEngine {
             .recv()
             .map_err(|_| "Audio thread exited before initialization completed".to_string())??;
 
+        static NEXT_LAYOUT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         Ok(Self {
+            remote_layout_generation: NEXT_LAYOUT.fetch_add(1, Ordering::Relaxed),
             stop_tx,
             join_handle: Some(join_handle),
             shared,

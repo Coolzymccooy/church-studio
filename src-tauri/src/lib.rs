@@ -1,4 +1,5 @@
 mod audio;
+mod remote_mixer;
 #[cfg(test)]
 mod remote_mixer_tests;
 mod computer_audio;
@@ -394,6 +395,7 @@ pub fn run() {
         .manage(engine_stopping::EngineStopping::default())
         .manage(SharedParams(Arc::new(DspParams::defaults())))
         .manage(MixerControl::new())
+        .manage(remote_mixer::desktop::RemoteMixer::default())
         .manage(mixer_commands::CurrentScene::default())
         .manage(NdiSettings::new())
         .manage(NdiInputSettings::new())
@@ -411,6 +413,12 @@ pub fn run() {
             gate_commands::learn_mic_fingerprint,
             engine_status,
             mixer_commands::mixer_state,
+            remote_mixer::desktop::remote_mixer_start,
+            remote_mixer::desktop::remote_mixer_stop,
+            remote_mixer::desktop::remote_mixer_status,
+            remote_mixer::desktop::remote_mixer_pair_code,
+            remote_mixer::desktop::remote_mixer_cancel_code,
+            remote_mixer::desktop::remote_mixer_revoke,
             mixer_commands::mixer_set_strip_param,
             mixer_commands::mixer_set_strip_bool,
             mixer_commands::mixer_rename_strip,

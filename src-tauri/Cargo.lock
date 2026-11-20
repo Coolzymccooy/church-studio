@@ -5091,6 +5091,8 @@ dependencies = [
  "gethostname",
  "getrandom 0.2.17",
  "hmac",
+ "hyper",
+ "hyper-util",
  "libloading 0.8.9",
  "log",
  "mp3lame-encoder",
@@ -5105,6 +5107,7 @@ dependencies = [
  "parking_lot",
  "ringbuf",
  "rustfft",
+ "rustls",
  "serde",
  "serde_json",
  "sha2",
@@ -5117,6 +5120,8 @@ dependencies = [
  "tauri-plugin-shell",
  "tauri-plugin-updater",
  "tokio",
+ "tokio-rustls",
+ "tower",
  "windows 0.61.3",
 ]
 
