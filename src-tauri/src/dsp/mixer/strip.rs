@@ -31,21 +31,14 @@
 //! strip's latency is `latency_samples()`). Trade-off: a gated strip is
 //! 20 ms behind an ungated one, which matters only when two strips carry the
 //! same source.
+use super::channel_proc::ChannelProc;
 use super::params::{
     clamp_or, fader_db_to_lin, StripParams, BUS_MAIN, BUS_MONITOR, BUS_MONITOR2, BUS_MONITOR3,
-    BUS_STREAM, EQ_MAX_DB, NUM_BUSES, PAN_LAW_NORM, TRIM_MAX_DB, TRIM_MIN_DB,
+    BUS_STREAM, NUM_BUSES, PAN_LAW_NORM, TRIM_MAX_DB, TRIM_MIN_DB,
 };
 use super::smooth::LinearSmoother;
 use super::StereoBuffer;
-use crate::dsp::biquad::Biquad;
-use crate::dsp::compressor::Compressor;
-use crate::dsp::gate::SwitchedGate;
 use std::sync::atomic::Ordering::Relaxed;
-
-const EQ_LOW_HZ: f64 = 100.0;
-const EQ_MID_HZ: f64 = 1_000.0;
-const EQ_MID_Q: f64 = 0.9;
-const EQ_HIGH_HZ: f64 = 8_000.0;
 
 /// Per-strip meter readings for the last processed block.
 #[derive(Clone, Copy, Debug, serde::Serialize)]
@@ -80,10 +73,12 @@ impl StripMeters {
 }
 
 pub struct Strip {
-    sr: f64,
-    scratch: Vec<f32>,
-    /// Compressed copy of `scratch`, crossfaded in by `comp_mix`.
-    comp_buf: Vec<f32>,
+    /// Channel processing of the strip's input (what every bus hears).
+    proc: ChannelProc,
+    /// Channel processing of the Stream-only input (the voice strip's full
+    /// voice-chain signal). Used only in blocks that pass one.
+    stream_proc: ChannelProc,
+    stream_alt: bool,
     /// Post-trim/HPF copy of the block for the automix detector.
     det_buf: Vec<f32>,
     /// Frames, gate state and compressor GR from `process_pre`.
@@ -92,7 +87,6 @@ pub struct Strip {
     pending_gr_db: f32,
     monitor_post: bool,
 
-    in_gain: LinearSmoother,
     fader: LinearSmoother,
     pan_l: LinearSmoother,
     pan_r: LinearSmoother,
@@ -100,17 +94,6 @@ pub struct Strip {
     sends: [LinearSmoother; NUM_BUSES],
     /// PFL gain (1 while this strip is soloed, else 0). Not affected by mute.
     pfl: LinearSmoother,
-    /// Compressor on/off as a dry→compressed crossfade (0 = off, 1 = on).
-    comp_mix: LinearSmoother,
-
-    hpf: Biquad,
-    hpf_freq: f32,
-    gate: SwitchedGate,
-    eq_low: Biquad,
-    eq_mid: Biquad,
-    eq_high: Biquad,
-    eq_gains: [f32; 3],
-    comp: Compressor,
 
     meters: StripMeters,
 }
@@ -118,15 +101,14 @@ pub struct Strip {
 impl Strip {
     pub fn new(sr: f64, max_block: usize, ramp: u32) -> Self {
         Strip {
-            sr,
-            scratch: vec![0.0; max_block.max(1)],
-            comp_buf: vec![0.0; max_block.max(1)],
+            proc: ChannelProc::new(sr, max_block, ramp),
+            stream_proc: ChannelProc::new(sr, max_block, ramp),
+            stream_alt: false,
             det_buf: vec![0.0; max_block.max(1)],
             pending_frames: 0,
             pending_gate_open: true,
             pending_gr_db: 0.0,
             monitor_post: false,
-            in_gain: LinearSmoother::new(1.0, ramp),
             fader: LinearSmoother::new(1.0, ramp),
             pan_l: LinearSmoother::new(1.0, ramp),
             pan_r: LinearSmoother::new(1.0, ramp),
@@ -139,19 +121,6 @@ impl Strip {
                 LinearSmoother::new(0.0, ramp),
             ],
             pfl: LinearSmoother::new(0.0, ramp),
-            comp_mix: LinearSmoother::new(0.0, ramp),
-            hpf: Biquad::hpf(80.0, sr),
-            hpf_freq: 80.0,
-            gate: {
-                let mut gate = SwitchedGate::new(sr);
-                gate.enabled = false; // synced from the params every block
-                gate
-            },
-            eq_low: Biquad::low_shelf(EQ_LOW_HZ, 0.0, sr),
-            eq_mid: Biquad::peaking(EQ_MID_HZ, EQ_MID_Q, 0.0, sr),
-            eq_high: Biquad::high_shelf(EQ_HIGH_HZ, 0.0, sr),
-            eq_gains: [0.0; 3],
-            comp: Compressor::new(sr),
             meters: StripMeters::silent(),
         }
     }
@@ -163,7 +132,7 @@ impl Strip {
     /// Current processing latency in samples: the gate lookahead while the
     /// gate is on, otherwise 0.
     pub fn latency_samples(&self) -> usize {
-        self.gate.latency_samples()
+        self.proc.latency_samples()
     }
 
     /// Update ramp targets from the shared params. `snap` jumps straight to
@@ -193,14 +162,14 @@ impl Strip {
             sends[BUS_MONITOR] = 0.0;
         }
 
+        self.proc.set_targets(in_gain, comp_mix, snap);
+        self.stream_proc.set_targets(in_gain, comp_mix, snap);
         let targets = [
-            (&mut self.in_gain, in_gain),
             (&mut self.fader, fader),
             (&mut self.pan_l, pan_l),
             (&mut self.pan_r, pan_r),
             (&mut self.mute, mute),
             (&mut self.pfl, pfl),
-            (&mut self.comp_mix, comp_mix),
         ];
         for (smoother, value) in targets {
             if snap {
@@ -220,41 +189,8 @@ impl Strip {
 
     /// Recompute filter coefficients only when their settings changed.
     fn update_filters(&mut self, p: &StripParams) {
-        let hpf_max = ((self.sr * 0.45) as f32).min(1_000.0).max(20.0);
-        let hpf_freq = clamp_or(p.hpf_freq_hz.load(Relaxed), 20.0, hpf_max, 80.0);
-        if hpf_freq != self.hpf_freq {
-            self.hpf.copy_coeffs_from(&Biquad::hpf(hpf_freq as f64, self.sr));
-            self.hpf_freq = hpf_freq;
-        }
-
-        let gains = [
-            clamp_or(p.eq_low_db.load(Relaxed), -EQ_MAX_DB, EQ_MAX_DB, 0.0),
-            clamp_or(p.eq_mid_db.load(Relaxed), -EQ_MAX_DB, EQ_MAX_DB, 0.0),
-            clamp_or(p.eq_high_db.load(Relaxed), -EQ_MAX_DB, EQ_MAX_DB, 0.0),
-        ];
-        if gains[0] != self.eq_gains[0] {
-            self.eq_low
-                .copy_coeffs_from(&Biquad::low_shelf(EQ_LOW_HZ, gains[0] as f64, self.sr));
-        }
-        if gains[1] != self.eq_gains[1] {
-            self.eq_mid.copy_coeffs_from(&Biquad::peaking(
-                EQ_MID_HZ,
-                EQ_MID_Q,
-                gains[1] as f64,
-                self.sr,
-            ));
-        }
-        if gains[2] != self.eq_gains[2] {
-            self.eq_high
-                .copy_coeffs_from(&Biquad::high_shelf(EQ_HIGH_HZ, gains[2] as f64, self.sr));
-        }
-        self.eq_gains = gains;
-
-        self.gate
-            .set_threshold_db(clamp_or(p.gate_threshold_db.load(Relaxed), -100.0, 0.0, -50.0));
-        self.comp
-            .set_threshold(clamp_or(p.comp_threshold_db.load(Relaxed), -60.0, 0.0, -18.0));
-        self.comp.set_ratio(clamp_or(p.comp_ratio.load(Relaxed), 1.0, 20.0, 3.0));
+        self.proc.update_filters(p);
+        self.stream_proc.update_filters(p);
     }
 
     /// Both passes at unity automix gain (a strip on its own).
@@ -286,7 +222,24 @@ impl Strip {
         any_solo: bool,
         snap: bool,
     ) {
-        let n = frames.min(self.scratch.len());
+        self.process_pre_split(input, None, frames, p, any_solo, snap);
+    }
+
+    /// `process_pre` with an optional Stream-only input. The voice strip
+    /// passes its live (fast) signal as `input`, which Main, the monitors
+    /// and the automix detector use, and its full voice-chain signal as
+    /// `stream_input`, which only the Stream send uses. Both go through the
+    /// same strip settings (trim, HPF, gate, EQ, compressor).
+    pub fn process_pre_split(
+        &mut self,
+        input: &[f32],
+        stream_input: Option<&[f32]>,
+        frames: usize,
+        p: &StripParams,
+        any_solo: bool,
+        snap: bool,
+    ) {
+        let n = frames.min(self.det_buf.len());
         self.update_targets(p, any_solo, snap);
         self.update_filters(p);
 
@@ -294,50 +247,15 @@ impl Strip {
         let gate_on = p.gate_enabled.load(Relaxed);
         let monitor_post = p.monitor_post_fader.load(Relaxed) && !any_solo;
 
-        // Stage 1: gain and HPF (per sample).
-        for i in 0..n {
-            let x = input.get(i).copied().unwrap_or(0.0);
-            let mut y = x * self.in_gain.next();
-            if hpf_on {
-                y = self.hpf.tick(y);
-            }
-            self.scratch[i] = y;
-            self.det_buf[i] = y;
-        }
-
-        // Gate: zero latency and no work while off (see module docs).
-        self.gate.enabled = gate_on;
-        let gate_gain = self.gate.process_block(&mut self.scratch[..n]);
-
-        // EQ (per sample).
-        for y in self.scratch[..n].iter_mut() {
-            let mut v = self.eq_low.tick(*y);
-            v = self.eq_mid.tick(v);
-            *y = self.eq_high.tick(v);
-        }
-
-        // Stage 2: compressor (block API), crossfaded on/off over the ramp
-        // so switching it never clicks. Skipped entirely while fully off.
-        let mut gr_db = 0.0f32;
-        let comp_active = self.comp_mix.current() > 0.0 || self.comp_mix.target() > 0.0;
-        if comp_active {
-            self.comp_buf[..n].copy_from_slice(&self.scratch[..n]);
-            self.comp.process_block(&mut self.comp_buf[..n]);
-            let before = peak(&self.scratch[..n]);
-            let after = peak(&self.comp_buf[..n]);
-            if before > 1e-9 && self.comp_mix.target() > 0.0 {
-                gr_db = (20.0 * (after / before).max(1e-9).log10()).min(0.0);
-            }
-            for i in 0..n {
-                let mix = self.comp_mix.next();
-                let dry = self.scratch[i];
-                self.scratch[i] = dry + (self.comp_buf[i] - dry) * mix;
-            }
+        let readout = self.proc.run(input, n, hpf_on, gate_on, Some(&mut self.det_buf[..n]));
+        self.stream_alt = stream_input.is_some();
+        if let Some(alt) = stream_input {
+            self.stream_proc.run(alt, n, hpf_on, gate_on, None);
         }
 
         self.pending_frames = n;
-        self.pending_gate_open = !gate_on || gate_gain > 0.5;
-        self.pending_gr_db = gr_db;
+        self.pending_gate_open = !gate_on || readout.gate_gain > 0.5;
+        self.pending_gr_db = readout.gr_db;
         self.monitor_post = monitor_post;
     }
 
@@ -350,10 +268,14 @@ impl Strip {
         let mut pre_peak = 0.0f32;
         let mut post_peak = 0.0f32;
         let [main, stream, monitor, monitor2, monitor3] = buses;
+        let stream_alt = self.stream_alt;
         for i in 0..n {
-            let pre = self.scratch[i];
+            let pre = self.proc.scratch[i];
             let auto = auto_gain.get(i).copied().unwrap_or(1.0);
-            let post = pre * self.fader.next() * auto;
+            let fader = self.fader.next();
+            let post = pre * fader * auto;
+            // Stream hears the full voice chain when the strip carries one.
+            let stream_post = if stream_alt { self.stream_proc.scratch[i] * fader * auto } else { post };
             let pl = self.pan_l.next();
             let pr = self.pan_r.next();
             let m = self.mute.next();
@@ -365,8 +287,8 @@ impl Strip {
 
             main.left[i] += post * g_main * pl;
             main.right[i] += post * g_main * pr;
-            stream.left[i] += post * g_stream * pl;
-            stream.right[i] += post * g_stream * pr;
+            stream.left[i] += stream_post * g_stream * pl;
+            stream.right[i] += stream_post * g_stream * pr;
             let pfl = self.pfl.next(); // unity, both sides, ignores mute
             let mon_src = if monitor_post { post } else { pre };
             monitor.left[i] += mon_src * g_mon * pl + pre * pfl;
@@ -400,9 +322,6 @@ impl Strip {
     }
 }
 
-fn peak(buf: &[f32]) -> f32 {
-    buf.iter().fold(0.0f32, |m, &s| m.max(s.abs()))
-}
 
 pub(super) fn lin_to_db(lin: f32) -> f32 {
     if lin > 1e-6 {

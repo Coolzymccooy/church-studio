@@ -205,6 +205,8 @@ struct EngineShared {
     /// of any strip whose gate is on) plus the bus limiter. Published by the
     /// callback after every block.
     path_latency_samples: AtomicU64,
+    /// The same for Stream, which hears the voice strip's full chain.
+    stream_path_latency_samples: AtomicU64,
     dropped_output_samples: AtomicU64,
     /// Samples the NDI rings could not take (callback) or skipped to stay
     /// near real time (sender threads).
@@ -224,6 +226,7 @@ impl EngineShared {
             capture_busy: AtomicBool::new(false),
             dsp_latency_samples: AtomicU64::new(0),
             path_latency_samples: AtomicU64::new(0),
+            stream_path_latency_samples: AtomicU64::new(0),
             noise_profile_ready: AtomicBool::new(false),
             dropped_output_samples: AtomicU64::new(0),
             ndi_dropped_samples: Arc::new(AtomicU64::new(0)),
@@ -1003,13 +1006,21 @@ impl RunningEngine {
     /// Buffer latency plus the processing latency of what is really active
     /// (voice chain, gated strips, bus limiter), in ms.
     pub fn total_latency_ms(&self) -> f32 {
-        let path = self.shared.path_latency_samples.load(Ordering::Relaxed);
-        let path_ms = if self.sample_rate > 0 {
-            path as f32 * 1000.0 / self.sample_rate as f32
+        self.latency_ms + self.samples_ms(self.shared.path_latency_samples.load(Ordering::Relaxed))
+    }
+
+    /// Like `total_latency_ms`, for Stream (the voice strip's full chain).
+    pub fn stream_latency_ms(&self) -> f32 {
+        self.latency_ms
+            + self.samples_ms(self.shared.stream_path_latency_samples.load(Ordering::Relaxed))
+    }
+
+    fn samples_ms(&self, samples: u64) -> f32 {
+        if self.sample_rate > 0 {
+            samples as f32 * 1000.0 / self.sample_rate as f32
         } else {
             0.0
-        };
-        self.latency_ms + path_ms
+        }
     }
 
     pub fn noise_profile_ready(&self) -> bool {
