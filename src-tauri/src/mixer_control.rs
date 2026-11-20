@@ -1,5 +1,5 @@
 //! Control side of the live mixer (`docs/specs/2026-09-27-mixer-live-contract.md`).
-use crate::dsp::mixer::fx_params::FX_SEND_KEYS;
+use crate::dsp::mixer::fx_params::{FX_IDS, FX_SEND_KEYS};
 use crate::dsp::mixer::leveler::{
     LEVELER_TARGET_DEFAULT, LEVELER_TARGET_MAX, LEVELER_TARGET_MIN,
 };
@@ -598,10 +598,7 @@ impl MixerControl {
         Ok(())
     }
 
-    /// At most one strip carries the voice chain: turning it on for a strip
-    /// moves it there (clearing the others). Turning it off on the strip that
-    /// holds it leaves no strip with the voice chain (`NO_VOICE_STRIP`);
-    /// turning it off on any other strip is a no-op.
+    /// Assign the single voice chain, or clear it if this strip owns it.
     fn set_voice_chain(&self, index: usize, on: bool) -> Result<(), String> {
         if on {
             self.voice_strip.store(index, Relaxed);
@@ -622,6 +619,9 @@ impl MixerControl {
     }
 
     pub fn set_bus_param(&self, bus: &str, key: &str, value: f32) -> Result<(), String> {
+        if FX_IDS.contains(&bus) && key == "fader_db" {
+            return self.set_fx_param(bus, key, value);
+        }
         let p = &self.params.buses[bus_index(bus)?];
         match (f32_spec(BUS_F32_KEYS, key), bus_f32(p, key)) {
             (Some(spec), Some(field)) => {
@@ -633,6 +633,9 @@ impl MixerControl {
     }
 
     pub fn set_bus_bool(&self, bus: &str, key: &str, value: bool) -> Result<(), String> {
+        if FX_IDS.contains(&bus) && key == "mute" {
+            return self.set_fx_bool(bus, key, value);
+        }
         let p = &self.params.buses[bus_index(bus)?];
         let field = match key {
             "mute" => &p.mute,
@@ -700,8 +703,6 @@ impl MixerControl {
         self.snapshot_layout(layout, running, scenes)
     }
 
-    /// `MixerState` for the strips of `layout` (hardware, computer, NDI),
-    /// with no bus output devices (every bus `output` is null).
     pub fn snapshot_layout(
         &self,
         layout: StripLayout,
@@ -711,8 +712,6 @@ impl MixerControl {
         self.snapshot_outputs(layout, running, scenes, &BusOutputs::default())
     }
 
-    /// `snapshot_layout`, plus the device each bus plays on (`outputs`, in
-    /// `BUS_*` order; the running engine's `bus_outputs`).
     pub fn snapshot_outputs(
         &self,
         layout: StripLayout,

@@ -124,7 +124,8 @@ mod tests {
     fn fx_controls_survive_scene_recall_and_legacy_scenes_reset_them() {
         let mixer = MixerControl::new();
         mixer.set_fx_param("fx_b", "tempo_bpm", 999.0).unwrap();
-        mixer.set_fx_bool("fx_a", "mute", true).unwrap();
+        mixer.set_bus_bool("fx_a", "mute", true).unwrap();
+        mixer.set_bus_param("fx_a", "fader_db", -8.0).unwrap();
         mixer.set_strip_param(0, "send_fx_a_db", -6.0).unwrap();
         assert!(mixer.set_fx_param("fx_a", "tempo_bpm", 100.0).is_err());
         assert!(mixer.set_fx_param("fx_b", "send_fx_a_db", 0.0).is_err());
@@ -135,6 +136,7 @@ mod tests {
         mixer.apply_scene(&serde_json::from_value(scene.clone()).unwrap());
         assert_eq!(mixer.fx_state()[1].tempo_bpm, Some(240.0));
         assert!(mixer.fx_state()[0].mute);
+        assert_eq!(mixer.fx_state()[0].fader_db, -8.0);
         assert_eq!(mixer.params.strips[0].fx_send_db[0].load(Relaxed), -6.0);
 
         scene["mixer"].as_object_mut().unwrap().remove("fx");
