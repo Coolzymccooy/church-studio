@@ -1,3 +1,5 @@
+import { applyGroupChange, dcaDb, defaultGroups, defaultGroupLabels } from './mixerGroups.js';
+
 /**
  * mixerEngine.js — UI-side mixer controller, matching
  * docs/specs/2026-09-27-mixer-live-contract.md exactly:
@@ -13,6 +15,8 @@
  *   faderDbToPosition / positionToFaderDb, formatDb, clampStripValue,
  *   validateSceneName and the applyStripChange reducer.
  */
+
+import { applyFxChange, defaultFxReturns, fxParamRange, FX_RANGES, isFxFlag } from './mixerFx.js';
 
 // ── Fader law ────────────────────────────────────────────────────────────────
 // Two-segment piecewise-linear law: −90 dB at the very bottom (position 0),
@@ -50,6 +54,7 @@ export function formatDb(db) {
 
 // ── Contract ranges ──────────────────────────────────────────────────────────
 const PARAM_RANGES = {
+  ...FX_RANGES,
   trim_db: [-20, 40],
   hpf_hz: [20, 400],
   gate_threshold_db: [-80, 0],
@@ -157,8 +162,17 @@ export function createMixerController({ invoke, listen }) {
     setBusParam(bus, key, value) {
       return invoke('mixer_set_bus_param', { bus, key, value });
     },
+    setGroup(change) {
+      return invoke('mixer_set_group', { change });
+    },
     setBusBool(bus, key, value) {
       return invoke('mixer_set_bus_bool', { bus, key, value });
+    },
+    setFxParam(id, key, value) {
+      return invoke('mixer_set_fx_param', { id, key, value });
+    },
+    setFxBool(id, key, value) {
+      return invoke('mixer_set_fx_bool', { id, key, value });
     },
     listScenes() {
       return invoke('mixer_list_scenes');
@@ -182,6 +196,9 @@ export function createMixerController({ invoke, listen }) {
     },
     // Fired when the backend loads a scene on its own (the OBS scene link),
     // so the console can refetch its state.
+    subscribeStripRenames(cb) {
+      return subscribeEvent(listen, 'mixer-strip-renamed', cb);
+    },
     subscribeSceneLoaded(cb) {
       return subscribeEvent(listen, 'mixer-scene-loaded', cb);
     },
@@ -233,6 +250,8 @@ function defaultStrip(index, name, overrides = {}) {
   return {
     index,
     name,
+    group_membership: { dca: 0, mute: 0 },
+    group_muted: false,
     trim_db: 0,
     polarity: false,
     hpf_enabled: true,
@@ -255,6 +274,8 @@ function defaultStrip(index, name, overrides = {}) {
     // mon 2 / mon 3 start silent so a new monitor mix is built up on purpose.
     send_monitor2_db: -90,
     send_monitor3_db: -90,
+    send_fx_a_db: -90,
+    send_fx_b_db: -90,
     monitor_post_fader: false,
     voice_chain: false,
     automix: false,
@@ -279,7 +300,10 @@ export const BUS_IDS = ['main', 'stream', 'monitor', 'monitor2', 'monitor3'];
 function createInitialMockState() {
   return {
     inputChannels: MOCK_STRIP_NAMES.length,
+    fxReturns: defaultFxReturns(),
     running: true,
+    groups: defaultGroups(),
+    groupLabels: defaultGroupLabels(),
     strips: MOCK_STRIP_NAMES.map((name, index) =>
       defaultStrip(index, name, index === 0 ? { voice_chain: true } : {})),
     // The demo plays mon 2 on a pretend device so the browser build shows a second monitor mix.
@@ -291,6 +315,7 @@ function cloneState(state) {
   return {
     ...state,
     strips: state.strips.map((strip) => ({ ...strip })),
+    fxReturns: state.fxReturns.map((ret) => ({ ...ret })),
     buses: state.buses.map((bus) => ({ ...bus })),
   };
 }
@@ -306,7 +331,7 @@ function round1(value) {
 function buildMockMetersPayload(state, tick) {
   const strips = state.strips.map((strip, i) => {
     const pre = clampMeterDb(-18 + Math.sin(tick * 0.3 + i * 1.7) * 6 + (Math.random() - 0.5) * 3);
-    const post = strip.mute ? -96 : clampMeterDb(pre + strip.fader_db);
+    const post = strip.mute || strip.group_muted ? -96 : clampMeterDb(pre + Math.min(10, strip.fader_db + dcaDb(state.groups, strip.group_membership)));
     const gateOpen = strip.gate_enabled ? pre > strip.gate_threshold_db : true;
     const overshoot = strip.comp_enabled ? Math.max(0, pre - strip.comp_threshold_db) : 0;
     const grDb = strip.comp_enabled ? Math.min(12, overshoot - overshoot / strip.comp_ratio) : 0;
@@ -348,7 +373,16 @@ function buildMockMetersPayload(state, tick) {
     };
   });
 
-  return { strips: ducked, buses };
+  const fxReturns = state.fxReturns.map((ret, i) => {
+    const feeds = state.strips
+      .filter((strip) => !strip.mute && strip.fader_db > -90 && strip[i === 0 ? 'send_fx_a_db' : 'send_fx_b_db'] > -90);
+    const peak = ret.mute || feeds.length === 0 ? -96 : clampMeterDb(-25 + ret.fader_db + 5 * Math.sin(tick / 6));
+    return { peak_l_db: peak, peak_r_db: peak };
+  });
+  const dca_peaks = state.groups.faders.map((_, index) => Math.max(-96, ...ducked
+    .filter((_, i) => state.strips[i].group_membership.dca & (1 << index))
+    .map((meter) => meter.post_db)));
+  return { strips: ducked, buses, fxReturns, dca_peaks };
 }
 
 export function createMockMixerController() {
@@ -360,7 +394,13 @@ export function createMockMixerController() {
 
   function snapshot() {
     const cloned = cloneState(state);
-    return { ...cloned, scenes: Array.from(scenes.keys()) };
+    return {
+      ...cloned,
+      groups: { ...cloned.groups, faders: [...cloned.groups.faders] },
+      groupLabels: { dca: [...cloned.groupLabels.dca], mute: [...cloned.groupLabels.mute] },
+      strips: cloned.strips.map((strip) => ({ ...strip, group_membership: { ...strip.group_membership } })),
+      scenes: Array.from(scenes.keys()),
+    };
   }
 
   function requireStrip(index) {
@@ -425,6 +465,9 @@ export function createMockMixerController() {
       };
       return null;
     },
+    async setGroup(change) {
+      state = applyGroupChange(state, change);
+    },
     async setBusBool(bus, key, value) {
       requireBus(bus);
       state = {
@@ -434,6 +477,14 @@ export function createMockMixerController() {
         )),
       };
       return null;
+    },
+    async setFxParam(id, key, value) {
+      if (!fxParamRange(id, key)) throw new Error('Invalid FX control');
+      state = applyFxChange(state, id, key, clampStripValue(key, value));
+    },
+    async setFxBool(id, key, value) {
+      if (!state.fxReturns.some((ret) => ret.id === id) || !isFxFlag(key)) throw new Error('Invalid FX control');
+      state = applyFxChange(state, id, key, Boolean(value));
     },
     async listScenes() {
       return Array.from(scenes.keys());

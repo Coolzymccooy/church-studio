@@ -1,13 +1,17 @@
 //! Mixer scenes: a by-value snapshot of every strip and bus control that can
 //! be saved as JSON and recalled onto the live `MixerParams`.
+use super::fx_params::{FxScene, FX_COUNT};
 use super::params::{
     BusParams, MixerParams, StripParams, DUCK_DEPTH_DEFAULT_DB, MIN_DB, NUM_BUSES,
 };
+use super::groups::{GroupLabels, GroupState, Membership};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::sync::atomic::Ordering::Relaxed;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StripScene {
+    #[serde(default)]
+    pub group_membership: Membership,
     pub trim_db: f32,
     pub polarity_invert: bool,
     pub hpf_enabled: bool,
@@ -28,6 +32,8 @@ pub struct StripScene {
     /// mon 3 existed carry three; the missing sends load as −90 (off).
     #[serde(deserialize_with = "sends_padded")]
     pub send_db: Vec<f32>,
+    #[serde(default = "fx_sends_off")]
+    pub fx_send_db: [f32; FX_COUNT],
     pub monitor_post_fader: bool,
     /// Missing in scene files saved before automix existed: off.
     #[serde(default)]
@@ -38,12 +44,16 @@ pub struct StripScene {
     pub duck_depth_db: f32,
 }
 
+fn fx_sends_off() -> [f32; FX_COUNT] {
+    [MIN_DB; FX_COUNT]
+}
+
 fn default_duck_depth() -> f32 {
     DUCK_DEPTH_DEFAULT_DB
 }
 
 /// `send_db` padded with `MIN_DB` (off) up to one level per bus.
-fn sends_padded<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<f32>, D::Error> {
+pub(super) fn sends_padded<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<f32>, D::Error> {
     let mut sends = Vec::<f32>::deserialize(deserializer)?;
     if sends.len() < NUM_BUSES {
         sends.resize(NUM_BUSES, MIN_DB);
@@ -54,6 +64,7 @@ fn sends_padded<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<f32>, 
 impl StripScene {
     pub(crate) fn capture(p: &StripParams) -> Self {
         StripScene {
+            group_membership: p.groups.capture(),
             trim_db: p.trim_db.load(Relaxed),
             polarity_invert: p.polarity_invert.load(Relaxed),
             hpf_enabled: p.hpf_enabled.load(Relaxed),
@@ -71,6 +82,7 @@ impl StripScene {
             solo: p.solo.load(Relaxed),
             fader_db: p.fader_db.load(Relaxed),
             send_db: p.send_db.iter().map(|s| s.load(Relaxed)).collect(),
+            fx_send_db: std::array::from_fn(|i| p.fx_send_db[i].load(Relaxed)),
             monitor_post_fader: p.monitor_post_fader.load(Relaxed),
             automix: p.automix.load(Relaxed),
             duck: p.duck.load(Relaxed),
@@ -79,6 +91,7 @@ impl StripScene {
     }
 
     pub(crate) fn apply(&self, p: &StripParams) {
+        p.groups.store(self.group_membership);
         p.trim_db.store(self.trim_db, Relaxed);
         p.polarity_invert.store(self.polarity_invert, Relaxed);
         p.hpf_enabled.store(self.hpf_enabled, Relaxed);
@@ -96,6 +109,9 @@ impl StripScene {
         p.solo.store(self.solo, Relaxed);
         p.fader_db.store(self.fader_db, Relaxed);
         for (dst, &src) in p.send_db.iter().zip(self.send_db.iter()) {
+            dst.store(src, Relaxed);
+        }
+        for (dst, src) in p.fx_send_db.iter().zip(self.fx_send_db) {
             dst.store(src, Relaxed);
         }
         p.monitor_post_fader.store(self.monitor_post_fader, Relaxed);
@@ -139,7 +155,13 @@ impl BusScene {
 pub struct MixerScene {
     pub name: String,
     pub strips: Vec<StripScene>,
+    #[serde(default)]
+    pub groups: GroupState,
+    #[serde(default)]
+    pub group_labels: GroupLabels,
     pub buses: Vec<BusScene>,
+    #[serde(default)]
+    pub fx: FxScene,
 }
 
 impl MixerScene {
@@ -148,22 +170,34 @@ impl MixerScene {
     }
 
     pub fn capture_named(params: &MixerParams, name: &str) -> Self {
+        let _edit = params.groups.edit.lock();
         MixerScene {
             name: name.to_string(),
             strips: params.strips.iter().map(StripScene::capture).collect(),
+            groups: params.groups.capture(),
+            group_labels: params.groups.labels.lock().clone(),
             buses: params.buses.iter().map(BusScene::capture).collect(),
+            fx: FxScene::capture(&params.fx),
         }
     }
 
     /// Store the scene into `params`. Extra strips/buses in the scene are
     /// ignored; strips missing from the scene are left unchanged.
     pub fn apply(&self, params: &MixerParams) {
+        let _edit = params.groups.edit.lock();
+        params.groups.store(&self.groups);
+        *params.groups.labels.lock() = self.group_labels.clone();
         for (scene, p) in self.strips.iter().zip(params.strips.iter()) {
             scene.apply(p);
         }
         for (scene, p) in self.buses.iter().zip(params.buses.iter()).take(NUM_BUSES) {
             scene.apply(p);
         }
+        self.fx.apply(&params.fx);
+        for strip in params.strips.iter().skip(self.strips.len()) {
+            strip.groups.store(Membership::default());
+        }
+        params.groups.publish(&params.strips);
     }
 }
 

@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { applyGroupChange, hasGroup } from '../../lib/mixerGroups.js';
 import { applyStripChange, clampStripValue, createCoalescer } from '../../lib/mixerEngine.js';
 import { keepHeldFaders } from '../../lib/heldFaders.js';
+
+import { applyFxChange } from '../../lib/mixerFx.js';
 
 const TOAST_MS = 4000;
 
@@ -199,6 +202,27 @@ export function useMixer(controller, refreshKey) {
     );
   }, [controller, withOptimism]);
 
+  const setGroup = useCallback((change) => {
+    const { type, index, strip, kind } = change;
+    withOptimism(
+      (prev) => applyGroupChange(prev, change),
+      (prev) => {
+        if (type === 'rename') {
+          return (latest) => applyGroupChange(latest, { ...change, name: prev.groupLabels?.[kind]?.[index] ?? '' });
+        }
+        if (type === 'fader') {
+          return (latest) => applyGroupChange(latest, { ...change, db: prev.groups.faders[index] });
+        }
+        const mask = type === 'membership' ? prev.strips.find((s) => s.index === strip)?.group_membership[kind]
+          : type === 'dcaMute' ? prev.groups.dca_muted : prev.groups.mute_active;
+        return (latest) => applyGroupChange(latest, { ...change, enabled: hasGroup(mask, index) });
+      },
+      () => type === 'fader'
+        ? writeFader(`dca:${index}`, 'fader_db', () => controller.setGroup(change))
+        : coalesce(`group:${type}:${index}:${strip}:${kind}`, () => controller.setGroup(change)),
+    );
+  }, [controller, coalesce, withOptimism, writeFader]);
+
   const renameStrip = useCallback((index, name) => {
     const trimmed = String(name ?? '').trim().slice(0, 24);
     withOptimism(
@@ -251,6 +275,19 @@ export function useMixer(controller, refreshKey) {
     );
   }, [controller, withOptimism]);
 
+  const setFxControl = useCallback((id, key, value) => {
+    const next = typeof value === 'boolean' ? value : clampStripValue(key, value);
+    const call = typeof value === 'boolean' ? controller.setFxBool : controller.setFxParam;
+    withOptimism(
+      (prev) => applyFxChange(prev, id, key, next),
+      (prev) => {
+        const previousValue = prev.fxReturns.find((ret) => ret.id === id)?.[key];
+        return (latest) => applyFxChange(latest, id, key, previousValue);
+      },
+      () => writeFader(`bus:${id}`, key, () => call(id, key, next)),
+    );
+  }, [controller, withOptimism, writeFader]);
+
   const saveScene = useCallback(async (name) => {
     try {
       await controller.saveScene(name);
@@ -298,10 +335,12 @@ export function useMixer(controller, refreshKey) {
     renameStrip,
     setBusParam,
     setBusBool,
+    setFxControl,
     setFaderTouch,
     saveScene,
     loadScene,
     deleteScene,
+    setGroup,
   };
 }
 

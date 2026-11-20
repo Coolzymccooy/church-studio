@@ -9,8 +9,17 @@ export function keepHeldFaders(current, incoming, held) {
         : item;
     });
   };
+  const returns = incoming.fxReturns && current.fxReturns
+    ? { fxReturns: preserve(incoming.fxReturns, current.fxReturns, 'bus', 'id') }
+    : {};
+  const groups = incoming.groups && current.groups
+    ? { groups: { ...incoming.groups, faders: incoming.groups.faders.map((db, index) =>
+      held.has(`dca:${index}`) ? current.groups.faders[index] : db) } }
+    : {};
   return {
     ...incoming,
+    ...returns,
+    ...groups,
     strips: preserve(incoming.strips, current.strips, 'strip', 'index'),
     buses: preserve(incoming.buses, current.buses, 'bus', 'id'),
   };

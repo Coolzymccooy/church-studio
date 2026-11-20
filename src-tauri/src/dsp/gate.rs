@@ -42,10 +42,19 @@ pub struct Gate {
     delay_pos: usize,
 }
 
+/// Lookahead of the voice chain's gate: the gate opens before speech arrives.
+pub const LOOKAHEAD_MS: f64 = 20.0;
+
 impl Gate {
     pub fn new(sr: f64) -> Self {
-        let lookahead_ms = 20.0_f64;
-        let lookahead = (sr * lookahead_ms / 1000.0) as usize;
+        Gate::with_lookahead_ms(sr, LOOKAHEAD_MS)
+    }
+
+    /// A gate whose lookahead (its latency) is `lookahead_ms`. The live
+    /// (fast) voice path uses a short one so the room hears speech with
+    /// little delay; onsets may then open a few ms late.
+    pub fn with_lookahead_ms(sr: f64, lookahead_ms: f64) -> Self {
+        let lookahead = (sr * lookahead_ms.max(0.0) / 1000.0) as usize;
         let rms_window = (sr * 0.005) as usize; // 5ms RMS window
         Gate {
             threshold_lin: db_to_lin(-45.0),
@@ -256,6 +265,15 @@ impl SwitchedGate {
     /// Voice-chain gate with the Hyper modes (starts balanced).
     pub fn new_hyper(sr: f64) -> Self {
         let gate = Gate::new_hyper(sr);
+        let switch = StageSwitch::new(gate.latency_samples());
+        SwitchedGate { gate, switch, enabled: true }
+    }
+
+    /// Hyper-capable gate with a chosen lookahead (the live voice path).
+    pub fn new_hyper_with_lookahead_ms(sr: f64, lookahead_ms: f64) -> Self {
+        let mut gate = Gate::with_lookahead_ms(sr, lookahead_ms);
+        gate.hyper = Some(HyperDetector::new(sr));
+        gate.set_mode(GateMode::Balanced);
         let switch = StageSwitch::new(gate.latency_samples());
         SwitchedGate { gate, switch, enabled: true }
     }

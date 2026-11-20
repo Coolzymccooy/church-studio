@@ -1,4 +1,8 @@
 mod audio;
+mod soundcheck;
+mod soundcheck_commands;
+#[cfg(test)]
+mod soundcheck_tests;
 mod computer_audio;
 mod computer_audio_commands;
 mod dsp;
@@ -10,7 +14,9 @@ mod history;
 mod link;
 mod mixer_commands;
 mod mixer_control;
+mod mixer_groups;
 mod mixer_layout;
+mod mixer_fx;
 #[cfg(test)]
 mod automix_control_tests;
 #[cfg(test)]
@@ -208,11 +214,22 @@ async fn start_audio_engine(
         },
         net_audio.snapshot(),
         computer_audio.snapshot().enabled,
-    )?;
+    )
+    .map_err(|e| {
+        log::error!("engine start failed: {e}");
+        e
+    })?;
+    log::info!(
+        "engine started: {} Hz, {} frames, input '{}'",
+        engine.sample_rate,
+        engine.buffer_frames,
+        engine.input_device_name
+    );
     let info = serde_json::json!({
         "sample_rate": engine.sample_rate,
         "buffer_frames": engine.buffer_frames,
         "latency_ms": engine.total_latency_ms(),
+        "stream_latency_ms": engine.stream_latency_ms(),
         "buffer_latency_ms": engine.latency_ms,
         "callback_avg_ms": engine.callback_avg_ms(),
         "callback_peak_ms": engine.callback_peak_ms(),
@@ -319,6 +336,7 @@ fn serialize_engine_status(engine: &RunningEngine) -> serde_json::Value {
         "sample_rate": engine.sample_rate,
         "buffer_frames": engine.buffer_frames,
         "latency_ms": engine.total_latency_ms(),
+        "stream_latency_ms": engine.stream_latency_ms(),
         "buffer_latency_ms": engine.latency_ms,
         "callback_avg_ms": engine.callback_avg_ms(),
         "callback_peak_ms": engine.callback_peak_ms(),
@@ -412,15 +430,27 @@ pub fn run() {
             gate_commands::learn_mic_fingerprint,
             engine_status,
             mixer_commands::mixer_state,
+            soundcheck_commands::soundcheck_load,
+            soundcheck_commands::soundcheck_unload,
+            soundcheck_commands::soundcheck_set_source,
+            soundcheck_commands::soundcheck_play,
+            soundcheck_commands::soundcheck_stop,
+            soundcheck_commands::soundcheck_set_loop,
+            soundcheck_commands::soundcheck_locate,
+            soundcheck_commands::soundcheck_status,
+            soundcheck_commands::soundcheck_signal,
             mixer_commands::mixer_set_strip_param,
             mixer_commands::mixer_set_strip_bool,
             mixer_commands::mixer_rename_strip,
             mixer_commands::mixer_set_bus_param,
             mixer_commands::mixer_set_bus_bool,
+            mixer_fx::mixer_set_fx_param,
+            mixer_fx::mixer_set_fx_bool,
             mixer_commands::mixer_list_scenes,
             mixer_commands::mixer_save_scene,
             mixer_commands::mixer_load_scene,
             mixer_commands::mixer_delete_scene,
+            mixer_groups::mixer_set_group,
             link::commands::link_get_config,
             link::commands::link_set_enabled,
             link::commands::link_set_rules,
@@ -585,6 +615,18 @@ pub fn run() {
                 )
                 .build()?;
 
+            // macOS routes Cmd+C / Cmd+V / Cmd+A in text fields through the Edit menu; without
+            // one, copying or pasting a token or a name silently does nothing.
+            let edit_menu = SubmenuBuilder::new(app, "Edit")
+                .undo()
+                .redo()
+                .separator()
+                .cut()
+                .copy()
+                .paste()
+                .select_all()
+                .build()?;
+
             let window_menu = SubmenuBuilder::new(app, "Window")
                 .minimize()
                 .maximize()
@@ -594,6 +636,7 @@ pub fn run() {
 
             let menu = MenuBuilder::new(app)
                 .item(&tiwaton_menu)
+                .item(&edit_menu)
                 .item(&engine_menu)
                 .item(&view_menu)
                 .item(&export_menu)

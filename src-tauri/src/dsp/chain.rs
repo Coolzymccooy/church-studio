@@ -302,6 +302,11 @@ impl DspChain {
     /// gate lookahead when the gate is on, limiter lookahead). Disabled
     /// stages are zero-latency passthroughs, and the global bypass is 0.
     /// Reflects the params from the most recent `sync_params`/`process_block`.
+    /// Current auto-gain rider level (linear), shared with the live path.
+    pub fn auto_gain(&self) -> f32 {
+        self.auto_gain
+    }
+
     pub fn total_latency_samples(&self) -> usize {
         if self.bypassed {
             return 0;
