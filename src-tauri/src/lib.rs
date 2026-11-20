@@ -157,6 +157,7 @@ async fn check_for_app_update(app: AppHandle) {
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // one optional arg per device, as Tauri maps them
 async fn start_audio_engine(
     app: AppHandle,
     state: State<'_, EngineState>,
