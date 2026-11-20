@@ -121,6 +121,8 @@ const AudioProcessor = ({ goHome }) => {
   const [voiceActive, setVoiceActive] = useState(false);
   const [isAutoCalibrating, setIsAutoCalibrating] = useState(false);
   const [audioEngineError, setAudioEngineError] = useState(null);
+  // True while the desktop engine is opening its devices, so "start" shows it is working.
+  const [engineStarting, setEngineStarting] = useState(false);
   const [chainReady, setChainReady] = useState(0); // increments when audio chain is fully built
   const [mainTab, setMainTab] = useState('live'); // 'live' | 'editor' | 'mixer'
   // Mixer console: real Tauri controller (invoke/listen loaded lazily, same
@@ -1276,7 +1278,10 @@ const AudioProcessor = ({ goHome }) => {
     // In the desktop app "start" always means the native engine. From file mode it first returns
     // the rack to live; the browser microphone path does not work in the desktop webview.
     if (isTauri) {
+      if (engineStarting) return;
       if (mode !== 'live') setMode('live');
+      setEngineStarting(true);
+      setAudioEngineError(null);
       try {
         const { invoke } = await import('@tauri-apps/api/core');
         // The engine may already be running while this screen thinks it is off (a reload, or an
@@ -1304,6 +1309,8 @@ const AudioProcessor = ({ goHome }) => {
       } catch (err) {
         console.error('Tauri engine start failed', err);
         setAudioEngineError(describeNativeEngineError(err));
+      } finally {
+        setEngineStarting(false);
       }
       return;
     }
@@ -3376,6 +3383,7 @@ const AudioProcessor = ({ goHome }) => {
               playbackDuration,
               formatTime,
               engineError: audioEngineError,
+              engineStarting,
               onErrorBack: () => { cleanupAudio(); setIsLive(false); },
               onGoLive: toggleLive,
               loudness: { m: lufsM, st: lufsST, i: lufsI, target: loudnessTarget, limiterOn: Boolean(features.streamingSafe) },
