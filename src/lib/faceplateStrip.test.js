@@ -6,7 +6,7 @@ import { knobFraction } from './faceplateControls.js';
 import { knobDragValue } from './knobTravel.js';
 import {
   STRIP_KNOBS, STRIP_ROWS, STRIP_COLOURS, stripColour, stripGateTone, grText, panText, sendText, compactDb,
-  DUCK_KNOB, hasAutomix, reductionText,
+  DUCK_KNOB, hasAutomix, reductionText, activeExtraMonitors, EXTRA_MONITORS,
   BUS_LIMITER, busLabel,
 } from './faceplateStrip.js';
 
@@ -28,8 +28,10 @@ test('knob defaults match the engine defaults', () => {
 });
 
 test('the strip layout lists every knob exactly once', () => {
-  const used = STRIP_ROWS.flat();
+  // mon 2 / mon 3 live in their own row, shown only when that mix has a device.
+  const used = [...STRIP_ROWS.flat(), ...EXTRA_MONITORS.map((m) => m.knob)];
   assert.deepEqual([...used].sort(), Object.keys(STRIP_KNOBS).sort());
+  assert.equal(new Set(used).size, used.length);
 });
 
 test('a knob greys out when its stage is off', () => {
@@ -123,6 +125,26 @@ test('hasAutomix only when the engine reports both keys', () => {
 
 test('duck knob uses the contract range', () => {
   assert.deepEqual([DUCK_KNOB.min, DUCK_KNOB.max, DUCK_KNOB.defaultValue], [0, 40, 12]);
+});
+
+test('activeExtraMonitors lists only mon 2 / mon 3 buses that have a device', () => {
+  const buses = [
+    { id: 'main', output: 'PA' }, { id: 'monitor', output: 'Jabra' },
+    { id: 'monitor2', output: 'AirPods' }, { id: 'monitor3', output: null },
+  ];
+  assert.deepEqual(activeExtraMonitors(buses).map((m) => m.knob), ['mon2']);
+  assert.deepEqual(activeExtraMonitors([]), []);
+  assert.deepEqual(activeExtraMonitors(undefined), []);
+  assert.equal(busLabel('monitor2'), 'mon 2');
+});
+
+test('mon 2 / mon 3 knobs default to off', () => {
+  assert.equal(STRIP_KNOBS.mon2.defaultValue, -90);
+  assert.equal(STRIP_KNOBS.mon3.param, 'send_monitor3_db');
+  for (const k of [STRIP_KNOBS.mon2, STRIP_KNOBS.mon3]) {
+    assert.equal(k.taper, STRIP_KNOBS.mon.taper, 'turns like the mon 1 send');
+    assert.equal(k.detent, 0);
+  }
 });
 
 test('knob definitions: sends turn like faders, hz turns by octaves, 0 dB and centre are detents', () => {

@@ -1,5 +1,7 @@
-//! Mixer DSP core: mono input strips summed into three stereo buses
-//! (Main = room/PA, Stream = livestream/record, Monitor = stage/headphones).
+//! Mixer DSP core: mono input strips summed into five stereo buses
+//! (Main = room/PA, Stream = livestream/record, Monitor = mon 1, the
+//! engineer's stage/headphones, and Monitor 2 / Monitor 3 = mon 2 / mon 3,
+//! extra pre-fader monitor mixes).
 //!
 //! Pure DSP. The engine (`audio::input_proc`) owns the `Mixer` on the audio
 //! thread; the control side (`mixer_control`) owns the shared
@@ -35,12 +37,15 @@ mod automix_tests;
 #[cfg(test)]
 mod leveler_tests;
 #[cfg(test)]
+mod monitor_mix_tests;
+#[cfg(test)]
 mod tests;
 
 pub use automix::{AutoMix, AutoReadout};
 pub use bus::{Bus, BusMeters};
 pub use params::{
-    BusParams, MixerParams, StripParams, BUS_MAIN, BUS_MONITOR, BUS_STREAM, NUM_BUSES,
+    BusParams, MixerParams, StripParams, BUS_COUNT, BUS_MAIN, BUS_MONITOR, BUS_MONITOR2,
+    BUS_MONITOR3, BUS_STREAM, NUM_BUSES,
 };
 pub use scene::MixerScene;
 pub use strip::{Strip, StripMeters};
@@ -109,12 +114,8 @@ impl Mixer {
             .collect();
         let strip_meters: Vec<StripMeters> = strips.iter().map(|s| s.meters()).collect();
         let automix = AutoMix::new(sample_rate, max_block, num_strips);
-        let buses = [
-            Bus::new(sample_rate, ramp),
-            Bus::new(sample_rate, ramp),
-            Bus::new(sample_rate, ramp),
-        ];
-        let bus_meters = [buses[0].meters(), buses[1].meters(), buses[2].meters()];
+        let buses: [Bus; NUM_BUSES] = std::array::from_fn(|_| Bus::new(sample_rate, ramp));
+        let bus_meters = std::array::from_fn(|b| buses[b].meters());
 
         Mixer {
             params,
@@ -123,11 +124,7 @@ impl Mixer {
             strip_meters,
             buses,
             bus_meters,
-            bufs: [
-                StereoBuffer::new(max_block),
-                StereoBuffer::new(max_block),
-                StereoBuffer::new(max_block),
-            ],
+            bufs: std::array::from_fn(|_| StereoBuffer::new(max_block)),
             max_block,
             last_frames: 0,
             primed: false,

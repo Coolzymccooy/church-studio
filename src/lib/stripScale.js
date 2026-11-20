@@ -6,13 +6,14 @@ export const STRIP_ROW_PX = 590;
 export const EXTRA_ROW_PX = { keys: 28, knob: 52, readout: 38 };
 
 /** Height the tallest strip needs, given which optional rows any strip shows. */
-export function stripRowPx(strips) {
+export function stripRowPx(strips, extraMonitorRows = 0) {
   const list = Array.isArray(strips) ? strips : [];
   const has = (pred) => list.some(pred);
   let px = STRIP_ROW_PX;
   if (has((s) => 'automix' in s && 'duck' in s)) px += EXTRA_ROW_PX.keys;
   if (has((s) => s.duck)) px += EXTRA_ROW_PX.knob;
   if (has((s) => s.automix || s.duck)) px += EXTRA_ROW_PX.readout;
+  if (extraMonitorRows > 0) px += EXTRA_ROW_PX.knob;
   return px;
 }
 export const FIT_MIN = 0.75;

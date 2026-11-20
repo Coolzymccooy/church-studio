@@ -269,7 +269,7 @@ test('mock controller starts with 8 strips, strip 0 has voice_chain on', async (
   );
   assert.equal(state.strips[0].voice_chain, true);
   assert.ok(state.strips.slice(1).every((s) => s.voice_chain === false));
-  assert.deepEqual(state.buses.map((b) => b.id), ['main', 'stream', 'monitor']);
+  assert.deepEqual(state.buses.map((b) => b.id), ['main', 'stream', 'monitor', 'monitor2', 'monitor3']);
   assert.deepEqual(state.scenes, []);
 });
 
@@ -347,9 +347,9 @@ test('mock controller subscribeMeters emits animated data at ~20 Hz and respects
   const last = received[received.length - 1];
   assert.equal(last.strips.length, 8);
   assert.equal(last.strips[2].post_db, -96, 'muted strip is silent post-fader');
-  assert.equal(last.buses.length, 3);
+  assert.equal(last.buses.length, 5);
   for (const bus of last.buses) {
-    assert.ok(['main', 'stream', 'monitor'].includes(bus.id));
+    assert.ok(['main', 'stream', 'monitor', 'monitor2', 'monitor3'].includes(bus.id));
     assert.ok(Number.isFinite(bus.peak_l_db));
   }
 });

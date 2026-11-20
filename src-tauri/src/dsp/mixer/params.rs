@@ -5,14 +5,21 @@ use super::leveler::LEVELER_TARGET_DEFAULT;
 use atomic_float::AtomicF32;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// Number of stereo buses.
-pub const NUM_BUSES: usize = 3;
+/// Number of stereo buses (`docs/specs/2026-11-20-monitor-mixes.md`).
+pub const NUM_BUSES: usize = 5;
+/// Contract name for `NUM_BUSES`.
+pub const BUS_COUNT: usize = NUM_BUSES;
 /// Room / PA.
 pub const BUS_MAIN: usize = 0;
 /// Livestream / record.
 pub const BUS_STREAM: usize = 1;
-/// Stage / headphones (also carries solo PFL).
+/// Mon 1: the sound engineer's stage / headphones mix (also carries solo
+/// PFL, the monitor key and `monitor_post_fader`).
 pub const BUS_MONITOR: usize = 2;
+/// Mon 2 and mon 3: extra monitor mixes (pastor, worship leader). Their
+/// sends are always pre-fader; solo and the monitor key never reach them.
+pub const BUS_MONITOR2: usize = 3;
+pub const BUS_MONITOR3: usize = 4;
 
 /// Fader and send levels at or below this are treated as −inf (silence).
 pub const MIN_DB: f32 = -90.0;
@@ -70,12 +77,13 @@ pub struct StripParams {
     /// 0 dB at centre (see `PAN_LAW_NORM`).
     pub pan: AtomicF32,
     pub mute: AtomicBool,
-    /// PFL solo to the Monitor bus only.
+    /// PFL solo to the Monitor (mon 1) bus only.
     pub solo: AtomicBool,
     pub fader_db: AtomicF32,
     /// Send level per bus (index with `BUS_*`).
     pub send_db: [AtomicF32; NUM_BUSES],
-    /// Monitor send taken after the fader instead of before it.
+    /// Mon 1 send taken after the fader instead of before it (mon 2 and
+    /// mon 3 are always pre-fader).
     pub monitor_post_fader: AtomicBool,
     /// Member of the automix (gain-sharing) group.
     pub automix: AtomicBool,
@@ -136,6 +144,8 @@ impl StripParams {
                 AtomicF32::new(0.0),  // Main
                 AtomicF32::new(0.0),  // Stream
                 AtomicF32::new(MIN_DB), // Monitor: off until a monitor mix is built
+                AtomicF32::new(MIN_DB), // Mon 2: off, a new mix starts silent
+                AtomicF32::new(MIN_DB), // Mon 3: off
             ],
             monitor_post_fader: AtomicBool::new(false),
             automix: AtomicBool::new(false),
@@ -193,7 +203,7 @@ impl MixerParams {
     pub fn new(num_strips: usize) -> Self {
         MixerParams {
             strips: (0..num_strips).map(|_| StripParams::new()).collect(),
-            buses: [BusParams::new(), BusParams::new(), BusParams::new()],
+            buses: std::array::from_fn(|_| BusParams::new()),
         }
     }
 

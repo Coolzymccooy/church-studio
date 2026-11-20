@@ -360,7 +360,8 @@ fn mixer_state_json_shape_matches_contract() {
             "index", "name", "trim_db", "polarity", "hpf_enabled", "hpf_hz", "gate_enabled",
             "gate_threshold_db", "eq_low_db", "eq_mid_db", "eq_high_db", "comp_enabled",
             "comp_threshold_db", "comp_ratio", "pan", "mute", "solo", "fader_db",
-            "send_main_db", "send_stream_db", "send_monitor_db", "monitor_post_fader",
+            "send_main_db", "send_stream_db", "send_monitor_db", "send_monitor2_db",
+            "send_monitor3_db", "monitor_post_fader",
             "voice_chain", "automix", "duck", "duck_depth_db", "automix_gr_db", "duck_gr_db",
         ])
     );
@@ -380,10 +381,13 @@ fn mixer_state_json_shape_matches_contract() {
 
     let buses = v["buses"].as_array().unwrap();
     let ids: Vec<&str> = buses.iter().map(|b| b["id"].as_str().unwrap()).collect();
-    assert_eq!(ids, vec!["main", "stream", "monitor"]);
+    assert_eq!(ids, vec!["main", "stream", "monitor", "monitor2", "monitor3"]);
     assert_eq!(
         keys(&buses[0]),
-        set(&["id", "fader_db", "mute", "limiter_ceiling_db", "leveler_enabled", "leveler_target_lufs"])
+        set(&[
+            "id", "output", "fader_db", "mute", "limiter_ceiling_db", "leveler_enabled",
+            "leveler_target_lufs",
+        ])
     );
     assert_eq!(buses[2]["limiter_ceiling_db"], -1.0);
     assert_eq!(buses[1]["leveler_enabled"], false);
@@ -446,7 +450,7 @@ fn mixer_meters_json_shape_and_clamping() {
     assert_eq!(s[1]["pre_db"], METER_FLOOR_DB);
 
     let b = v["buses"].as_array().unwrap();
-    assert_eq!(b.len(), 3);
+    assert_eq!(b.len(), 5);
     assert_eq!(
         keys(&b[0]),
         set(&["id", "peak_l_db", "peak_r_db", "rms_l_db", "rms_r_db", "leveler_db"])

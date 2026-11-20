@@ -143,7 +143,7 @@ impl MixerMeterSlots {
                     speech: AtomicBool::new(false),
                 })
                 .collect(),
-            buses: [BusSlot::new(), BusSlot::new(), BusSlot::new()],
+            buses: std::array::from_fn(|_| BusSlot::new()),
         }
     }
 

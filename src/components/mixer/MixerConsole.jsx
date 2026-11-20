@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { bankStrips, pickBank, stripBanks, stripCounts } from '../../lib/mixerBanks.js';
+import { EXTRA_MONITORS, activeExtraMonitors } from '../../lib/faceplateStrip.js';
 import { nextStripSize, readStripSize, stripRowPx, stripScale, stripSizeLabel } from '../../lib/stripScale.js';
 import InfoTip from '../faceplate/InfoTip.jsx';
 import Key from '../faceplate/Key.jsx';
@@ -14,6 +15,7 @@ import ChannelStrip from './ChannelStrip.jsx';
 import { useMixer } from './useMixer.js';
 
 const SIZE_KEY = 'tiwaton_strip_size';
+const isExtraMonitor = (id) => EXTRA_MONITORS.some((m) => m.bus === id);
 
 function loadSize() {
   try {
@@ -82,19 +84,27 @@ function BankRow({ banks, bank, onBank, stripCount, demoBanner, sizeLabel, onCyc
  * ("size fit") or to a fixed size. Driven by useMixer(controller), which works the same for the
  * Tauri controller and the in-memory demo controller.
  */
-export default function MixerConsole({ controller, demoBanner, onOpenObs }) {
+export default function MixerConsole({ controller, refreshKey, demoBanner, onOpenObs }) {
   const {
     state, loading, toast, dismissToast, metersRef, currentScene,
     setStripParam, setStripBool, renameStrip,
     setBusParam, setBusBool,
     saveScene, loadScene, deleteScene,
-  } = useMixer(controller);
-  const { size, scale, areaRef, cycle } = useStripSize(stripRowPx(state?.strips));
+  } = useMixer(controller, refreshKey);
+  const extraMonitors = activeExtraMonitors(state?.buses);
+  const { size, scale, areaRef, cycle } = useStripSize(stripRowPx(state?.strips, extraMonitors.length));
   const [bankId, setBankId] = useState('all');
 
   if (loading || !state) {
     return <div className="flex-1 grid place-items-center fp-sub">loading mixer</div>;
   }
+
+  // Start a mon 2 / mon 3 mix from mon 1: every channel's send copied across.
+  const copyMon1Into = (busId) => {
+    const target = EXTRA_MONITORS.find((m) => m.bus === busId);
+    if (!target) return;
+    state.strips.forEach((s) => setStripParam(s.index, target.send, s.send_monitor_db));
+  };
 
   const counts = stripCounts(state);
   const banks = stripBanks(counts.total, counts.ndi, counts.computer);
@@ -125,17 +135,19 @@ export default function MixerConsole({ controller, demoBanner, onOpenObs }) {
                   onSetParam={(key, value) => setStripParam(strip.index, key, value)}
                   onSetBool={(key, value) => setStripBool(strip.index, key, value)}
                   onRename={(name) => renameStrip(strip.index, name)}
+                  extraMonitors={extraMonitors}
                 />
               ))}
             </div>
             <div className="fp-buses" role="group" aria-label="Buses">
-              {state.buses.map((bus) => (
+              {state.buses.filter((bus) => !isExtraMonitor(bus.id) || extraMonitors.some((m) => m.bus === bus.id)).map((bus) => (
                 <BusStrip
                   key={bus.id}
                   bus={bus}
                   metersRef={metersRef}
                   onSetParam={(key, value) => setBusParam(bus.id, key, value)}
                   onSetBool={(key, value) => setBusBool(bus.id, key, value)}
+                  onCopyFromMon1={isExtraMonitor(bus.id) ? () => copyMon1Into(bus.id) : null}
                 />
               ))}
             </div>
