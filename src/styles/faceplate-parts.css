@@ -174,14 +174,15 @@
 .fp-buses { display: flex; gap: 4px; padding: 8px; flex-shrink: 0; overflow-y: auto; background: var(--fp-plate); border-left: 1px solid var(--fp-seam); }
 
 /* An armed two-press key: a bar along the bottom runs down the arm window, so the time left to
-   press again is visible. */
-.fp-key.fp-arm, .fp-key.fp-arm-r { position: relative; overflow: hidden; }
-.fp-key.fp-arm::after, .fp-key.fp-arm-r::after {
+   press again is visible. Only TwoPressKey (fp-timed) gets it: other armed keys, such as the
+   recorder's stop, stay armed with no time limit. */
+.fp-key.fp-timed { position: relative; overflow: hidden; }
+.fp-key.fp-timed::after {
   content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; transform-origin: left;
   background: currentColor; animation: fp-arm-drain var(--fp-arm-timeout) linear forwards;
 }
 @keyframes fp-arm-drain { from { transform: scaleX(1); } to { transform: scaleX(0); } }
-@media (prefers-reduced-motion: reduce) { .fp-key.fp-arm::after, .fp-key.fp-arm-r::after { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .fp-key.fp-timed::after { animation: none; } }
 
 /* A two-press key sits in a tip wrapper; the key still fills the cell its wrapper is given. */
 .fp-tipwrap > .fp-key { flex: 1 1 auto; min-width: 0; }
