@@ -54,11 +54,12 @@ fn valid_hostname(host: &str) -> bool {
 
 fn pem(path: &str) -> Result<Vec<u8>, String> {
     use std::io::Read;
-    let file = std::fs::File::open(Path::new(path)).map_err(|_| "Cannot open TLS file")?;
-    let meta = file.metadata().map_err(|_| "Cannot read TLS file")?;
+    let path = Path::new(path);
+    let meta = path.metadata().map_err(|_| "Cannot read TLS file")?;
     if !meta.is_file() || meta.len() > MAX_PEM_BYTES {
         return Err("Invalid TLS file".into());
     }
+    let file = std::fs::File::open(path).map_err(|_| "Cannot open TLS file")?;
     let mut data = Vec::new();
     file.take(MAX_PEM_BYTES + 1)
         .read_to_end(&mut data)

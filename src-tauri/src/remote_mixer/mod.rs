@@ -17,6 +17,7 @@ use axum::{Json, Router};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::time::Duration;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -143,7 +144,10 @@ async fn checked_request(
         return Status::FORBIDDEN.into_response();
     }
 
-    let mut response = next.run(request).await;
+    let mut response = match tokio::time::timeout(Duration::from_secs(2), next.run(request)).await {
+        Ok(response) => response,
+        Err(_) => Status::REQUEST_TIMEOUT.into_response(),
+    };
     let headers = response.headers_mut();
     for (name, value) in [
         ("cache-control", "no-store"),
@@ -185,8 +189,8 @@ fn authorized(auth: &Auth, headers: &HeaderMap) -> Option<Role> {
 }
 
 async fn state(State(ctx): State<Arc<Context>>, headers: HeaderMap) -> Response {
-    let auth = ctx.auth.lock();
-    let Some(role) = authorized(&auth, &headers) else {
+    let role = { authorized(&ctx.auth.lock(), &headers) };
+    let Some(role) = role else {
         return Status::UNAUTHORIZED.into_response();
     };
     match ctx.board.view(role) {
