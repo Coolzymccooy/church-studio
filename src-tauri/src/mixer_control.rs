@@ -598,7 +598,6 @@ impl MixerControl {
         Ok(())
     }
 
-    /// Assign the single voice chain, or clear it if this strip owns it.
     fn set_voice_chain(&self, index: usize, on: bool) -> Result<(), String> {
         if on {
             self.voice_strip.store(index, Relaxed);
