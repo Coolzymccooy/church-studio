@@ -1,9 +1,9 @@
 import { useRef, useState } from 'react';
-import { parseKnobText } from '../../lib/knobTravel.js';
+import { knobEntryValue } from '../../lib/knobTravel.js';
 
 /**
  * The value under a knob. It lights while the knob is turned. Double-click it to type a value:
- * Enter or leaving the field sets it, Escape cancels, and unreadable text changes nothing.
+ * Enter or leaving the field sets it, Escape cancels; unreadable or untouched text changes nothing.
  */
 export default function KnobReadout({ text, label, range, live, editing, disabled, onOpen, onClose }) {
   if (editing) return <KnobEntry text={text} label={label} range={range} onClose={onClose} />;
@@ -24,7 +24,7 @@ function KnobEntry({ text, label, range, onClose }) {
   const finish = (commit) => {
     if (done.current) return;
     done.current = true;
-    const next = commit ? parseKnobText(draft, range) : null;
+    const next = commit ? knobEntryValue(draft, text, range) : null;
     onClose(next === null ? undefined : next);
   };
   return (

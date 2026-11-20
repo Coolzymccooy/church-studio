@@ -111,3 +111,12 @@ export function parseKnobText(text, range) {
   const num = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)/.exec(t);
   return num ? clampToStep(Number(num[0]), range) : null;
 }
+
+/**
+ * The value to set when typed entry closes, or null to leave the knob alone. The entry opens on
+ * the display text, which can be rounded (+15 for 14.5 dB), so an unchanged draft sets nothing.
+ */
+export function knobEntryValue(draft, shownText, range) {
+  if (String(draft ?? '').trim() === String(shownText ?? '').trim()) return null;
+  return parseKnobText(draft, range);
+}

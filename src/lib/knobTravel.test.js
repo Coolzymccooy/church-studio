@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   DRAG_THROW_PX, DETENT_PX, knobTravelSpan, knobTravelFor, knobValueAt, knobDragTravel, knobDragValue,
-  knobWheelTravel, knobWheelStep, knobTakesWheel, parseKnobText,
+  knobWheelTravel, knobWheelStep, knobTakesWheel, parseKnobText, knobEntryValue,
 } from './knobTravel.js';
 
 const GAIN = { min: -12, max: 12, step: 0.5 };
@@ -121,4 +121,12 @@ test('pan reads c, l30 and r100', () => {
   assert.equal(parseKnobText('R 50', PAN), 0.5);
   assert.equal(parseKnobText('r100', PAN), 1);
   assert.equal(parseKnobText('c', GAIN), null, 'centre only means something on a bipolar knob');
+});
+
+test('closing typed entry without a change sets nothing, even when the display was rounded', () => {
+  const TRIM = { min: -20, max: 40, step: 0.5 };
+  assert.equal(knobEntryValue('+15', '+15', TRIM), null, 'trim at 14.5 shows +15 and must stay 14.5');
+  assert.equal(knobEntryValue(' +15 ', '+15', TRIM), null);
+  assert.equal(knobEntryValue('15', '+15', TRIM), 15, 'a retyped value is a real change');
+  assert.equal(knobEntryValue('abc', '+15', TRIM), null);
 });
