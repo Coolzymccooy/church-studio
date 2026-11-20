@@ -146,3 +146,106 @@ fn both_effects_fit_the_block_budget() {
     eprintln!("256 frames at 48 kHz: average {average:?}, worst {worst:?}");
     assert!(average.as_secs_f32() < BLOCK as f32 / SR * 0.25);
 }
+
+#[test]
+fn sustained_sine_sweep_stays_below_three_db_at_every_decay_setting() {
+    let mut worst = 0.0_f32;
+    let mut worst_setting = 0.0_f32;
+    for tenths in 3..=50 {
+        let decay = tenths as f32 / 10.0;
+        let mut reverb = Reverb::new(SR);
+        reverb.set_decay(decay, true);
+        let mut phase = 0.0_f64;
+        // Sweep the vocal band, then hold the original regression tone long
+        // enough to build up feedback at the longest decay.
+        let frames = SR as usize * 3;
+        for i in 0..frames {
+            let hz = if i < frames / 2 {
+                100.0 * 80.0_f64.powf(2.0 * i as f64 / frames as f64)
+            } else {
+                1_000.0
+            };
+            phase = (phase + std::f64::consts::TAU * hz / SR as f64) % std::f64::consts::TAU;
+            let dry = 0.5 * phase.sin() as f32;
+            for wet in reverb.tick([dry, dry]) {
+                if wet.abs() * 2.0 > worst {
+                    worst = wet.abs() * 2.0;
+                    worst_setting = decay;
+                }
+            }
+        }
+    }
+    eprintln!("Worst wet peak {:+.2} dB at {worst_setting}s", 20.0 * worst.log10());
+    assert!(worst <= 10f32.powf(3.0 / 20.0), "wet/input peak {worst}");
+}
+
+#[test]
+fn low_frequency_rt60_tracks_decay_at_all_engine_rates() {
+    for rate in [44_100.0, 48_000.0, 96_000.0] {
+        for decay in [0.3, 1.8, 5.0] {
+            let mut reverb = Reverb::new(rate);
+            reverb.set_decay(decay, true);
+            // Measure low-band RT60; feedback damping intentionally shortens
+            // the treble. Fit the Schroeder energy curve from -8 to -35 dB.
+            let filter = 1.0 - (-std::f32::consts::TAU * 160.0 / rate).exp();
+            let mut low = [0.0; 2];
+            let mut energy = Vec::with_capacity((rate * (decay * 2.0 + 0.25)) as usize);
+            for i in 0..energy.capacity() {
+                let x = if i == 0 { 1.0 } else { 0.0 };
+                let wet = reverb.tick([x, x]);
+                for (out, input) in low.iter_mut().zip(wet) {
+                    *out += filter * (input - *out);
+                }
+                energy.push(f64::from(low[0] * low[0] + low[1] * low[1]));
+            }
+            let mut remaining = 0.0;
+            for value in energy.iter_mut().rev() {
+                remaining += *value;
+                *value = remaining;
+            }
+            let crossing = |db: f64| {
+                let threshold = remaining * 10f64.powf(db / 10.0);
+                energy.iter().position(|e| *e <= threshold).unwrap() as f32 / rate
+            };
+            let measured = (crossing(-35.0) - crossing(-8.0)) * (60.0 / 27.0);
+            eprintln!("{rate} Hz {decay}s: measured {measured:.3}s");
+            assert!((measured / decay - 1.0).abs() < 0.20);
+        }
+    }
+}
+
+#[test]
+fn mixer_fx_gain_changes_and_retargeted_tempo_are_continuous() {
+    let params = Arc::new(MixerParams::new(1));
+    params.strips[0].send_db[BUS_MAIN].store(-90.0, Relaxed);
+    params.strips[0].fx_send_db[1].store(0.0, Relaxed);
+    params.fx.feedback.store(0.0, Relaxed);
+    let mut mixer = Mixer::new(SR as f64, BLOCK, 1, params.clone());
+    let mut last = 0.0;
+    let mut highest = 0.0_f32;
+    for block in 0..480 {
+        match block {
+            130 => params.strips[0].fx_send_db[1].store(-90.0, Relaxed),
+            145 => params.strips[0].fx_send_db[1].store(0.0, Relaxed),
+            260 => params.fx.returns[1].fader.store(-30.0, Relaxed),
+            270 => params.fx.returns[1].fader.store(0.0, Relaxed),
+            280 => params.fx.returns[1].mute.store(true, Relaxed),
+            290 => params.fx.returns[1].mute.store(false, Relaxed),
+            310 => params.fx.tempo.store(170.0, Relaxed),
+            312 => params.fx.tempo.store(230.0, Relaxed),
+            _ => {}
+        }
+        let input: [f32; BLOCK] = std::array::from_fn(|i| {
+            0.18 * (1.0 + ((block * BLOCK + i) as f32 * 0.0021).sin())
+        });
+        mixer.process(&[&input], BLOCK);
+        for &out in mixer.output(BUS_MAIN).0 {
+            if block >= 129 {
+                assert!((out - last).abs() < 0.003, "block {block}: {last} -> {out}");
+            }
+            last = out;
+            highest = highest.max(out);
+        }
+    }
+    assert!(highest > 0.3);
+}
