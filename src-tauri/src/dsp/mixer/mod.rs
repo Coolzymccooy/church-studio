@@ -184,8 +184,8 @@ impl Mixer {
         for (i, strip) in self.strips.iter_mut().enumerate() {
             let input = inputs.get(i).copied().unwrap_or(empty);
             let params = &params.strips[i];
-            let group_gain = groups.strip_gain(params.groups.capture());
-            strip.process_pre(input, n, params, any_solo, snap, group_gain);
+            strip.set_group_gain(groups.strip_gain(params.groups.capture()));
+            strip.process_pre(input, n, params, any_solo, snap);
         }
 
         // Automix and ducking gains across the strips, sample by sample.

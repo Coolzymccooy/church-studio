@@ -341,13 +341,14 @@ fn scene_round_trip_restores_and_clamps() {
 fn mixer_state_json_shape_matches_contract() {
     let m = MixerControl::new();
     let state = m.snapshot(2, true, vec!["Sermon".to_string()]);
-    let v = serde_json::to_value(&state).unwrap();
+    let mut v = serde_json::to_value(&state).unwrap();
+    let groups = v.as_object_mut().unwrap().remove("groups").expect("group state");
+    assert_eq!(groups["faders"], serde_json::json!([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]));
 
     assert_eq!(
-        keys(&v).into_iter().filter(|key| key != "groups").collect::<BTreeSet<_>>(),
+        keys(&v),
         set(&["inputChannels", "computerStrips", "ndiStrips", "netStrips", "running", "strips", "buses", "scenes"])
     );
-    assert_eq!(v["groups"]["faders"], serde_json::json!([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]));
     assert_eq!(v["ndiStrips"], 0);
     assert_eq!(v["netStrips"], 0);
     assert_eq!(v["inputChannels"], 2);

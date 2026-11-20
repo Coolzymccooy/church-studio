@@ -1,3 +1,5 @@
+import { applyGroupChange, defaultGroups, mockDcaDb } from './mixerGroups.js';
+
 /**
  * mixerEngine.js — UI-side mixer controller, matching
  * docs/specs/2026-09-27-mixer-live-contract.md exactly:
@@ -13,8 +15,6 @@
  *   faderDbToPosition / positionToFaderDb, formatDb, clampStripValue,
  *   validateSceneName and the applyStripChange reducer.
  */
-
-import { applyGroupChange, defaultGroups, mockDcaDb } from './mixerGroups.js';
 
 // ── Fader law ────────────────────────────────────────────────────────────────
 // Two-segment piecewise-linear law: −90 dB at the very bottom (position 0),
@@ -295,8 +295,7 @@ function createInitialMockState() {
 function cloneState(state) {
   return {
     ...state,
-    groups: { ...state.groups, faders: [...state.groups.faders] },
-    strips: state.strips.map((strip) => ({ ...strip, group_membership: { ...strip.group_membership } })),
+    strips: state.strips.map((strip) => ({ ...strip })),
     buses: state.buses.map((bus) => ({ ...bus })),
   };
 }
@@ -366,7 +365,12 @@ export function createMockMixerController() {
 
   function snapshot() {
     const cloned = cloneState(state);
-    return { ...cloned, scenes: Array.from(scenes.keys()) };
+    return {
+      ...cloned,
+      groups: { ...cloned.groups, faders: [...cloned.groups.faders] },
+      strips: cloned.strips.map((strip) => ({ ...strip, group_membership: { ...strip.group_membership } })),
+      scenes: Array.from(scenes.keys()),
+    };
   }
 
   function requireStrip(index) {

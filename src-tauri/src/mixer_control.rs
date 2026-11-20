@@ -1,4 +1,13 @@
 //! Control side of the live mixer (`docs/specs/2026-09-27-mixer-live-contract.md`).
+//!
+//! `MixerControl` is Tauri-managed state that exists whether or not the audio
+//! engine runs, so the UI can prepare a mix while stopped. It owns:
+//! - the shared `Arc<MixerParams>` (atomics only; the audio thread reads it),
+//! - the index of the strip carrying the voice chain (`AtomicUsize`, read by
+//!   the audio thread),
+//! - strip names (control side only; never touched by the audio thread).
+//!
+//! Everything here is pure (no Tauri, no files) so it can be unit-tested.
 use crate::dsp::mixer::leveler::{
     LEVELER_TARGET_DEFAULT, LEVELER_TARGET_MAX, LEVELER_TARGET_MIN,
 };
@@ -160,9 +169,6 @@ pub fn default_fader_db(index: usize) -> f32 {
     }
 }
 
-/// Contract defaults for strip `index` (differs from `StripParams::new()`:
-/// HPF on, gate threshold −45 dB, Monitor send 0 dB pre-fader, and every
-/// strip but the first with its fader off).
 fn reset_strip(index: usize, p: &StripParams) {
     p.groups.store(Membership::default());
     for spec in STRIP_F32_KEYS.iter() {
@@ -598,10 +604,7 @@ impl MixerControl {
         Ok(())
     }
 
-    /// At most one strip carries the voice chain: turning it on for a strip
-    /// moves it there (clearing the others). Turning it off on the strip that
-    /// holds it leaves no strip with the voice chain (`NO_VOICE_STRIP`);
-    /// turning it off on any other strip is a no-op.
+    /// Assign the single voice chain, or clear it if this strip owns it.
     fn set_voice_chain(&self, index: usize, on: bool) -> Result<(), String> {
         if on {
             self.voice_strip.store(index, Relaxed);
@@ -710,8 +713,6 @@ impl MixerControl {
         self.snapshot_outputs(layout, running, scenes, &BusOutputs::default())
     }
 
-    /// `snapshot_layout`, plus the device each bus plays on (`outputs`, in
-    /// `BUS_*` order; the running engine's `bus_outputs`).
     pub fn snapshot_outputs(
         &self,
         layout: StripLayout,

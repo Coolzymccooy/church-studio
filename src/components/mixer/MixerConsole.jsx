@@ -8,12 +8,12 @@ import Key from '../faceplate/Key.jsx';
 import Lamp from '../faceplate/Lamp.jsx';
 import { ScaleContext } from '../faceplate/scaleContext.js';
 import RecordPanel from '../recorder/RecordPanel.jsx';
-import DcaBank from './DcaBank.jsx';
 import BusStrip from './BusStrip.jsx';
 import ObsPlate from './ObsPlate.jsx';
 import ScenesPlate from './ScenesPlate.jsx';
 import ChannelStrip from './ChannelStrip.jsx';
 import { useMixer } from './useMixer.js';
+import DcaBank from './DcaBank.jsx';
 
 const SIZE_KEY = 'tiwaton_strip_size';
 const isExtraMonitor = (id) => EXTRA_MONITORS.some((m) => m.bus === id);
@@ -89,14 +89,19 @@ function BankRow({ banks, bank, onBank, stripCount, demoBanner, sizeLabel, onCyc
 export default function MixerConsole({ controller, refreshKey, demoBanner, onOpenObs }) {
   const [showGroups, setShowGroups] = useState(false);
   const {
+    setGroup,
     state, loading, toast, dismissToast, metersRef, currentScene,
     setStripParam, setStripBool, renameStrip,
     setBusParam, setBusBool,
-    saveScene, loadScene, deleteScene, setGroup,
+    saveScene, loadScene, deleteScene,
   } = useMixer(controller, refreshKey);
   const extraMonitors = activeExtraMonitors(state?.buses);
   const { size, scale, areaRef, cycle } = useStripSize(stripRowPx(state?.strips, extraMonitors.length));
-  const [bankId, setBankId] = useState('all');
+  const [bankId, selectBank] = useState('all');
+  const setBankId = (id) => {
+    selectBank(id);
+    setShowGroups(false);
+  };
 
   if (loading || !state) {
     return <div className="flex-1 grid place-items-center fp-sub">loading mixer</div>;
@@ -119,7 +124,7 @@ export default function MixerConsole({ controller, refreshKey, demoBanner, onOpe
       <BankRow
         banks={banks}
         bank={bank}
-        onBank={(id) => { setBankId(id); setShowGroups(false); }}
+        onBank={setBankId}
         stripCount={state.strips.length}
         demoBanner={demoBanner}
         sizeLabel={stripSizeLabel(size)}
@@ -130,9 +135,8 @@ export default function MixerConsole({ controller, refreshKey, demoBanner, onOpe
 
       <div ref={areaRef} className="flex-1 flex overflow-hidden min-h-0">
         <ScaleContext.Provider value={scale}>
-          <div className="fp-desk-scale" style={{ zoom: scale }}>
-            {showGroups && state.groups && <DcaBank groups={state.groups} strips={state.strips} onChange={setGroup} />}
-            <div className={showGroups ? 'hidden' : 'flex-1 flex gap-2 p-2 overflow-x-auto'}>
+          <div className="fp-desk-scale" style={{ zoom: scale }} data-group-bank={showGroups || undefined}>
+            <div className="flex-1 flex gap-2 p-2 overflow-x-auto">
               {shown.map((strip) => (
                 <ChannelStrip
                   key={strip.index}
@@ -145,6 +149,7 @@ export default function MixerConsole({ controller, refreshKey, demoBanner, onOpe
                 />
               ))}
             </div>
+            {showGroups && state.groups && <DcaBank groups={state.groups} strips={state.strips} onChange={setGroup} />}
             <div className="fp-buses" role="group" aria-label="Buses">
               {state.buses.filter((bus) => !isExtraMonitor(bus.id) || extraMonitors.some((m) => m.bus === bus.id)).map((bus) => (
                 <BusStrip
