@@ -24,7 +24,7 @@ The current local key was generated without a password, so `TAURI_SIGNING_PRIVAT
 
 ## Release flow
 
-1. Push a tag like `v1.2.1`
+1. Push a tag like `v1.2.1` (or, with no Actions, run `npm run release:local`; see `docs/release-local.md`)
 2. GitHub Actions builds the app and signs updater artifacts
 3. The release must publish `latest.json` plus the signed installers
 4. Installed desktop apps will prompt users to install the update on next launch

@@ -20,7 +20,11 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "node scripts/tauri-build.mjs",
-    "tauri:release": "node scripts/tauri-build.mjs --release"
+    "tauri:release": "node scripts/tauri-build.mjs --release",
+    "release:dry-run": "node scripts/release-local.mjs --dry-run",
+    "release:local": "node scripts/release-local.mjs",
+    "deploy:web": "node scripts/deploy-web.mjs",
+    "test:release": "node --test scripts/release/*.test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
