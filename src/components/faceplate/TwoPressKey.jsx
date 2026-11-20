@@ -31,7 +31,7 @@ export default function TwoPressKey({
     <>
       <Key
         lit={armed ? null : lit}
-        className={[armed && armCls, className].filter(Boolean).join(' ')}
+        className={[armed && armCls, armed && 'fp-timed', className].filter(Boolean).join(' ')}
         aria-label={armed ? `${label}: press again to confirm` : label}
         onClick={press}
         onKeyDown={onKeyDown}
