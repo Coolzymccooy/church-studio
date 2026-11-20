@@ -13,6 +13,7 @@ export function stripRowPx(strips, extraMonitorRows = 0) {
   if (has((s) => 'automix' in s && 'duck' in s)) px += EXTRA_ROW_PX.keys;
   if (has((s) => s.duck)) px += EXTRA_ROW_PX.knob;
   if (has((s) => s.automix || s.duck)) px += EXTRA_ROW_PX.readout;
+  if (has((s) => 'send_fx_a_db' in s)) px += EXTRA_ROW_PX.knob;
   if (extraMonitorRows > 0) px += EXTRA_ROW_PX.knob;
   return px;
 }

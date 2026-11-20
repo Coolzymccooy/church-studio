@@ -1,5 +1,6 @@
 //! Mixer scenes: a by-value snapshot of every strip and bus control that can
 //! be saved as JSON and recalled onto the live `MixerParams`.
+use super::fx_params::{FxScene, FX_COUNT};
 use super::params::{
     BusParams, MixerParams, StripParams, DUCK_DEPTH_DEFAULT_DB, MIN_DB, NUM_BUSES,
 };
@@ -28,6 +29,8 @@ pub struct StripScene {
     /// mon 3 existed carry three; the missing sends load as −90 (off).
     #[serde(deserialize_with = "sends_padded")]
     pub send_db: Vec<f32>,
+    #[serde(default = "fx_sends_off")]
+    pub fx_send_db: [f32; FX_COUNT],
     pub monitor_post_fader: bool,
     /// Missing in scene files saved before automix existed: off.
     #[serde(default)]
@@ -36,6 +39,10 @@ pub struct StripScene {
     pub duck: bool,
     #[serde(default = "default_duck_depth")]
     pub duck_depth_db: f32,
+}
+
+fn fx_sends_off() -> [f32; FX_COUNT] {
+    [MIN_DB; FX_COUNT]
 }
 
 fn default_duck_depth() -> f32 {
@@ -71,6 +78,7 @@ impl StripScene {
             solo: p.solo.load(Relaxed),
             fader_db: p.fader_db.load(Relaxed),
             send_db: p.send_db.iter().map(|s| s.load(Relaxed)).collect(),
+            fx_send_db: std::array::from_fn(|i| p.fx_send_db[i].load(Relaxed)),
             monitor_post_fader: p.monitor_post_fader.load(Relaxed),
             automix: p.automix.load(Relaxed),
             duck: p.duck.load(Relaxed),
@@ -96,6 +104,9 @@ impl StripScene {
         p.solo.store(self.solo, Relaxed);
         p.fader_db.store(self.fader_db, Relaxed);
         for (dst, &src) in p.send_db.iter().zip(self.send_db.iter()) {
+            dst.store(src, Relaxed);
+        }
+        for (dst, src) in p.fx_send_db.iter().zip(self.fx_send_db) {
             dst.store(src, Relaxed);
         }
         p.monitor_post_fader.store(self.monitor_post_fader, Relaxed);
@@ -140,6 +151,8 @@ pub struct MixerScene {
     pub name: String,
     pub strips: Vec<StripScene>,
     pub buses: Vec<BusScene>,
+    #[serde(default)]
+    pub fx: FxScene,
 }
 
 impl MixerScene {
@@ -152,6 +165,7 @@ impl MixerScene {
             name: name.to_string(),
             strips: params.strips.iter().map(StripScene::capture).collect(),
             buses: params.buses.iter().map(BusScene::capture).collect(),
+            fx: FxScene::capture(&params.fx),
         }
     }
 
@@ -164,6 +178,7 @@ impl MixerScene {
         for (scene, p) in self.buses.iter().zip(params.buses.iter()).take(NUM_BUSES) {
             scene.apply(p);
         }
+        self.fx.apply(&params.fx);
     }
 }
 

@@ -1,13 +1,5 @@
 //! Control side of the live mixer (`docs/specs/2026-09-27-mixer-live-contract.md`).
-//!
-//! `MixerControl` is Tauri-managed state that exists whether or not the audio
-//! engine runs, so the UI can prepare a mix while stopped. It owns:
-//! - the shared `Arc<MixerParams>` (atomics only; the audio thread reads it),
-//! - the index of the strip carrying the voice chain (`AtomicUsize`, read by
-//!   the audio thread),
-//! - strip names (control side only; never touched by the audio thread).
-//!
-//! Everything here is pure (no Tauri, no files) so it can be unit-tested.
+use crate::dsp::mixer::fx_params::FX_SEND_KEYS;
 use crate::dsp::mixer::leveler::{
     LEVELER_TARGET_DEFAULT, LEVELER_TARGET_MAX, LEVELER_TARGET_MIN,
 };
@@ -55,9 +47,10 @@ const STRIP_F32_KEYS: &[F32Key] = &[
     ("send_main_db", -90.0, 10.0, 0.0),
     ("send_stream_db", -90.0, 10.0, 0.0),
     ("send_monitor_db", -90.0, 10.0, 0.0),
-    // Mon 2 / mon 3: off by default, so a new monitor mix starts silent.
     ("send_monitor2_db", -90.0, 10.0, -90.0),
     ("send_monitor3_db", -90.0, 10.0, -90.0),
+    (FX_SEND_KEYS[0], -90.0, 10.0, -90.0),
+    (FX_SEND_KEYS[1], -90.0, 10.0, -90.0),
     ("duck_depth_db", 0.0, DUCK_DEPTH_MAX_DB, DUCK_DEPTH_DEFAULT_DB),
 ];
 
@@ -113,7 +106,7 @@ fn strip_f32<'a>(p: &'a StripParams, key: &str) -> Option<&'a AtomicF32> {
         "send_monitor2_db" => &p.send_db[BUS_MONITOR2],
         "send_monitor3_db" => &p.send_db[BUS_MONITOR3],
         "duck_depth_db" => &p.duck_depth_db,
-        _ => return None,
+        key => &p.fx_send_db[FX_SEND_KEYS.iter().position(|name| *name == key)?],
     };
     Some(field)
 }
@@ -678,6 +671,8 @@ impl MixerControl {
             send_monitor_db: f("send_monitor_db"),
             send_monitor2_db: f("send_monitor2_db"),
             send_monitor3_db: f("send_monitor3_db"),
+            send_fx_a_db: f(FX_SEND_KEYS[0]),
+            send_fx_b_db: f(FX_SEND_KEYS[1]),
             monitor_post_fader: b("monitor_post_fader"),
             voice_chain: self.voice_strip.load(Relaxed) == index,
             automix: b("automix"),
@@ -688,16 +683,11 @@ impl MixerControl {
         }
     }
 
-    /// Build the `MixerState` JSON model. `input_channels` is the running
-    /// engine's channel count (1 when stopped); one strip is listed per
-    /// input channel, capped at `MAX_STRIPS`.
     #[cfg(test)] // tests only; the app uses `snapshot_layout`
     pub fn snapshot(&self, input_channels: u32, running: bool, scenes: Vec<String>) -> MixerState {
         self.snapshot_with_ndi(input_channels, 0, running, scenes)
     }
 
-    /// `snapshot`, plus one strip per running NDI input after the hardware
-    /// strips (`StripLayout`).
     #[cfg(test)] // tests only; the app uses `snapshot_layout`
     pub fn snapshot_with_ndi(
         &self,
@@ -760,6 +750,7 @@ impl MixerControl {
             running,
             strips,
             buses,
+            fx_returns: self.fx_state(),
             scenes,
         }
     }

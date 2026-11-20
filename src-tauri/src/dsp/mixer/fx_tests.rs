@@ -40,7 +40,11 @@ fn delay_repeats_on_the_beat_at_the_requested_feedback() {
     let mut delay = Delay::new(SR);
     delay.configure(120.0, 25.0, true);
     for i in 0..96_001 {
-        let x = if i == 0 { [1.0, -0.5] } else { [f32::from_bits(1), f32::NAN] };
+        let x = if i == 0 {
+            [1.0, -0.5]
+        } else {
+            [f32::from_bits(1), f32::NAN]
+        };
         let out = delay.tick(x);
         let expected = if i != 0 && i % 24_000 == 0 {
             0.25f32.powi(i / 24_000 - 1)
@@ -76,7 +80,11 @@ fn tempo_crossfade_and_reverb_decay_change_have_no_parameter_step() {
 
 #[test]
 fn sends_follow_fader_and_mute_and_returns_route_independently() {
-    for (fader, mute, audible) in [(0.0, false, true), (-90.0, false, false), (0.0, true, false)] {
+    for (fader, mute, audible) in [
+        (0.0, false, true),
+        (-90.0, false, false),
+        (0.0, true, false),
+    ] {
         let params = Arc::new(MixerParams::new(1));
         let input = &params.strips[0];
         input.fader_db.store(fader, Relaxed);
@@ -108,21 +116,31 @@ fn sends_follow_fader_and_mute_and_returns_route_independently() {
 
 #[test]
 fn both_effects_fit_the_block_budget() {
-    let params = Arc::new(MixerParams::new(1));
-    for send in &params.strips[0].fx_send_db {
-        send.store(-6.0, Relaxed);
+    use super::fx_rack::FxRack;
+    use super::smooth::ramp_samples;
+    use super::{StereoBuffer, NUM_BUSES};
+
+    let params = MixerParams::new(1);
+    let mut rack = FxRack::new(SR, BLOCK, ramp_samples(SR as f64));
+    let mut buses: [StereoBuffer; NUM_BUSES] = std::array::from_fn(|_| StereoBuffer::new(BLOCK));
+    for send in &mut rack.sends {
+        for (i, (left, right)) in send.left.iter_mut().zip(&mut send.right).enumerate() {
+            *left = (i as f32 * 0.5).sin() * 0.04;
+            *right = *left;
+        }
     }
-    let mut mixer = Mixer::new(SR as f64, BLOCK, 1, params);
-    let input = std::array::from_fn::<_, BLOCK, _>(|i| (i as f32 * 0.5).sin() * 0.04);
     let mut elapsed = Duration::ZERO;
     let mut worst = Duration::ZERO;
-    for _ in 0..800 {
+    for block in 0..800 {
+        for bus in &mut buses {
+            bus.clear(BLOCK);
+        }
         let start = Instant::now();
-        mixer.process(&[&input], BLOCK);
+        rack.process(&mut buses, BLOCK, &params.fx, false, block == 0);
         let block = start.elapsed();
         elapsed += block;
         worst = worst.max(block);
-        std::hint::black_box(mixer.output(BUS_MAIN));
+        std::hint::black_box(&buses);
     }
     let average = elapsed / 800;
     eprintln!("256 frames at 48 kHz: average {average:?}, worst {worst:?}");

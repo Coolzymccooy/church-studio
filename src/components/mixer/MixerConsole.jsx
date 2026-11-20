@@ -1,3 +1,4 @@
+import { AudioWaveform } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { bankStrips, pickBank, stripBanks, stripCounts } from '../../lib/mixerBanks.js';
@@ -8,6 +9,8 @@ import Key from '../faceplate/Key.jsx';
 import Lamp from '../faceplate/Lamp.jsx';
 import { ScaleContext } from '../faceplate/scaleContext.js';
 import RecordPanel from '../recorder/RecordPanel.jsx';
+import { createTapTempo } from '../../lib/mixerFx.js';
+import FxReturnStrip from './FxReturnStrip.jsx';
 import BusStrip from './BusStrip.jsx';
 import ObsPlate from './ObsPlate.jsx';
 import ScenesPlate from './ScenesPlate.jsx';
@@ -58,7 +61,8 @@ function BankRow({ banks, bank, onBank, stripCount, demoBanner, sizeLabel, onCyc
       {banks.length > 1 && (
         <div className="fp-keys" role="tablist" aria-label="Banks">
           {banks.map((b) => (
-            <Key key={b.id} role="tab" aria-selected={b.id === bank.id} lit={b.id === bank.id ? 'sel' : null} onClick={() => onBank(b.id)}>
+            <Key key={b.id} className={b.id === "fx" ? "inline-flex items-center gap-1" : ""} role="tab" aria-selected={b.id === bank.id} lit={b.id === bank.id ? 'sel' : null} onClick={() => onBank(b.id)}>
+              {b.id === 'fx' && <AudioWaveform size={14} strokeWidth={1.75} aria-hidden="true" />}
               {b.label}
             </Key>
           ))}
@@ -88,12 +92,13 @@ export default function MixerConsole({ controller, refreshKey, demoBanner, onOpe
   const {
     state, loading, toast, dismissToast, metersRef, currentScene,
     setStripParam, setStripBool, renameStrip,
-    setBusParam, setBusBool,
+    setBusParam, setBusBool, setFxControl,
     saveScene, loadScene, deleteScene,
   } = useMixer(controller, refreshKey);
   const extraMonitors = activeExtraMonitors(state?.buses);
   const { size, scale, areaRef, cycle } = useStripSize(stripRowPx(state?.strips, extraMonitors.length));
   const [bankId, setBankId] = useState('all');
+  const [tapTempo] = useState(createTapTempo);
 
   if (loading || !state) {
     return <div className="flex-1 grid place-items-center fp-sub">loading mixer</div>;
@@ -107,9 +112,20 @@ export default function MixerConsole({ controller, refreshKey, demoBanner, onOpe
   };
 
   const counts = stripCounts(state);
-  const banks = stripBanks(counts.total, counts.ndi, counts.computer);
+  const inputBanks = stripBanks(counts.total, counts.ndi, counts.computer);
+  const returns = state.fxReturns ?? [];
+  const banks = returns.length ? [...inputBanks, { id: 'fx', label: 'FX' }] : inputBanks;
   const bank = pickBank(banks, bankId);
-  const shown = bankStrips(state.strips, bank);
+  const fxBank = bank.id === 'fx';
+  const shown = fxBank ? [] : bankStrips(state.strips, bank);
+  const tempo = (bpm) => {
+    tapTempo.reset();
+    setFxControl('fx_b', 'tempo_bpm', bpm);
+  };
+  const tap = () => {
+    const bpm = tapTempo(performance.now());
+    if (bpm !== null) setFxControl('fx_b', 'tempo_bpm', bpm);
+  };
 
   return (
     <div className="relative flex-1 flex flex-col min-h-0">
@@ -117,7 +133,7 @@ export default function MixerConsole({ controller, refreshKey, demoBanner, onOpe
         banks={banks}
         bank={bank}
         onBank={setBankId}
-        stripCount={state.strips.length}
+        stripCount={fxBank ? returns.length : state.strips.length}
         demoBanner={demoBanner}
         sizeLabel={stripSizeLabel(size)}
         onCycleSize={cycle}
@@ -127,6 +143,10 @@ export default function MixerConsole({ controller, refreshKey, demoBanner, onOpe
         <ScaleContext.Provider value={scale}>
           <div className="fp-desk-scale" style={{ zoom: scale }}>
             <div className="flex-1 flex gap-2 p-2 overflow-x-auto">
+              {fxBank && returns.map((ret, index) => (
+                <FxReturnStrip key={ret.id} ret={ret} index={index} extraMonitors={extraMonitors} metersRef={metersRef}
+                  onSet={(key, value) => setFxControl(ret.id, key, value)} onTempo={tempo} onTap={tap} />
+              ))}
               {shown.map((strip) => (
                 <ChannelStrip
                   key={strip.index}

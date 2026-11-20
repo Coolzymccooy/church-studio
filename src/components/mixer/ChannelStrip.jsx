@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { faderDbToPosition, formatDb, positionToFaderDb } from '../../lib/mixerEngine.js';
 import {
-  DUCK_KNOB, STRIP_KNOBS, STRIP_ROWS, grText, hasAutomix, reductionText, stripColour, stripGateTone,
+  DUCK_KNOB, FX_SEND_KNOBS, STRIP_KNOBS, STRIP_ROWS, grText, hasAutomix, reductionText, stripColour, stripGateTone,
 } from '../../lib/faceplateStrip.js';
 import { Fader, Glass, Key, Knob, MeterLadder } from '../faceplate/index.js';
 
@@ -169,6 +169,7 @@ export default function ChannelStrip({ strip, metersRef, onSetParam, onSetBool, 
       {knobRow(rowDyn)}
       {knobRow(rowEq)}
       {knobRow(rowSends)}
+      {'send_fx_a_db' in strip && knobRow(FX_SEND_KNOBS)}
       {extraMonitors.length > 0 && knobRow(extraMonitors.map((m) => m.knob))}
       <KeyPair>{boolKey('monitor_post_fader', 'post', 'sel', 'monitor send after fader')}{boolKey('voice_chain', 'voice', 'orange', 'voice chain')}</KeyPair>
       {hasAutomix(strip) && (
