@@ -11,18 +11,24 @@ const PAGE = 5;
 const SOURCE_WORD = { desk: 'from the desk', obs: 'from OBS', lumina: 'from Lumina', link: 'from Lumina link' };
 
 function SceneKey({ n, name, current, deleting, onLoad, onDelete }) {
-  const body = (
+  const face = (top) => (
     <>
-      <span className="fp-skey-n">{n}</span>
+      <span className="fp-skey-n">{top}</span>
       <span className="fp-skey-l">{name}</span>
     </>
   );
   if (deleting) {
-    return <TwoPressKey label={`delete scene ${name}`} tone="red" className="fp-skey" onConfirm={() => onDelete(name)}>{body}</TwoPressKey>;
+    return (
+      <TwoPressKey label={`delete scene ${name}`} tone="red" className="fp-skey" armedChildren={face('delete?')}
+        onConfirm={() => onDelete(name)}>
+        {face(n)}
+      </TwoPressKey>
+    );
   }
   return (
-    <TwoPressKey label={`load scene ${name}`} lit={current ? 'sel' : null} className="fp-skey" onConfirm={() => onLoad(name)}>
-      {body}
+    <TwoPressKey label={`load scene ${name}`} lit={current ? 'sel' : null} className="fp-skey" armedChildren={face('load?')}
+      onConfirm={() => onLoad(name)}>
+      {face(n)}
     </TwoPressKey>
   );
 }

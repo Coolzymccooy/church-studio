@@ -116,7 +116,12 @@ function RecordSection({ strips, engineRunning }) {
         <Glass className="fp-timer" aria-label="Elapsed recording time">
           {formatElapsed(recording ? status.elapsedSeconds : 0)}
         </Glass>
-        {recording && confirmStop && <Key onClick={() => setArmedKey(null)}>keep</Key>}
+        {recording && confirmStop && (
+          <>
+            <span className="fp-arm-ask" aria-hidden="true">stop?</span>
+            <Key onClick={() => setArmedKey(null)}>keep</Key>
+          </>
+        )}
         {!recording && (
           <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Title" maxLength={60}
             aria-label="Recording title" className="fp-field" style={{ flex: 1, minWidth: 0 }} />
