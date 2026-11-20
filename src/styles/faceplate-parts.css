@@ -172,3 +172,14 @@
 .fp-scrib.fp-c-bus { color: var(--fp-bus-line); }
 .fp-scrib .fp-busname { grid-column: 1 / 3; font: var(--fp-weight-semibold) var(--fp-text-md)/1.1 var(--fp-font-legend); }
 .fp-buses { display: flex; gap: 4px; padding: 8px; flex-shrink: 0; overflow-y: auto; background: var(--fp-plate); border-left: 1px solid var(--fp-seam); }
+
+/* An armed two-press key: a bar along the bottom runs down the arm window, so the time left to
+   press again is visible. Only TwoPressKey (fp-timed) gets it: other armed keys, such as the
+   recorder's stop, stay armed with no time limit. */
+.fp-key.fp-timed { position: relative; overflow: hidden; }
+.fp-key.fp-timed::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; transform-origin: left;
+  background: currentColor; animation: fp-arm-drain var(--fp-arm-timeout) linear forwards;
+}
+@keyframes fp-arm-drain { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+@media (prefers-reduced-motion: reduce) { .fp-key.fp-timed::after { animation: none; } }

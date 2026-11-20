@@ -14,7 +14,13 @@ function OutputKey({ kind, active, timecode, disabled, onRun }) {
   const lit = active ? (kind === 'stream' ? 'green' : 'red') : null;
   const label = active ? `stop ${kind === 'stream' ? 'stream' : 'recording'}` : (kind === 'stream' ? 'go live' : 'start recording');
   return (
-    <TwoPressKey label={label} tone={active ? 'red' : 'amber'} lit={lit} className="fp-okey" disabled={disabled} onConfirm={onRun}>
+    <TwoPressKey label={label} tone={active ? 'red' : 'amber'} lit={lit} className="fp-okey" disabled={disabled} onConfirm={onRun}
+      armedChildren={(
+        <>
+          <span>{active ? 'stop?' : `${legend.text}?`}</span>
+          <span className="fp-num fp-okey-tc">{legend.tc}</span>
+        </>
+      )}>
       <span>{legend.text}</span>
       <span className="fp-num fp-okey-tc">{legend.tc}</span>
     </TwoPressKey>
