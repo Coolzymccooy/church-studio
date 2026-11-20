@@ -122,7 +122,7 @@ export default function RemoteMixerPanel() {
           {pairingLabel && (
             <div className="fp-row">
               <Lamp tone={pairing === 'ready' ? 'g' : 'a'}>{pairingLabel}</Lamp>
-              {blocked > 0 && <InfoTip label="Pairing backoff">
+              {pairing === 'ready' && blocked > 0 && <InfoTip label="Pairing backoff">
                 {blocked} {blocked === 1 ? 'address is' : 'addresses are'} in backoff. Other devices can still use the active code.
               </InfoTip>}
             </div>
