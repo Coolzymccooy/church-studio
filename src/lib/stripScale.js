@@ -3,7 +3,7 @@ export const STRIP_SIZES = ['fit', '1', '1.25', '1.5'];
 /** Height in CSS px that a strip row needs at scale 1 (strip plus the row padding). */
 export const STRIP_ROW_PX = 590;
 /** Extra height for the optional strip rows: the auto/duck keys, the duck knob, the readout. */
-export const EXTRA_ROW_PX = { keys: 28, knob: 52, readout: 24 };
+export const EXTRA_ROW_PX = { keys: 28, knob: 52, readout: 38 };
 
 /** Height the tallest strip needs, given which optional rows any strip shows. */
 export function stripRowPx(strips, extraMonitorRows = 0) {

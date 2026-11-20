@@ -41,6 +41,9 @@
   --fp-cap-eq: #E3D8C0;
   --fp-cap-pan: #8C939C;
   --fp-cap-send: #B7B0A0;
+  /* knob skirt and its knurling: dark in every finish, like the caps */
+  --fp-knob-skirt: #1B1D21;
+  --fp-knob-knurl: #484E57;
 
   /* channel scribble-strip colours, picked per strip by the operator */
   --fp-ch-amber: #E9A23B;
@@ -205,6 +208,8 @@
   --color-fp-cap-eq: var(--fp-cap-eq);
   --color-fp-cap-pan: var(--fp-cap-pan);
   --color-fp-cap-send: var(--fp-cap-send);
+  --color-fp-knob-skirt: var(--fp-knob-skirt);
+  --color-fp-knob-knurl: var(--fp-knob-knurl);
   --color-fp-ch-amber: var(--fp-ch-amber);
   --color-fp-ch-clay: var(--fp-ch-clay);
   --color-fp-ch-teal: var(--fp-ch-teal);

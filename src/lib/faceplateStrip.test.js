@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { paramRange } from './mixerEngine.js';
+import { knobFraction } from './faceplateControls.js';
+import { knobDragValue } from './knobTravel.js';
 import {
   STRIP_KNOBS, STRIP_ROWS, STRIP_COLOURS, stripColour, stripGateTone, grText, panText, sendText, compactDb,
   DUCK_KNOB, hasAutomix, reductionText, activeExtraMonitors, EXTRA_MONITORS,
@@ -139,4 +141,18 @@ test('activeExtraMonitors lists only mon 2 / mon 3 buses that have a device', ()
 test('mon 2 / mon 3 knobs default to off', () => {
   assert.equal(STRIP_KNOBS.mon2.defaultValue, -90);
   assert.equal(STRIP_KNOBS.mon3.param, 'send_monitor3_db');
+  for (const k of [STRIP_KNOBS.mon2, STRIP_KNOBS.mon3]) {
+    assert.equal(k.taper, STRIP_KNOBS.mon.taper, 'turns like the mon 1 send');
+    assert.equal(k.detent, 0);
+  }
+});
+
+test('knob definitions: sends turn like faders, hz turns by octaves, 0 dB and centre are detents', () => {
+  const { main, hz, trim, pan, mid } = STRIP_KNOBS;
+  assert.equal(knobFraction(0, main), 0.75);
+  assert.equal(knobFraction(10, main), 1);
+  assert.equal(knobFraction(40, hz).toFixed(3), '0.231');
+  for (const k of [main, trim, pan, mid]) assert.equal(k.detent, 0, k.label);
+  assert.equal(knobDragValue(0, -3, main), 0, 'a send rests at 0 dB');
+  assert.equal(knobDragValue(-90, -100, main), -30);
 });

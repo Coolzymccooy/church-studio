@@ -42,27 +42,37 @@ function StripDyn({ getMeter, gateEnabled }) {
  * Auto-mix: a green lamp while the strip hears speech, then "mix -n". Duck: an amber lamp while
  * the strip is being dipped, then "duck -n".
  */
+const AUTO_TIP = {
+  automix: 'Speech: lit while this mic hears a voice. The reading is how far auto-mix has turned this mic down (0 while it is the one talking).',
+  duck: 'Ducking: lit while this music strip is being turned down because someone is talking. The reading is how far it is down.',
+};
+
 function StripAuto({ getMeter, mode }) {
+  const boxRef = useRef(null);
   const ledRef = useRef(null);
   const textRef = useRef(null);
+  const automix = mode === 'automix';
   useEffect(() => {
     let raf = 0;
     const tick = () => {
       const m = getMeter();
-      const db = mode === 'automix' ? m.automix_gr_db : m.duck_gr_db;
-      const lit = mode === 'automix' ? Boolean(m.speech) : db >= 0.1;
-      if (ledRef.current) ledRef.current.className = lit ? `fp-led ${mode === 'automix' ? 'fp-led-g' : 'fp-led-a'}` : 'fp-led';
-      if (textRef.current) textRef.current.textContent = reductionText(mode === 'automix' ? 'mix' : 'duck', db);
+      const db = automix ? m.automix_gr_db : m.duck_gr_db;
+      const lit = automix ? Boolean(m.speech) : db >= 0.1;
+      if (ledRef.current) ledRef.current.className = lit ? `fp-led ${automix ? 'fp-led-g' : 'fp-led-a'}` : 'fp-led';
+      if (boxRef.current) boxRef.current.classList.toggle('fp-auto-on', lit);
+      if (textRef.current) textRef.current.textContent = reductionText(automix ? 'mix' : 'duck', db);
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [getMeter, mode]);
-  const word = mode === 'automix' ? 'speech' : 'ducking';
+  }, [getMeter, automix]);
   return (
-    <Glass className="fp-dyn" aria-label={mode === 'automix' ? 'auto-mix reduction' : 'duck reduction'}>
-      <span className="fp-lamp"><span ref={ledRef} className="fp-led" aria-label={word} /></span>
-      <span ref={textRef}>{mode === 'automix' ? 'mix 0.0' : 'duck 0'}</span>
+    <Glass className="fp-auto" title={AUTO_TIP[mode]} aria-label={automix ? 'speech and auto-mix reduction' : 'ducking and duck reduction'}>
+      <span ref={boxRef} className="fp-auto-lamp">
+        <span ref={ledRef} className="fp-led" aria-hidden="true" />
+        <span>{automix ? 'speech' : 'ducking'}</span>
+      </span>
+      <span ref={textRef} className="fp-auto-val">{automix ? 'mix 0.0' : 'duck 0'}</span>
     </Glass>
   );
 }
@@ -123,6 +133,8 @@ export default function ChannelStrip({ strip, metersRef, onSetParam, onSetBool, 
         max={k.max}
         step={k.step}
         bipolar={k.bipolar}
+        detent={k.detent}
+        taper={k.taper}
         defaultValue={k.defaultValue}
         value={value}
         valueText={k.fmt(value)}

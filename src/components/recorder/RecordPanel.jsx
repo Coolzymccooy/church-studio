@@ -14,6 +14,7 @@ import {
   toggleArmedStrip,
 } from '../../lib/recorder.js';
 import { useRecorder } from './useRecorder.js';
+import RecordExportKeys from './RecordExportKeys.jsx';
 import RecordTrackChips from './RecordTrackChips.jsx';
 
 const HEALTH_CLASS = { ok: '', warn: 'fp-caution', error: 'fp-fault' };
@@ -103,7 +104,7 @@ function RecordSection({ strips, engineRunning }) {
       <div className="fp-plate-hd">
         <span>
           Record
-          <InfoTip label="Record">One WAV per armed channel, raw, plus the Stream mix as it went to broadcast. Stop needs two presses.</InfoTip>
+          <InfoTip label="Record">One WAV per armed channel, raw, plus the Stream mix as it went to broadcast. Stop needs two presses. After a recording, export any track as mp3 or m4a.</InfoTip>
         </span>
         <span className={`fp-sub ${HEALTH_CLASS[health.level]}`}>{health.text}</span>
       </div>
@@ -158,9 +159,12 @@ function RecordSection({ strips, engineRunning }) {
       </div>
 
       {summary && (
-        <div className="fp-sub">
-          saved {summary.files?.length ?? 0} files · {formatElapsed(summary.durationSeconds)} · {summary.markers ?? 0} markers
-          {summary.droppedFrames > 0 ? ` · ${summary.droppedFrames} dropped frames` : ''}
+        <div className="fp-recrow">
+          <span className="fp-sub">
+            saved {summary.files?.length ?? 0} files · {formatElapsed(summary.durationSeconds)} · {summary.markers ?? 0} markers
+            {summary.droppedFrames > 0 ? ` · ${summary.droppedFrames} dropped frames` : ''}
+          </span>
+          <RecordExportKeys key={summary.folder} summary={summary} />
         </div>
       )}
       {!engineOn && !recording && <div className="fp-sub">engine off</div>}

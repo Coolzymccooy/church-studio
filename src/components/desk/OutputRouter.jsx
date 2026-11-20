@@ -35,7 +35,7 @@ function SignalFlow({ isLive, hasSignal, features }) {
   );
 }
 
-function AlertList({ alerts, onShowSettings }) {
+function AlertList({ alerts, onShowSettings, onMonitorOn }) {
   if (alerts.length === 0) return <Lamp tone="g">all clear</Lamp>;
   return alerts.map((a) => (
     <div key={a.id} className="fp-row" role={a.tone === 'r' ? 'alert' : undefined}>
@@ -45,6 +45,7 @@ function AlertList({ alerts, onShowSettings }) {
       </span>
       {a.action === 'setup' && <Key onClick={onShowSettings}>setup</Key>}
       {a.action === 'ndi-tools' && <Key onClick={() => { openExternal(NDI_TOOLS_URL).catch(() => {}); }}>get</Key>}
+      {a.action === 'monitor' && <Key lit="green" onClick={onMonitorOn}>monitor on</Key>}
     </div>
   ));
 }
@@ -66,6 +67,7 @@ export default function OutputRouter({ r }) {
     cpuPct: r.cpuPct,
     lufsST: r.lufsST,
     target: r.target,
+    computerMutedUnheard: Boolean(r.computerMutesSpeakers) && !monitorOn,
   });
 
   const items = [
@@ -111,7 +113,10 @@ export default function OutputRouter({ r }) {
     {
       id: 'alerts', icon: Bell, label: 'alerts', title: 'Alerts', led: alertLamp(alerts), badge: alerts.length,
       aria: alerts.length ? `Alerts: ${alerts.length}` : 'Alerts: none',
-      render: () => <AlertList alerts={alerts} onShowSettings={r.onShowSettings} />,
+      render: () => (
+        <AlertList alerts={alerts} onShowSettings={r.onShowSettings}
+          onMonitorOn={() => { if (!monitorOn) r.onToggleMonitor(); }} />
+      ),
     },
   ];
 
