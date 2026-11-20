@@ -20,6 +20,8 @@ mod monitor_mixes_tests;
 mod mixer_meters;
 mod mixer_model;
 mod obs;
+mod preview;
+mod preview_commands;
 mod ndi;
 pub mod netaudio;
 mod recorder;
@@ -452,6 +454,9 @@ pub fn run() {
             recorder_commands::recorder_stop,
             recorder_commands::recorder_add_marker,
             recorder_commands::recorder_open_folder,
+            preview_commands::recorder_play,
+            preview_commands::recorder_play_stop,
+            preview_commands::recorder_play_status,
             export_commands::recorder_export,
             export_commands::editor_export,
         ])

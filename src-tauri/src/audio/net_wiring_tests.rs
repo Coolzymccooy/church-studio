@@ -49,6 +49,7 @@ fn rig() -> Rig {
             }),
         },
         record_tap,
+        crate::preview::preview_ring(48_000).0,
         meters_tx,
     );
     Rig { processor, peer, sent, mixer }

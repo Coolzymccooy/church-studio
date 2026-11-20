@@ -33,6 +33,7 @@ use crate::mixer_control::{MixerLink, MAX_STRIPS};
 use crate::mixer_meters::MixerMeterSlots;
 use crate::ndi::receive::NdiInputFeed;
 use crate::netaudio::{NetInputFeed, NetSendRoute};
+use crate::preview::PreviewTap;
 use crate::recorder::tap::RecordTap;
 use crate::routing::{deinterleave, push_stereo};
 use ringbuf::traits::Producer;
@@ -138,6 +139,12 @@ pub(super) struct InputProcessor<P> {
     /// NDI inputs, feeding the strips after the hardware and computer ones.
     ndi_inputs: Vec<NdiInputFeed<HeapCons<f32>>>,
     dsp: DspChain,
+    /// Record preview ("play"), mixed into the Monitor output only.
+    preview: PreviewTap,
+    preview_l: Vec<f32>,
+    preview_r: Vec<f32>,
+    monitor_l: Vec<f32>,
+    monitor_r: Vec<f32>,
     params: Arc<DspParams>,
     shared: Arc<EngineShared>,
     voice_strip: Arc<AtomicUsize>,
@@ -171,6 +178,7 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
         mut ndi_inputs: Vec<NdiInputFeed<HeapCons<f32>>>,
         net: NetIo<P>,
         recorder: RecordTap<P>,
+        preview: PreviewTap,
         meters_tx: mpsc::SyncSender<MetersPayload>,
     ) -> Self {
         let stride = stride.max(1);
@@ -199,6 +207,11 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
             computer,
             ndi_inputs,
             dsp,
+            preview,
+            preview_l: vec![0.0f32; MAX_CALLBACK_FRAMES],
+            preview_r: vec![0.0f32; MAX_CALLBACK_FRAMES],
+            monitor_l: vec![0.0f32; MAX_CALLBACK_FRAMES],
+            monitor_r: vec![0.0f32; MAX_CALLBACK_FRAMES],
             params,
             shared,
             voice_strip: mixer.voice_strip,
@@ -255,12 +268,24 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
         self.meter_slots
             .publish(self.mixer.strip_meters(), &self.mixer.bus_meters()[..]);
 
-        // Outputs: one stereo bus per device.
+        // Outputs: one stereo bus per device. A record preview adds to the
+        // Monitor output only, after the mixer (never recorded or streamed).
+        let previewing =
+            self.preview.pop_into(&mut self.preview_l[..n], &mut self.preview_r[..n]) > 0;
         let mut dropped = 0u64;
         for route in self.outputs.iter_mut() {
             let (left, right) = self.mixer.output(route.bus);
             let gain = if route.bus == BUS_MONITOR { monitor_gain } else { 1.0 };
-            dropped += push_stereo(&mut route.producer, left, right, route.channels, gain);
+            if previewing && route.bus == BUS_MONITOR && left.len() == n {
+                for i in 0..n {
+                    self.monitor_l[i] = left[i] + self.preview_l[i];
+                    self.monitor_r[i] = right[i] + self.preview_r[i];
+                }
+                let (l, r) = (&self.monitor_l[..n], &self.monitor_r[..n]);
+                dropped += push_stereo(&mut route.producer, l, r, route.channels, gain);
+            } else {
+                dropped += push_stereo(&mut route.producer, left, right, route.channels, gain);
+            }
         }
         // No logging on the audio thread: just count. The meters thread logs
         // the running total when it changes.
