@@ -29,7 +29,7 @@ export async function drainControlQueue({ queue, active, post, respond, wait, no
   while (queue.size) {
     const [id, entry] = queue.entries().next().value;
     queue.delete(id);
-    if (!isCurrent(entry.change)) continue;
+    if (!isCurrent(entry)) continue;
     if (entry.lastStatus !== undefined && now() >= entry.retryUntil) {
       respond(entry.lastStatus);
       continue;
@@ -37,6 +37,7 @@ export async function drainControlQueue({ queue, active, post, respond, wait, no
     active.add(id);
     try {
       const status = await post(entry.change);
+      if (!isCurrent(entry)) continue;
       if ((status === 429 || status === 503) && now() + RETRY_DELAY_MS < entry.retryUntil) {
         if (!queue.has(id)) queue.set(id, { ...entry, lastStatus: status });
         await wait(RETRY_DELAY_MS);

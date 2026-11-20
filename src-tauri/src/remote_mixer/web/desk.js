@@ -223,6 +223,7 @@ function write(key, target, kind, value) {
   const id = `${key}:${kind}`;
   queue.set(id, {
     change: changeBody(view.layout, target, kind, value),
+    generation: connectGeneration,
     retryUntil: performance.now() + CONTROL_RETRY_WINDOW_MS,
   });
   if (!sending) void flush();
@@ -253,13 +254,12 @@ function controlResult(status) {
 
 async function flush() {
   sending = true;
-  const generation = connectGeneration;
   try {
     await drainControlQueue({
       queue, active, post: postControl, respond: controlResult,
       wait: (ms) => new Promise((resolve) => window.setTimeout(resolve, ms)),
       now: () => performance.now(),
-      isCurrent: (change) => generation === connectGeneration && change.layout === view?.layout,
+      isCurrent: ({ change, generation }) => generation === connectGeneration && change.layout === view?.layout,
     });
   } catch {
     queue.clear();

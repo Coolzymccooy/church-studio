@@ -128,3 +128,31 @@ test('an expired retry is discarded before it can change a fader', async () => {
   assert.equal(writes, 1);
   assert.deepEqual(outcomes, [503]);
 });
+
+test('an obsolete response cannot clear fader changes from a new connection', async () => {
+  const { drainControlQueue } = await import('../../src-tauri/src/remote_mixer/web/protocol.js');
+  let generation = 1;
+  const id = 'strip:0:level';
+  const queue = new Map([[id, { change: -3, generation, retryUntil: 2_000 }]]);
+  const outcomes = [];
+  const writes = [];
+  await drainControlQueue({
+    queue, active: new Set(), now: () => 0, wait: async () => {},
+    isCurrent: (entry) => entry.generation === generation,
+    post: async (change) => {
+      writes.push(change);
+      if (generation === 1) {
+        generation = 2;
+        queue.set(id, { change: -26, generation, retryUntil: 2_000 });
+        return 409;
+      }
+      return 204;
+    },
+    respond: (status) => {
+      outcomes.push(status);
+      if (status === 409) queue.clear();
+    },
+  });
+  assert.deepEqual(writes, [-3, -26]);
+  assert.deepEqual(outcomes, [204]);
+});
