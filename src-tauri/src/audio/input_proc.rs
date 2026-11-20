@@ -255,6 +255,7 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
         self.meter_slots.publish_dca(self.mixer.dca_peaks());
         self.meter_slots
             .publish(self.mixer.strip_meters(), &self.mixer.bus_meters()[..]);
+        self.meter_slots.publish_fx(self.mixer.fx_peaks());
 
         // Outputs: one stereo bus per device.
         let mut dropped = 0u64;

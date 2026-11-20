@@ -31,6 +31,7 @@
 //! strip's latency is `latency_samples()`). Trade-off: a gated strip is
 //! 20 ms behind an ungated one, which matters only when two strips carry the
 //! same source.
+use super::fx_params::FX_COUNT;
 use super::params::{
     clamp_or, fader_db_to_lin, StripParams, BUS_MAIN, BUS_MONITOR, BUS_MONITOR2, BUS_MONITOR3,
     BUS_STREAM, EQ_MAX_DB, FADER_MAX_DB, NUM_BUSES, PAN_LAW_NORM, TRIM_MAX_DB, TRIM_MIN_DB,
@@ -100,6 +101,7 @@ pub struct Strip {
     pan_r: LinearSmoother,
     mute: LinearSmoother,
     sends: [LinearSmoother; NUM_BUSES],
+    fx_sends: [LinearSmoother; FX_COUNT],
     /// PFL gain (1 while this strip is soloed, else 0). Not affected by mute.
     pfl: LinearSmoother,
     /// Compressor on/off as a dry→compressed crossfade (0 = off, 1 = on).
@@ -141,6 +143,7 @@ impl Strip {
                 LinearSmoother::new(0.0, ramp),
                 LinearSmoother::new(0.0, ramp),
             ],
+            fx_sends: std::array::from_fn(|_| LinearSmoother::new(0.0, ramp)),
             pfl: LinearSmoother::new(0.0, ramp),
             comp_mix: LinearSmoother::new(0.0, ramp),
             hpf: Biquad::hpf(80.0, sr),
@@ -216,7 +219,8 @@ impl Strip {
                 smoother.set_target(value);
             }
         }
-        for (smoother, &value) in self.sends.iter_mut().zip(sends.iter()) {
+        let fx_sends = p.fx_send_db.iter().map(|param| fader_db_to_lin(param.load(Relaxed)));
+        for (smoother, value) in self.sends.iter_mut().chain(&mut self.fx_sends).zip(sends.into_iter().chain(fx_sends)) {
             if snap {
                 smoother.snap(value);
             } else {
@@ -275,7 +279,7 @@ impl Strip {
         buses: &mut [StereoBuffer; NUM_BUSES],
     ) {
         self.process_pre(input, frames, p, any_solo, snap);
-        self.process_out(&[], buses);
+        self.process_out(&[], buses, None);
     }
 
     /// Detection signal of the last `process_pre` (post trim and HPF).
@@ -350,13 +354,21 @@ impl Strip {
 
     /// Pass 2: fader × `auto_gain[i]` (automix × duck; missing samples are
     /// unity), pan, sends and mute, ADDED into the bus buffers.
-    pub fn process_out(&mut self, auto_gain: &[f32], buses: &mut [StereoBuffer; NUM_BUSES]) {
+    pub fn process_out(
+        &mut self,
+        auto_gain: &[f32],
+        buses: &mut [StereoBuffer; NUM_BUSES],
+        mut fx: Option<&mut [StereoBuffer; FX_COUNT]>,
+    ) {
         let n = self.pending_frames;
         let monitor_post = self.monitor_post;
         // Stage 3: fader, pan, sends, mute → buses.
         let mut pre_peak = 0.0f32;
         let mut post_peak = 0.0f32;
         let [main, stream, monitor, monitor2, monitor3] = buses;
+        if self.fx_sends.iter().all(|send| send.current() == 0.0 && send.target() == 0.0) {
+            fx = None;
+        }
         for i in 0..n {
             let pre = self.scratch[i];
             let auto = auto_gain.get(i).copied().unwrap_or(1.0);
@@ -383,6 +395,14 @@ impl Strip {
             monitor2.right[i] += pre * g_mon2 * pr;
             monitor3.left[i] += pre * g_mon3 * pl;
             monitor3.right[i] += pre * g_mon3 * pr;
+
+            if let Some(returns) = fx.as_mut() {
+                for (buf, send) in returns.iter_mut().zip(&mut self.fx_sends) {
+                    let wet = post * m * send.next();
+                    buf.left[i] += wet * pl;
+                    buf.right[i] += wet * pr;
+                }
+            }
 
             pre_peak = pre_peak.max(pre.abs());
             post_peak = post_peak.max(post.abs());

@@ -26,6 +26,9 @@
 
 pub mod automix;
 pub mod bus;
+mod fx;
+pub mod fx_params;
+mod fx_rack;
 pub mod leveler;
 pub mod params;
 pub mod scene;
@@ -44,6 +47,8 @@ mod monitor_mix_tests;
 mod group_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod fx_tests;
 
 pub use automix::{AutoMix, AutoReadout};
 pub use bus::{Bus, BusMeters};
@@ -99,6 +104,7 @@ pub struct Mixer {
     buses: [Bus; NUM_BUSES],
     bus_meters: [BusMeters; NUM_BUSES],
     bufs: [StereoBuffer; NUM_BUSES],
+    fx: fx_rack::FxRack,
     max_block: usize,
     last_frames: usize,
     primed: bool,
@@ -133,6 +139,7 @@ impl Mixer {
             buses,
             bus_meters,
             bufs: std::array::from_fn(|_| StereoBuffer::new(max_block)),
+            fx: fx_rack::FxRack::new(sample_rate as f32, max_block, ramp),
             max_block,
             last_frames: 0,
             primed: false,
@@ -181,7 +188,9 @@ impl Mixer {
         }
 
         let params = &*self.params;
-        let any_solo = params.any_solo(self.strips.len());
+        self.fx.clear(n);
+        let any_solo = params.any_solo(self.strips.len())
+            || params.fx.returns.iter().any(|ret| ret.solo.load(Relaxed));
         let empty: &[f32] = &[];
 
         // Pass 1: every strip up to the pre-fader point.
@@ -203,7 +212,11 @@ impl Mixer {
 
         // Pass 2: fader × automix × duck, pan, sends → buses.
         for (i, strip) in self.strips.iter_mut().enumerate() {
-            strip.process_out(self.automix.gains(i, n), &mut self.bufs);
+            strip.process_out(
+                self.automix.gains(i, n),
+                &mut self.bufs,
+                Some(&mut self.fx.sends),
+            );
             let auto = self.automix.readout(i);
             strip.set_auto_meters(auto.automix_gr_db, auto.duck_gr_db, auto.speech);
             self.strip_meters[i] = strip.meters();
@@ -219,6 +232,8 @@ impl Mixer {
             live.automix_gr_db.store(-auto.automix_gr_db, Relaxed);
             live.duck_gr_db.store(-auto.duck_gr_db, Relaxed);
         }
+
+        self.fx.process(&mut self.bufs, n, &params.fx, any_solo, snap);
 
         for b in 0..NUM_BUSES {
             self.buses[b].process(&mut self.bufs[b], n, &params.buses[b], snap);
@@ -260,6 +275,9 @@ impl Mixer {
         &self.bus_meters
     }
 
+    pub fn fx_peaks(&self) -> [[f32; 2]; fx_params::FX_COUNT] {
+        self.fx.peaks()
+    }
     pub fn dca_peaks(&self) -> &[f32; groups::GROUP_COUNT] { &self.dca_peaks }
 
     pub fn meters(&self) -> MixerMeters {

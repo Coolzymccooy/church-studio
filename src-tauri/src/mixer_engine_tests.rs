@@ -348,7 +348,7 @@ fn mixer_state_json_shape_matches_contract() {
 
     assert_eq!(
         keys(&v),
-        set(&["inputChannels", "computerStrips", "ndiStrips", "netStrips", "running", "strips", "buses", "scenes"])
+        set(&["inputChannels", "computerStrips", "ndiStrips", "netStrips", "running", "strips", "buses", "fxReturns", "scenes"])
     );
     assert_eq!(v["ndiStrips"], 0);
     assert_eq!(v["netStrips"], 0);
@@ -365,7 +365,7 @@ fn mixer_state_json_shape_matches_contract() {
             "gate_threshold_db", "eq_low_db", "eq_mid_db", "eq_high_db", "comp_enabled",
             "comp_threshold_db", "comp_ratio", "pan", "mute", "solo", "fader_db",
             "send_main_db", "send_stream_db", "send_monitor_db", "send_monitor2_db",
-            "send_monitor3_db", "monitor_post_fader",
+            "send_monitor3_db", "send_fx_a_db", "send_fx_b_db", "monitor_post_fader",
             "voice_chain", "automix", "duck", "duck_depth_db", "automix_gr_db", "duck_gr_db",
         ])
     );
@@ -382,6 +382,12 @@ fn mixer_state_json_shape_matches_contract() {
     assert_eq!(s0["monitor_post_fader"], false);
     assert_eq!(s0["voice_chain"], true);
     assert_eq!(strips[1]["voice_chain"], false);
+
+    assert_eq!(s0["send_fx_a_db"], -90.0);
+    assert_eq!(s0["send_fx_b_db"], -90.0);
+    assert_eq!(v["fxReturns"][0]["id"], "fx_a");
+    assert_eq!(v["fxReturns"][1]["id"], "fx_b");
+    assert_eq!(v["fxReturns"][1]["tempo_bpm"], 120.0);
 
     let buses = v["buses"].as_array().unwrap();
     let ids: Vec<&str> = buses.iter().map(|b| b["id"].as_str().unwrap()).collect();
@@ -435,8 +441,13 @@ fn mixer_meters_json_shape_and_clamping() {
     let quieter = StripMeters { pre_fader_peak_db: -50.0, ..strips[0] };
     slots.publish(&[quieter], &[]);
 
+    slots.publish_fx([[-30.0, -6.0], [-120.0, -15.0]]);
+    slots.publish_fx([[-5.0, -40.0], [-120.0, -18.0]]);
     let v = serde_json::to_value(slots.take_payload()).unwrap();
-    assert_eq!(keys(&v), set(&["strips", "buses", "dca_peaks"]));
+    assert_eq!(keys(&v), set(&["strips", "buses", "fxReturns", "dca_peaks"]));
+    assert_eq!(v["fxReturns"][0], serde_json::json!({ "peak_l_db": -5.0, "peak_r_db": -6.0 }));
+    assert_eq!(v["fxReturns"][1]["peak_l_db"], METER_FLOOR_DB);
+    assert_eq!(v["fxReturns"][1]["peak_r_db"], -15.0);
     let s = v["strips"].as_array().unwrap();
     assert_eq!(s.len(), 2);
     assert_eq!(
