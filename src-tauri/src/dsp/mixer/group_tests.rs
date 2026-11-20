@@ -97,3 +97,15 @@ fn scene_round_trip_and_legacy_defaults_cover_groups_and_membership() {
     assert_eq!(fresh.strips[1].groups.dca.load(Relaxed), 0);
     assert_eq!(fresh.strips[1].groups.mute.load(Relaxed), 0);
 }
+
+#[test]
+fn strip_and_dca_gain_share_one_ceiling_on_main_and_stream() {
+    let p = Arc::new(MixerParams::new(1));
+    p.strips[0].groups.dca.store(1, Relaxed);
+    p.strips[0].fader_db.store(10.0, Relaxed);
+    p.groups.faders[0].store(10.0, Relaxed);
+    let mut mixer = Mixer::new(48_000.0, 512, 1, p.clone());
+    let expected = 0.2 * 10f32.powf(10.0 / 20.0);
+    near(signal_on(&mut mixer, BUS_MAIN), expected);
+    near(signal_on(&mut mixer, BUS_STREAM), expected);
+}

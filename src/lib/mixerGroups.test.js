@@ -31,3 +31,11 @@ test('mock and desktop carry the same typed group command', async () => {
   assert.equal((await mock.loadScene('Groups')).groups.faders[2], -7.5);
   await assert.rejects(mock.setGroup({ ...change, index: 8 }));
 });
+
+test('a group mute keeps the same strip height', async () => {
+  const { stripRowPx } = await import('./stripScale.js');
+  const mixer = createMockMixerController();
+  const { strips } = await mixer.getState();
+  const muted = strips.map((strip, i) => ({ ...strip, group_muted: i === 0 }));
+  assert.equal(stripRowPx(strips), stripRowPx(muted));
+});
