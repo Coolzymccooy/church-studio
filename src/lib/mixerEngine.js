@@ -1,3 +1,5 @@
+import { applyGroupChange, dcaDb, defaultGroups, defaultGroupLabels } from './mixerGroups.js';
+
 /**
  * mixerEngine.js — UI-side mixer controller, matching
  * docs/specs/2026-09-27-mixer-live-contract.md exactly:
@@ -157,6 +159,9 @@ export function createMixerController({ invoke, listen }) {
     setBusParam(bus, key, value) {
       return invoke('mixer_set_bus_param', { bus, key, value });
     },
+    setGroup(change) {
+      return invoke('mixer_set_group', { change });
+    },
     setBusBool(bus, key, value) {
       return invoke('mixer_set_bus_bool', { bus, key, value });
     },
@@ -239,6 +244,8 @@ function defaultStrip(index, name, overrides = {}) {
   return {
     index,
     name,
+    group_membership: { dca: 0, mute: 0 },
+    group_muted: false,
     trim_db: 0,
     polarity: false,
     hpf_enabled: true,
@@ -289,6 +296,8 @@ function createInitialMockState() {
     inputChannels: MOCK_STRIP_NAMES.length,
     fxReturns: defaultFxReturns(),
     running: true,
+    groups: defaultGroups(),
+    groupLabels: defaultGroupLabels(),
     strips: MOCK_STRIP_NAMES.map((name, index) =>
       defaultStrip(index, name, index === 0 ? { voice_chain: true } : {})),
     // The demo plays mon 2 on a pretend device so the browser build shows a second monitor mix.
@@ -316,7 +325,7 @@ function round1(value) {
 function buildMockMetersPayload(state, tick) {
   const strips = state.strips.map((strip, i) => {
     const pre = clampMeterDb(-18 + Math.sin(tick * 0.3 + i * 1.7) * 6 + (Math.random() - 0.5) * 3);
-    const post = strip.mute ? -96 : clampMeterDb(pre + strip.fader_db);
+    const post = strip.mute || strip.group_muted ? -96 : clampMeterDb(pre + Math.min(10, strip.fader_db + dcaDb(state.groups, strip.group_membership)));
     const gateOpen = strip.gate_enabled ? pre > strip.gate_threshold_db : true;
     const overshoot = strip.comp_enabled ? Math.max(0, pre - strip.comp_threshold_db) : 0;
     const grDb = strip.comp_enabled ? Math.min(12, overshoot - overshoot / strip.comp_ratio) : 0;
@@ -364,7 +373,10 @@ function buildMockMetersPayload(state, tick) {
     const peak = ret.mute || feeds.length === 0 ? -96 : clampMeterDb(-25 + ret.fader_db + 5 * Math.sin(tick / 6));
     return { peak_l_db: peak, peak_r_db: peak };
   });
-  return { strips: ducked, buses, fxReturns };
+  const dca_peaks = state.groups.faders.map((_, index) => Math.max(-96, ...ducked
+    .filter((_, i) => state.strips[i].group_membership.dca & (1 << index))
+    .map((meter) => meter.post_db)));
+  return { strips: ducked, buses, fxReturns, dca_peaks };
 }
 
 export function createMockMixerController() {
@@ -376,7 +388,13 @@ export function createMockMixerController() {
 
   function snapshot() {
     const cloned = cloneState(state);
-    return { ...cloned, scenes: Array.from(scenes.keys()) };
+    return {
+      ...cloned,
+      groups: { ...cloned.groups, faders: [...cloned.groups.faders] },
+      groupLabels: { dca: [...cloned.groupLabels.dca], mute: [...cloned.groupLabels.mute] },
+      strips: cloned.strips.map((strip) => ({ ...strip, group_membership: { ...strip.group_membership } })),
+      scenes: Array.from(scenes.keys()),
+    };
   }
 
   function requireStrip(index) {
@@ -440,6 +458,9 @@ export function createMockMixerController() {
         )),
       };
       return null;
+    },
+    async setGroup(change) {
+      state = applyGroupChange(state, change);
     },
     async setBusBool(bus, key, value) {
       requireBus(bus);

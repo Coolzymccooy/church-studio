@@ -16,6 +16,7 @@ import ObsPlate from './ObsPlate.jsx';
 import ScenesPlate from './ScenesPlate.jsx';
 import ChannelStrip from './ChannelStrip.jsx';
 import { useMixer } from './useMixer.js';
+import DcaBank from './DcaBank.jsx';
 
 const SIZE_KEY = 'tiwaton_strip_size';
 const isExtraMonitor = (id) => EXTRA_MONITORS.some((m) => m.bus === id);
@@ -55,7 +56,7 @@ function useStripSize(rowPx) {
   return { size, scale: stripScale(size, height, rowPx), areaRef, cycle };
 }
 
-function BankRow({ banks, bank, onBank, stripCount, demoBanner, sizeLabel, onCycleSize }) {
+function BankRow({ banks, bank, onBank, stripCount, demoBanner, sizeLabel, onCycleSize, groupKey }) {
   return (
     <div className="fp-bar" role="group" aria-label="Strip banks">
       {banks.length > 1 && (
@@ -75,6 +76,7 @@ function BankRow({ banks, bank, onBank, stripCount, demoBanner, sizeLabel, onCyc
           <InfoTip label="Demo mixer">{demoBanner}</InfoTip>
         </span>
       )}
+      {groupKey}
       <div className="fp-bar-end">
         <Key onClick={onCycleSize} aria-label={`strip ${sizeLabel}`}>{sizeLabel}</Key>
       </div>
@@ -89,7 +91,9 @@ function BankRow({ banks, bank, onBank, stripCount, demoBanner, sizeLabel, onCyc
  * Tauri controller and the in-memory demo controller.
  */
 export default function MixerConsole({ controller, refreshKey, demoBanner, onOpenObs }) {
+  const [showGroups, setShowGroups] = useState(false);
   const {
+    setGroup,
     state, loading, toast, dismissToast, metersRef, currentScene,
     setStripParam, setStripBool, renameStrip,
     setBusParam, setBusBool, setFxControl,
@@ -98,7 +102,11 @@ export default function MixerConsole({ controller, refreshKey, demoBanner, onOpe
   const [tapTempo] = useState(createTapTempo);
   const extraMonitors = activeExtraMonitors(state?.buses);
   const { size, scale, areaRef, cycle } = useStripSize(stripRowPx(state?.strips, extraMonitors.length));
-  const [bankId, setBankId] = useState('all');
+  const [bankId, selectBank] = useState('all');
+  const setBankId = (id) => {
+    selectBank(id);
+    setShowGroups(false);
+  };
 
   if (loading || !state) {
     return <div className="flex-1 grid place-items-center fp-sub">loading mixer</div>;
@@ -137,11 +145,13 @@ export default function MixerConsole({ controller, refreshKey, demoBanner, onOpe
         demoBanner={demoBanner}
         sizeLabel={stripSizeLabel(size)}
         onCycleSize={cycle}
+        groupKey={state.groups && <Key lit={showGroups ? 'sel' : null} pressed={showGroups}
+          onClick={() => setShowGroups((open) => !open)}>Groups</Key>}
       />
 
       <div ref={areaRef} className="flex-1 flex overflow-hidden min-h-0">
         <ScaleContext.Provider value={scale}>
-          <div className="fp-desk-scale" style={{ zoom: scale }}>
+          <div className="fp-desk-scale" style={{ zoom: scale }} data-group-bank={showGroups || undefined}>
             <div className="flex-1 flex gap-2 p-2 overflow-x-auto">
               {fxBank && returns.map((ret, index) => (
                 <FxReturnStrip key={ret.id} ret={ret} index={index} extraMonitors={extraMonitors} metersRef={metersRef}
@@ -151,6 +161,8 @@ export default function MixerConsole({ controller, refreshKey, demoBanner, onOpe
                 <ChannelStrip
                   key={strip.index}
                   strip={strip}
+                  groups={state.groups}
+                  groupLabels={state.groupLabels}
                   metersRef={metersRef}
                   onSetParam={(key, value) => setStripParam(strip.index, key, value)}
                   onSetBool={(key, value) => setStripBool(strip.index, key, value)}
@@ -159,6 +171,7 @@ export default function MixerConsole({ controller, refreshKey, demoBanner, onOpe
                 />
               ))}
             </div>
+            {showGroups && state.groups && <DcaBank groups={state.groups} labels={state.groupLabels} strips={state.strips} metersRef={metersRef} onChange={setGroup} />}
             <div className="fp-buses" role="group" aria-label="Buses">
               {state.buses.filter((bus) => !isExtraMonitor(bus.id) || extraMonitors.some((m) => m.bus === bus.id)).map((bus) => (
                 <BusStrip

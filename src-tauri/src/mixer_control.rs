@@ -11,6 +11,9 @@
 mod bus_controls;
 
 use crate::dsp::mixer::fx_params::FX_SEND_KEYS;
+mod names;
+pub use names::{clean_strip_name, scene_slug};
+
 use crate::dsp::mixer::leveler::{
     LEVELER_TARGET_DEFAULT, LEVELER_TARGET_MAX, LEVELER_TARGET_MIN,
 };
@@ -19,6 +22,7 @@ use crate::dsp::mixer::params::{
     BUS_STREAM, DUCK_DEPTH_DEFAULT_DB, DUCK_DEPTH_MAX_DB, NUM_BUSES,
 };
 use crate::dsp::mixer::scene::StripScene;
+use crate::dsp::mixer::groups::{GroupState, Membership};
 use crate::dsp::mixer::{MixerParams, MixerScene};
 use crate::mixer_layout::StripLayout;
 pub use crate::mixer_model::{BusState, MixerState, StoredScene, StripState};
@@ -238,69 +242,6 @@ fn sanitize_bus(p: &BusParams) {
     }
 }
 
-/// Trim, bound and check a strip name. Empty means "use the default name".
-pub fn clean_strip_name(index: usize, name: &str) -> Result<String, String> {
-    let name = name.trim();
-    if name.is_empty() {
-        return Ok(default_strip_name(index));
-    }
-    if name.chars().count() > MAX_STRIP_NAME_CHARS {
-        return Err(format!(
-            "strip name is longer than {MAX_STRIP_NAME_CHARS} characters"
-        ));
-    }
-    if name.chars().any(char::is_control) {
-        return Err("strip name contains control characters".to_string());
-    }
-    Ok(name.to_string())
-}
-
-/// Validate a scene name and turn it into a file-name slug.
-///
-/// Names are 1–40 characters (after trimming) of ASCII letters, digits,
-/// space, `-` and `_`. The slug is lowercase with spaces replaced by `-`.
-/// Anything else (dots, slashes, unicode) is rejected, so a slug can never
-/// escape the scenes directory. Windows device names are rejected too.
-pub fn scene_slug(name: &str) -> Result<String, String> {
-    let name = name.trim();
-    let len = name.chars().count();
-    if len == 0 {
-        return Err("scene name is empty".to_string());
-    }
-    if len > MAX_SCENE_NAME_CHARS {
-        return Err(format!(
-            "scene name is longer than {MAX_SCENE_NAME_CHARS} characters"
-        ));
-    }
-    let valid = name
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == ' ' || c == '-' || c == '_');
-    if !valid {
-        return Err(
-            "scene name may only contain letters, digits, spaces, '-' and '_'".to_string(),
-        );
-    }
-    let slug: String = name
-        .chars()
-        .map(|c| if c == ' ' { '-' } else { c.to_ascii_lowercase() })
-        .collect();
-    if is_reserved_file_name(&slug) {
-        return Err(format!("'{name}' is a reserved name"));
-    }
-    Ok(slug)
-}
-
-fn is_reserved_file_name(slug: &str) -> bool {
-    const RESERVED: [&str; 4] = ["con", "prn", "aux", "nul"];
-    if RESERVED.contains(&slug) {
-        return true;
-    }
-    let bytes = slug.as_bytes();
-    bytes.len() == 4
-        && (slug.starts_with("com") || slug.starts_with("lpt"))
-        && (b'1'..=b'9').contains(&bytes[3])
-}
-
 /// A live attenuation readout for `mixer_state`: 0 while stopped or NaN.
 fn live_gr(value: &AtomicF32, running: bool) -> f32 {
     let gr = value.load(Relaxed);
@@ -454,6 +395,7 @@ fn previous_index(origins: &[StripOrigin], identity: &str, index: usize) -> Opti
 /// is ignored. Strips not in `feeds` keep their record. Returns the indices
 /// that were reset.
 fn assign_feeds(link: &MixerLink, feeds: &[StripFeed]) -> Vec<usize> {
+    let _edit = link.params.groups.edit.lock();
     let mut names = link.names.lock();
     let mut origins = link.origins.lock();
     // Everything as it was, so moves can chain (L 2→3 while R 3→4).
@@ -484,6 +426,7 @@ fn assign_feeds(link: &MixerLink, feeds: &[StripFeed]) -> Vec<usize> {
                 }
                 None => {
                     reset_strip(index, strip);
+                    strip.groups.store(Membership::default());
                     apply_preset(feed.preset, strip);
                     *name = default_strip_name(index);
                     if voice_before == index && voice == voice_before {
@@ -508,6 +451,7 @@ fn assign_feeds(link: &MixerLink, feeds: &[StripFeed]) -> Vec<usize> {
         };
     }
     link.voice_strip.store(voice, Relaxed);
+    link.params.groups.publish(&link.params.strips);
     reset
 }
 
@@ -633,12 +577,15 @@ impl MixerControl {
         Ok(())
     }
 
-    fn strip_state(&self, index: usize, name: String, running: bool) -> StripState {
+    fn strip_state(&self, index: usize, name: String, running: bool, groups: &GroupState) -> StripState {
         let p = &self.params.strips[index];
         let f = |key: &str| strip_f32(p, key).map(|a| a.load(Relaxed)).unwrap_or(0.0);
         let b = |key: &str| strip_bool(p, key).map(|a| a.load(Relaxed)).unwrap_or(false);
+        let group_membership = p.groups.capture();
         StripState {
             index: index as u32,
+            group_membership,
+            group_muted: groups.muted(group_membership),
             name,
             trim_db: f("trim_db"),
             polarity: b("polarity"),
@@ -716,11 +663,13 @@ impl MixerControl {
         outputs: &BusOutputs,
     ) -> MixerState {
         let count = layout.total();
+        let _edit = self.params.groups.edit.lock();
+        let groups = self.params.groups.capture();
         let names: Vec<String> = self.names.lock().clone();
         let strips = (0..count)
             .map(|i| {
                 let name = names.get(i).cloned().unwrap_or_else(|| default_strip_name(i));
-                self.strip_state(i, name, running)
+                self.strip_state(i, name, running, &groups)
             })
             .collect();
         let buses = BUS_IDS
@@ -743,6 +692,8 @@ impl MixerControl {
             ndi_strips: layout.ndi as u32,
             net_strips: layout.net as u32,
             running,
+            groups,
+            group_labels: self.params.groups.labels.lock().clone(),
             strips,
             buses,
             fx_returns: self.fx_state(),
@@ -751,10 +702,11 @@ impl MixerControl {
     }
 
     pub fn capture_scene(&self, name: &str) -> StoredScene {
+        let strip_names = self.names.lock().clone();
         StoredScene {
             version: SCENE_FILE_VERSION,
             name: name.trim().to_string(),
-            strip_names: self.names.lock().clone(),
+            strip_names,
             voice_strip: self.voice_strip.load(Relaxed),
             mixer: MixerScene::capture_named(&self.params, name.trim()),
         }

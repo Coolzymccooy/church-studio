@@ -341,7 +341,10 @@ fn scene_round_trip_restores_and_clamps() {
 fn mixer_state_json_shape_matches_contract() {
     let m = MixerControl::new();
     let state = m.snapshot(2, true, vec!["Sermon".to_string()]);
-    let v = serde_json::to_value(&state).unwrap();
+    let mut v = serde_json::to_value(&state).unwrap();
+    let groups = v.as_object_mut().unwrap().remove("groups").expect("group state");
+    assert!(v.as_object_mut().unwrap().remove("groupLabels").is_some());
+    assert_eq!(groups["faders"], serde_json::json!([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]));
 
     assert_eq!(
         keys(&v),
@@ -358,7 +361,7 @@ fn mixer_state_json_shape_matches_contract() {
     assert_eq!(
         keys(&strips[0]),
         set(&[
-            "index", "name", "trim_db", "polarity", "hpf_enabled", "hpf_hz", "gate_enabled",
+            "index", "name", "group_membership", "group_muted", "trim_db", "polarity", "hpf_enabled", "hpf_hz", "gate_enabled",
             "gate_threshold_db", "eq_low_db", "eq_mid_db", "eq_high_db", "comp_enabled",
             "comp_threshold_db", "comp_ratio", "pan", "mute", "solo", "fader_db",
             "send_main_db", "send_stream_db", "send_monitor_db", "send_monitor2_db",
@@ -441,7 +444,7 @@ fn mixer_meters_json_shape_and_clamping() {
     slots.publish_fx([[-30.0, -6.0], [-120.0, -15.0]]);
     slots.publish_fx([[-5.0, -40.0], [-120.0, -18.0]]);
     let v = serde_json::to_value(slots.take_payload()).unwrap();
-    assert_eq!(keys(&v), set(&["strips", "buses", "fxReturns"]));
+    assert_eq!(keys(&v), set(&["strips", "buses", "fxReturns", "dca_peaks"]));
     assert_eq!(v["fxReturns"][0], serde_json::json!({ "peak_l_db": -5.0, "peak_r_db": -6.0 }));
     assert_eq!(v["fxReturns"][1]["peak_l_db"], METER_FLOOR_DB);
     assert_eq!(v["fxReturns"][1]["peak_r_db"], -15.0);

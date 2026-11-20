@@ -3,11 +3,14 @@
 use crate::dsp::mixer::{fx_params::FX_COUNT, MixerScene};
 use crate::mixer_fx::FxReturnState;
 use serde::{Deserialize, Serialize};
+use crate::dsp::mixer::groups::{GroupLabels, GroupState, Membership};
 
 /// One strip in `MixerState` (snake_case keys, identical to the set keys).
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct StripState {
     pub index: u32,
+    pub group_membership: Membership,
+    pub group_muted: bool,
     pub name: String,
     pub trim_db: f32,
     pub polarity: bool,
@@ -76,6 +79,8 @@ pub struct MixerState {
     pub net_strips: u32,
     pub running: bool,
     pub strips: Vec<StripState>,
+    pub groups: GroupState,
+    pub group_labels: GroupLabels,
     pub buses: Vec<BusState>,
     pub fx_returns: [FxReturnState; FX_COUNT],
     pub scenes: Vec<String>,

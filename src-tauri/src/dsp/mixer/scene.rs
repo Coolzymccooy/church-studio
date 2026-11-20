@@ -4,11 +4,14 @@ use super::fx_params::{FxScene, FX_COUNT};
 use super::params::{
     BusParams, MixerParams, StripParams, DUCK_DEPTH_DEFAULT_DB, MIN_DB, NUM_BUSES,
 };
+use super::groups::{GroupLabels, GroupState, Membership};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::sync::atomic::Ordering::Relaxed;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StripScene {
+    #[serde(default)]
+    pub group_membership: Membership,
     pub trim_db: f32,
     pub polarity_invert: bool,
     pub hpf_enabled: bool,
@@ -61,6 +64,7 @@ pub(super) fn sends_padded<'de, D: Deserializer<'de>>(deserializer: D) -> Result
 impl StripScene {
     pub(crate) fn capture(p: &StripParams) -> Self {
         StripScene {
+            group_membership: p.groups.capture(),
             trim_db: p.trim_db.load(Relaxed),
             polarity_invert: p.polarity_invert.load(Relaxed),
             hpf_enabled: p.hpf_enabled.load(Relaxed),
@@ -87,6 +91,7 @@ impl StripScene {
     }
 
     pub(crate) fn apply(&self, p: &StripParams) {
+        p.groups.store(self.group_membership);
         p.trim_db.store(self.trim_db, Relaxed);
         p.polarity_invert.store(self.polarity_invert, Relaxed);
         p.hpf_enabled.store(self.hpf_enabled, Relaxed);
@@ -150,6 +155,10 @@ impl BusScene {
 pub struct MixerScene {
     pub name: String,
     pub strips: Vec<StripScene>,
+    #[serde(default)]
+    pub groups: GroupState,
+    #[serde(default)]
+    pub group_labels: GroupLabels,
     pub buses: Vec<BusScene>,
     #[serde(default)]
     pub fx: FxScene,
@@ -161,9 +170,12 @@ impl MixerScene {
     }
 
     pub fn capture_named(params: &MixerParams, name: &str) -> Self {
+        let _edit = params.groups.edit.lock();
         MixerScene {
             name: name.to_string(),
             strips: params.strips.iter().map(StripScene::capture).collect(),
+            groups: params.groups.capture(),
+            group_labels: params.groups.labels.lock().clone(),
             buses: params.buses.iter().map(BusScene::capture).collect(),
             fx: FxScene::capture(&params.fx),
         }
@@ -172,6 +184,9 @@ impl MixerScene {
     /// Store the scene into `params`. Extra strips/buses in the scene are
     /// ignored; strips missing from the scene are left unchanged.
     pub fn apply(&self, params: &MixerParams) {
+        let _edit = params.groups.edit.lock();
+        params.groups.store(&self.groups);
+        *params.groups.labels.lock() = self.group_labels.clone();
         for (scene, p) in self.strips.iter().zip(params.strips.iter()) {
             scene.apply(p);
         }
@@ -179,6 +194,10 @@ impl MixerScene {
             scene.apply(p);
         }
         self.fx.apply(&params.fx);
+        for strip in params.strips.iter().skip(self.strips.len()) {
+            strip.groups.store(Membership::default());
+        }
+        params.groups.publish(&params.strips);
     }
 }
 
