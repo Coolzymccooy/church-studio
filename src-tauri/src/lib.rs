@@ -1,4 +1,8 @@
 mod audio;
+mod soundcheck;
+mod soundcheck_commands;
+#[cfg(test)]
+mod soundcheck_tests;
 mod computer_audio;
 mod computer_audio_commands;
 mod dsp;
@@ -411,6 +415,15 @@ pub fn run() {
             gate_commands::learn_mic_fingerprint,
             engine_status,
             mixer_commands::mixer_state,
+            soundcheck_commands::soundcheck_load,
+            soundcheck_commands::soundcheck_unload,
+            soundcheck_commands::soundcheck_set_source,
+            soundcheck_commands::soundcheck_play,
+            soundcheck_commands::soundcheck_stop,
+            soundcheck_commands::soundcheck_set_loop,
+            soundcheck_commands::soundcheck_locate,
+            soundcheck_commands::soundcheck_status,
+            soundcheck_commands::soundcheck_signal,
             mixer_commands::mixer_set_strip_param,
             mixer_commands::mixer_set_strip_bool,
             mixer_commands::mixer_rename_strip,

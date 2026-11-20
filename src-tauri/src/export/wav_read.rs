@@ -49,6 +49,7 @@ pub struct WavReader<R> {
     /// Whole frames left to read.
     frames_left: u64,
     total_frames: u64,
+    data_start: u64,
     bytes: Vec<u8>,
 }
 
@@ -116,12 +117,11 @@ impl<R: Read + Seek> WavReader<R> {
             let size = u32_at(&head, 4) as u64;
             match &head[0..4] {
                 b"fmt " => {
-                    let mut body = vec![0u8; size as usize];
-                    inner.read_exact(&mut body)?;
-                    format = Some(parse_fmt(&body)?);
-                    if size % 2 == 1 {
-                        inner.seek(SeekFrom::Current(1))?;
-                    }
+                    let mut body = [0u8; 40];
+                    let read = size.min(body.len() as u64);
+                    inner.read_exact(&mut body[..read as usize])?;
+                    format = Some(parse_fmt(&body[..read as usize])?);
+                    inner.seek(SeekFrom::Current((size - read + size % 2) as i64))?;
                 }
                 b"data" => {
                     let format = format.ok_or_else(|| invalid("WAV data comes before fmt"))?;
@@ -136,6 +136,7 @@ impl<R: Read + Seek> WavReader<R> {
                         format,
                         frames_left: frames,
                         total_frames: frames,
+                        data_start: start,
                         bytes: Vec::new(),
                     });
                 }
@@ -152,6 +153,16 @@ impl<R: Read + Seek> WavReader<R> {
 
     pub fn total_frames(&self) -> u64 {
         self.total_frames
+    }
+
+    pub fn seek_frame(&mut self, frame: u64) -> io::Result<()> {
+        if frame > self.total_frames {
+            return Err(invalid("WAV seek past the data"));
+        }
+        let offset = self.data_start + frame * self.format.block_align() as u64;
+        self.inner.seek(SeekFrom::Start(offset))?;
+        self.frames_left = self.total_frames - frame;
+        Ok(())
     }
 
     /// Read up to `max_frames` frames as interleaved f32 into `out`

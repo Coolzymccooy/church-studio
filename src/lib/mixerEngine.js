@@ -193,6 +193,9 @@ export function createMixerController({ invoke, listen }) {
     },
     // Fired when the backend loads a scene on its own (the OBS scene link),
     // so the console can refetch its state.
+    subscribeStripRenames(cb) {
+      return subscribeEvent(listen, 'mixer-strip-renamed', cb);
+    },
     subscribeSceneLoaded(cb) {
       return subscribeEvent(listen, 'mixer-scene-loaded', cb);
     },

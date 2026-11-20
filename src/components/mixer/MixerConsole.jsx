@@ -90,7 +90,7 @@ function BankRow({ banks, bank, onBank, stripCount, demoBanner, sizeLabel, onCyc
  * ("size fit") or to a fixed size. Driven by useMixer(controller), which works the same for the
  * Tauri controller and the in-memory demo controller.
  */
-export default function MixerConsole({ controller, refreshKey, demoBanner, onOpenObs }) {
+export default function MixerConsole({ controller, refreshKey, demoBanner, onOpenObs, soundcheckSignal }) {
   const [showGroups, setShowGroups] = useState(false);
   const {
     setGroup,
@@ -166,6 +166,7 @@ export default function MixerConsole({ controller, refreshKey, demoBanner, onOpe
                   metersRef={metersRef}
                   onSetParam={(key, value) => setStripParam(strip.index, key, value)}
                   onSetBool={(key, value) => setStripBool(strip.index, key, value)}
+                  playbackTone={soundcheckSignal?.selected & (1 << strip.index) ? (soundcheckSignal.playing ? 'g' : 'a') : null}
                   onRename={(name) => renameStrip(strip.index, name)}
                   extraMonitors={extraMonitors}
                 />

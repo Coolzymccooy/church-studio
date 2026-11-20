@@ -20,6 +20,7 @@ import OutputRouter from './components/desk/OutputRouter.jsx';
 import LiveView from './components/desk/LiveView.jsx';
 import DesktopRecordButton from './components/recorder/DesktopRecordButton.jsx';
 import InputRack from './components/desk/InputRack.jsx';
+import { useSoundcheckSignal } from './components/soundcheck/useSoundcheckSignal.js';
 import MixerConsole from './components/mixer/MixerConsole';
 import { createMixerController, createMockMixerController } from './lib/mixerEngine';
 import { syncStreamLeveler } from './lib/streamLeveler';
@@ -98,6 +99,7 @@ const MAIN_TABS = [
 
 const AudioProcessor = ({ goHome }) => {
   const [isLive, setIsLive] = useState(false);
+  const soundcheckSignal = useSoundcheckSignal(isLive);
   const [isPlayingFile, setIsPlayingFile] = useState(false);
   const [audioContext, setAudioContext] = useState(null);
   const [mode, setMode] = useState('live');
@@ -3271,6 +3273,8 @@ const AudioProcessor = ({ goHome }) => {
       <div className="flex-1 flex overflow-hidden min-h-0">
 
         <InputRack
+          mixer={mixerController}
+          soundcheckSignal={soundcheckSignal}
           mode={mode}
           onModeSwitch={handleModeSwitch}
           core={{
@@ -3406,6 +3410,7 @@ const AudioProcessor = ({ goHome }) => {
           {mainTab === 'mixer' && (
             <MixerConsole
               controller={mixerController}
+              soundcheckSignal={soundcheckSignal}
               refreshKey={mixerRefreshKey(audioStats.state, nativeRouteStatus)}
               onOpenObs={() => setShowObs(true)}
               demoBanner={isTauri ? null : 'Demo mixer — live multichannel mixing runs in the desktop app'}
