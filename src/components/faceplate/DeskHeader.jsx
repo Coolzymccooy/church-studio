@@ -46,7 +46,8 @@ export default function DeskHeader({
 
       <div className="fp-grp" role="group" aria-label="Engine">
         {isLive
-          ? <TwoPressKey label="stop engine" tone="red" onConfirm={runEngine} disabled={busy}>stop</TwoPressKey>
+          ? <TwoPressKey label="stop engine" tone="red" onConfirm={runEngine} disabled={busy}
+            tip="Press twice within 3 seconds to stop the engine. The first press only arms it, so a stray click can't stop a service.">stop</TwoPressKey>
           : <Key lit={null} onClick={runEngine} disabled={busy} aria-label="start engine">start</Key>}
         <Lamp tone={state.tone}>{busy ? (isLive ? 'stopping' : 'starting') : state.word}</Lamp>
       </div>
@@ -70,7 +71,8 @@ export default function DeskHeader({
           {onShowObs && <Key onClick={onShowObs}>obs</Key>}
           <Key onClick={onShowLink}>link</Key>
           <Key onClick={onShowHelp}>help</Key>
-          <TwoPressKey label="reset session" tone="red" onConfirm={onReset}>reset</TwoPressKey>
+          <TwoPressKey label="reset session" tone="red" onConfirm={onReset}
+            tip="Press twice within 3 seconds. Stops the engine and turns every voice stage off.">reset</TwoPressKey>
           <Key onClick={cycleFinish} aria-label={`finish: ${finish}`}>{finish}</Key>
           <Key onClick={onShowSettings}>setup</Key>
         </div>

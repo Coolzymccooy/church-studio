@@ -113,6 +113,12 @@ function SetupPanel({
   const { pos, handlers, nudge } = useDragPanel(panelRef);
   const [draft, setDraft] = useState(() => draftFrom(selectedDevices));
   const [savedWhileLive, setSavedWhileLive] = useState(false);
+  // Saved devices apply when the engine next starts, so once it stops the note no longer holds.
+  const [prevLive, setPrevLive] = useState(isLive);
+  if (isLive !== prevLive) {
+    setPrevLive(isLive);
+    if (!isLive) setSavedWhileLive(false);
+  }
   // Only the desktop engine has real meters; the browser's demo mixer simulates levels, which
   // must never pass for a working device.
   const feed = useMeterFeed(isTauri ? mixerController : null, isTauri);

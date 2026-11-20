@@ -183,3 +183,6 @@
 }
 @keyframes fp-arm-drain { from { transform: scaleX(1); } to { transform: scaleX(0); } }
 @media (prefers-reduced-motion: reduce) { .fp-key.fp-timed::after { animation: none; } }
+
+/* A two-press key sits in a tip wrapper; the key still fills the cell its wrapper is given. */
+.fp-tipwrap > .fp-key { flex: 1 1 auto; min-width: 0; }
