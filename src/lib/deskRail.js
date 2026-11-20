@@ -5,11 +5,11 @@ const GAP = 8;
 
 /**
  * Alerts the operator should see, most serious first. Each is { id, tone: 'r' | 'a', text, tip,
- * action? } where action is 'setup' | 'ndi-tools'. Only what needs attention: no "all good" rows.
+ * action? } where action is 'setup' | 'ndi-tools' | 'monitor'. Only what needs attention: no "all good" rows.
  */
 export function deskAlerts({
   engineError = null, ndi = null, broadcastSet = true, isLive = false,
-  droppedSamples = 0, cpuPct = null, lufsST = null, target = null,
+  droppedSamples = 0, cpuPct = null, lufsST = null, target = null, computerMutedUnheard = false,
 } = {}) {
   const alerts = [];
   if (engineError) {
@@ -17,6 +17,9 @@ export function deskAlerts({
   }
   if (isLive && typeof lufsST === 'number' && typeof target === 'number' && lufsST > target + 3) {
     alerts.push({ id: 'loud', tone: 'r', text: 'stream too loud', tip: `Short-term ${lufsST.toFixed(1)} LUFS against a ${target} target. Lower the Stream bus or turn the limiter on.` });
+  }
+  if (isLive && computerMutedUnheard) {
+    alerts.push({ id: 'computer-muted', tone: 'a', text: 'computer audio muted at speakers', tip: 'While computer audio is captured, the Mac mutes those apps at their normal output, so the music only reaches you through the desk. Turn the monitor on to hear it.', action: 'monitor' });
   }
   if (isLive && droppedSamples > 0) {
     alerts.push({ id: 'drops', tone: 'a', text: `${droppedSamples} dropped samples`, tip: 'Audio is breaking up. Raise the buffer in setup or close other apps.' });

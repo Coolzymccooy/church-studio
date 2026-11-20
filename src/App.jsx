@@ -27,6 +27,7 @@ import { getExportAvailability } from './lib/exportFlow';
 import { loadRnnoiseAssets } from './lib/rnnoise';
 import { pickVideoMimeType } from './lib/mediaFormats';
 import { readVisualiserPalette } from './lib/visualiserPalette.js';
+import { computerAudioFromEngineStatus } from './lib/computerAudio.js';
 import {
   analyserRange, bandEdges, bandLevels, createScope, createWaterfall, dbFraction, drawScope, fitCanvas, gateState, stepScope,
 } from './lib/liveScope.js';
@@ -322,6 +323,8 @@ const AudioProcessor = ({ goHome }) => {
   });
   const [nativeNoiseProfileCaptured, setNativeNoiseProfileCaptured] = useState(false);
   const [nativeRouteStatus, setNativeRouteStatus] = useState(null);
+  // Whether computer-audio capture has muted the tapped apps at the speakers (macOS).
+  const [computerMutesSpeakers, setComputerMutesSpeakers] = useState(false);
   const [roomName, setRoomName] = useState(() => {
     return window.localStorage.getItem('tiwaton:roomName') || 'Main Sanctuary';
   });
@@ -3002,6 +3005,7 @@ const AudioProcessor = ({ goHome }) => {
             state: 'running',
           }));
           setNativeNoiseProfileCaptured(Boolean(status.noise_profile_ready));
+          setComputerMutesSpeakers(computerAudioFromEngineStatus(status).mutesSpeakers);
           setNativeRouteStatus({
             input: status.input_device_name || status.device_name || null,
             monitor: status.monitor_output_name || null,
@@ -3383,6 +3387,7 @@ const AudioProcessor = ({ goHome }) => {
           cpuPct: audioStats.cpuLoadPct,
           lufsST,
           target: loudnessTarget,
+          computerMutesSpeakers: isLive && computerMutesSpeakers,
           onShowSettings: () => setShowSettings(true),
           isLive,
           isPlayingFile,
