@@ -95,10 +95,10 @@ export default function MixerConsole({ controller, refreshKey, demoBanner, onOpe
     setBusParam, setBusBool, setFxControl,
     saveScene, loadScene, deleteScene,
   } = useMixer(controller, refreshKey);
+  const [tapTempo] = useState(createTapTempo);
   const extraMonitors = activeExtraMonitors(state?.buses);
   const { size, scale, areaRef, cycle } = useStripSize(stripRowPx(state?.strips, extraMonitors.length));
   const [bankId, setBankId] = useState('all');
-  const [tapTempo] = useState(createTapTempo);
 
   if (loading || !state) {
     return <div className="flex-1 grid place-items-center fp-sub">loading mixer</div>;
