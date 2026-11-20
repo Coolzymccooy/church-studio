@@ -72,7 +72,7 @@ export default function RackProfiles({ p }) {
             <div className="fp-row"><span className="fp-glass-dim">integrated</span><span className="fp-num">{fmt(p.lufsI, 'LUFS')}</span></div>
             <div className="fp-row"><span className="fp-glass-dim">target</span><span className="fp-num">{p.target} LUFS</span></div>
           </div>
-          <ToggleRow label="Stream safe" tip="Limits the stream so it never clips." tone="green"
+          <ToggleRow label="Stream safe" tip="Levels the stream toward the target, within 6 dB, and limits it so it never clips." tone="green"
             on={Boolean(p.streamSafe)} onToggle={p.onToggleStreamSafe} />
         </div>
       </section>
