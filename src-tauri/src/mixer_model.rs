@@ -45,6 +45,9 @@ pub struct BusState {
     pub fader_db: f32,
     pub mute: bool,
     pub limiter_ceiling_db: f32,
+    /// Loudness leveler on this bus (a delivery setting; not in scenes).
+    pub leveler_enabled: bool,
+    pub leveler_target_lufs: f32,
 }
 
 /// `mixer_state` / `mixer_load_scene` result. Top level is camelCase.

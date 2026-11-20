@@ -1,6 +1,7 @@
 //! Lock-free mixer controls shared between the UI/control thread and the
 //! audio thread. Every field is an atomic, same style as `DspParams`: the UI
 //! stores, the audio thread loads once per block.
+use super::leveler::LEVELER_TARGET_DEFAULT;
 use atomic_float::AtomicF32;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -157,6 +158,10 @@ pub struct BusParams {
     pub mute: AtomicBool,
     pub limiter_enabled: AtomicBool,
     pub limiter_ceiling_db: AtomicF32,
+    /// Loudness leveler (`leveler.rs`): steers the bus toward
+    /// `leveler_target_lufs`. A delivery setting, not part of scenes.
+    pub leveler_enabled: AtomicBool,
+    pub leveler_target_lufs: AtomicF32,
 }
 
 impl BusParams {
@@ -166,6 +171,8 @@ impl BusParams {
             mute: AtomicBool::new(false),
             limiter_enabled: AtomicBool::new(true),
             limiter_ceiling_db: AtomicF32::new(-1.0),
+            leveler_enabled: AtomicBool::new(false),
+            leveler_target_lufs: AtomicF32::new(LEVELER_TARGET_DEFAULT),
         }
     }
 }

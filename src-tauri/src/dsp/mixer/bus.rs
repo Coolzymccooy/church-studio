@@ -1,8 +1,13 @@
-//! Stereo output bus: fader, mute, brick-wall limiter, peak/RMS meters.
+//! Stereo output bus: fader, mute, loudness leveler, brick-wall limiter,
+//! peak/RMS meters.
+//!
+//! The leveler (`leveler.rs`) runs only while switched on (or ramping back
+//! to unity after being switched off) and adds no latency.
 //!
 //! The limiter (one `compressor::Limiter` per channel, 5 ms lookahead) always
 //! runs so the bus latency never changes; when disabled its ceiling is raised
 //! far above full scale so it never acts.
+use super::leveler::Leveler;
 use super::params::{clamp_or, fader_db_to_lin, BusParams};
 use super::smooth::LinearSmoother;
 use super::strip::lin_to_db;
@@ -19,6 +24,8 @@ pub struct BusMeters {
     pub peak_r_db: f32,
     pub rms_l_db: f32,
     pub rms_r_db: f32,
+    /// Gain the loudness leveler applies now, dB (0 when off).
+    pub leveler_db: f32,
 }
 
 impl BusMeters {
@@ -28,6 +35,7 @@ impl BusMeters {
             peak_r_db: -120.0,
             rms_l_db: -120.0,
             rms_r_db: -120.0,
+            leveler_db: 0.0,
         }
     }
 }
@@ -35,6 +43,7 @@ impl BusMeters {
 pub struct Bus {
     fader: LinearSmoother,
     mute: LinearSmoother,
+    leveler: Leveler,
     limiter_l: Limiter,
     limiter_r: Limiter,
     ceiling_db: f32,
@@ -46,6 +55,7 @@ impl Bus {
         Bus {
             fader: LinearSmoother::new(1.0, ramp),
             mute: LinearSmoother::new(1.0, ramp),
+            leveler: Leveler::new(sr),
             limiter_l: Limiter::new(sr),
             limiter_r: Limiter::new(sr),
             ceiling_db: f32::NAN, // forces the first update
@@ -62,7 +72,7 @@ impl Bus {
         self.limiter_l.latency_samples()
     }
 
-    /// Apply fader, mute and limiter to the first `frames` samples of `buf`
+    /// Apply fader, mute, leveler and limiter to the first `frames` samples of `buf`
     /// in place, then update the meters.
     pub fn process(&mut self, buf: &mut StereoBuffer, frames: usize, p: &BusParams, snap: bool) {
         let n = frames.min(buf.left.len()).min(buf.right.len());
@@ -94,6 +104,13 @@ impl Bus {
             buf.right[i] *= g;
         }
 
+        self.leveler.process(
+            &mut buf.left[..n],
+            &mut buf.right[..n],
+            p.leveler_enabled.load(Relaxed),
+            p.leveler_target_lufs.load(Relaxed),
+        );
+
         self.limiter_l.process_block(&mut buf.left[..n]);
         self.limiter_r.process_block(&mut buf.right[..n]);
 
@@ -102,6 +119,7 @@ impl Bus {
             peak_r_db: lin_to_db(peak(&buf.right[..n])),
             rms_l_db: lin_to_db(rms(&buf.left[..n])),
             rms_r_db: lin_to_db(rms(&buf.right[..n])),
+            leveler_db: self.leveler.gain_db(),
         };
     }
 }
