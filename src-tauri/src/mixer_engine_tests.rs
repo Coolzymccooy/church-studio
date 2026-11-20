@@ -343,6 +343,7 @@ fn mixer_state_json_shape_matches_contract() {
     let state = m.snapshot(2, true, vec!["Sermon".to_string()]);
     let mut v = serde_json::to_value(&state).unwrap();
     let groups = v.as_object_mut().unwrap().remove("groups").expect("group state");
+    assert!(v.as_object_mut().unwrap().remove("groupLabels").is_some());
     assert_eq!(groups["faders"], serde_json::json!([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]));
 
     assert_eq!(
@@ -435,7 +436,7 @@ fn mixer_meters_json_shape_and_clamping() {
     slots.publish(&[quieter], &[]);
 
     let v = serde_json::to_value(slots.take_payload()).unwrap();
-    assert_eq!(keys(&v), set(&["strips", "buses"]));
+    assert_eq!(keys(&v), set(&["strips", "buses", "dca_peaks"]));
     let s = v["strips"].as_array().unwrap();
     assert_eq!(s.len(), 2);
     assert_eq!(

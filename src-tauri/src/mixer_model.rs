@@ -2,7 +2,7 @@
 //! scene file. Field names follow `docs/specs/2026-09-27-mixer-live-contract.md`.
 use crate::dsp::mixer::MixerScene;
 use serde::{Deserialize, Serialize};
-use crate::dsp::mixer::groups::{GroupState, Membership};
+use crate::dsp::mixer::groups::{GroupLabels, GroupState, Membership};
 
 /// One strip in `MixerState` (snake_case keys, identical to the set keys).
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -77,6 +77,7 @@ pub struct MixerState {
     pub running: bool,
     pub strips: Vec<StripState>,
     pub groups: GroupState,
+    pub group_labels: GroupLabels,
     pub buses: Vec<BusState>,
     pub scenes: Vec<String>,
 }

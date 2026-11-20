@@ -4,6 +4,10 @@ export function defaultGroups() {
   return { faders: Array(GROUP_COUNT).fill(0), dca_muted: 0, mute_active: 0 };
 }
 
+export function defaultGroupLabels() {
+  return { dca: Array(GROUP_COUNT).fill(''), mute: Array(GROUP_COUNT).fill('') };
+}
+
 export function hasGroup(mask, index) {
   return Boolean(mask & (1 << index));
 }
@@ -21,6 +25,15 @@ export function applyGroupChange(state, change) {
   const { type, index, enabled } = change;
   const groups = state.groups ?? defaultGroups();
   if (!Number.isInteger(index) || index < 0 || index >= GROUP_COUNT) throw new Error('Invalid group number');
+  if (type === 'rename') {
+    if (!['dca', 'mute'].includes(change.kind)) throw new Error('Invalid group kind');
+    const name = change.name.trim();
+    if (Array.from(name).length > 24 || /[\p{Cc}]/u.test(name)) throw new Error('Invalid group name');
+    const labels = state.groupLabels ?? defaultGroupLabels();
+    return { ...state, groupLabels: {
+      ...labels, [change.kind]: labels[change.kind].map((label, i) => i === index ? name : label),
+    } };
+  }
   if (type === 'fader') {
     const db = Number.isFinite(change.db) ? Math.max(-90, Math.min(10, change.db)) : 0;
     return { ...state, groups: {
@@ -52,7 +65,11 @@ export function applyGroupChange(state, change) {
   };
 }
 
-export function mockDcaDb(groups, membership) {
+export function dcaDb(groups, membership) {
   const values = groups.faders.filter((_, i) => hasGroup(membership.dca, i));
-  return values.some((db) => db <= -90) ? -Infinity : Math.min(10, values.reduce((total, db) => total + db, 0));
+  return values.some((db) => db <= -90) ? -Infinity : values.reduce((total, db) => total + db, 0);
+}
+
+export function groupLabel(labels, kind, index) {
+  return labels?.[kind]?.[index] || `${kind === 'dca' ? 'DCA' : 'Mute group'} ${index + 1}`;
 }

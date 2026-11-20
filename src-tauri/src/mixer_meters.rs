@@ -7,6 +7,7 @@
 //! reduction are held at their maximum until the meters thread reads them,
 //! so short peaks between two reads are not lost. A read racing with a write
 //! can lose at most one block's peak, which is harmless for a meter.
+use crate::dsp::mixer::groups::GROUP_COUNT;
 use crate::dsp::mixer::{BusMeters, StripMeters, NUM_BUSES};
 use crate::mixer_control::BUS_IDS;
 use atomic_float::AtomicF32;
@@ -49,6 +50,7 @@ pub struct BusMeterPayload {
 pub struct MixerMetersPayload {
     pub strips: Vec<StripMeterPayload>,
     pub buses: Vec<BusMeterPayload>,
+    pub dca_peaks: [f32; GROUP_COUNT],
 }
 
 struct StripSlot {
@@ -84,6 +86,7 @@ impl BusSlot {
 pub struct MixerMeterSlots {
     strips: Vec<StripSlot>,
     buses: [BusSlot; NUM_BUSES],
+    dca_peaks: [AtomicF32; GROUP_COUNT],
 }
 
 /// Clamp a dB reading for the event (NaN → floor).
@@ -144,6 +147,7 @@ impl MixerMeterSlots {
                 })
                 .collect(),
             buses: std::array::from_fn(|_| BusSlot::new()),
+            dca_peaks: std::array::from_fn(|_| AtomicF32::new(RESET_DB)),
         }
     }
 
@@ -170,6 +174,12 @@ impl MixerMeterSlots {
     }
 
     /// Meters thread: build the event payload and reset the held peaks.
+    pub fn publish_dca(&self, peaks: &[f32; GROUP_COUNT]) {
+        for (slot, value) in self.dca_peaks.iter().zip(peaks) {
+            hold_max(slot, *value);
+        }
+    }
+
     pub fn take_payload(&self) -> MixerMetersPayload {
         let strips = self
             .strips
@@ -196,6 +206,7 @@ impl MixerMeterSlots {
                 leveler_db: finite_or_zero(slot.leveler_db.load(Relaxed)),
             })
             .collect();
-        MixerMetersPayload { strips, buses }
+        let dca_peaks = self.dca_peaks.each_ref().map(|slot| clamp_db(take(slot, RESET_DB)));
+        MixerMetersPayload { strips, buses, dca_peaks }
     }
 }

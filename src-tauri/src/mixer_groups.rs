@@ -7,6 +7,7 @@ use tauri::State;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[derive(Clone, Copy)]
 pub enum GroupKind {
     Dca,
     Mute,
@@ -26,6 +27,11 @@ pub enum GroupChange {
     MuteGroup {
         index: usize,
         enabled: bool,
+    },
+    Rename {
+        index: usize,
+        kind: GroupKind,
+        name: String,
     },
     Membership {
         index: usize,
@@ -50,7 +56,8 @@ fn set_bit(mask: &AtomicU8, index: usize, enabled: bool) -> Result<(), String> {
 
 pub fn set_group(mixer: &MixerControl, change: GroupChange) -> Result<(), String> {
     let groups = &mixer.params.groups;
-    match change {
+    let _edit = groups.edit.lock();
+    let result: Result<(), String> = match change {
         GroupChange::Fader { index, db } => {
             let fader = groups.faders.get(index).ok_or("Invalid group number")?;
             fader.store(clamp_or(db, MIN_DB, FADER_MAX_DB, 0.0), Relaxed);
@@ -58,6 +65,21 @@ pub fn set_group(mixer: &MixerControl, change: GroupChange) -> Result<(), String
         }
         GroupChange::DcaMute { index, enabled } => set_bit(&groups.dca_muted, index, enabled),
         GroupChange::MuteGroup { index, enabled } => set_bit(&groups.mute_active, index, enabled),
+        GroupChange::Rename { index, kind, name } => {
+            let name = name.trim();
+            if name.chars().count() > crate::mixer_control::MAX_STRIP_NAME_CHARS
+                || name.chars().any(char::is_control)
+            {
+                return Err("Invalid group name".into());
+            }
+            let mut labels = groups.labels.lock();
+            let names = match kind {
+                GroupKind::Dca => &mut labels.dca,
+                GroupKind::Mute => &mut labels.mute,
+            };
+            *names.get_mut(index).ok_or("Invalid group number")? = name.to_owned();
+            Ok(())
+        }
         GroupChange::Membership {
             index,
             strip,
@@ -76,6 +98,19 @@ pub fn set_group(mixer: &MixerControl, change: GroupChange) -> Result<(), String
             };
             set_bit(mask, index, enabled)
         }
+    };
+    result?;
+    groups.publish(&mixer.params.strips);
+    Ok(())
+}
+
+impl MixerControl {
+    pub fn set_dca_fader(&self, index: usize, db: f32) -> Result<(), String> {
+        set_group(self, GroupChange::Fader { index, db })
+    }
+
+    pub fn set_dca_mute(&self, index: usize, enabled: bool) -> Result<(), String> {
+        set_group(self, GroupChange::DcaMute { index, enabled })
     }
 }
 
@@ -122,8 +157,28 @@ mod tests {
             },
         )
         .unwrap();
-        mixer.set_strip_param(7, "dca_fader_db", -8.0).unwrap();
-        mixer.set_strip_bool(7, "dca_mute", true).unwrap();
+        mixer.set_dca_fader(7, -8.0).unwrap();
+        mixer.set_dca_mute(7, true).unwrap();
+        set_group(
+            &mixer,
+            GroupChange::Rename {
+                index: 0,
+                kind: GroupKind::Mute,
+                name: "Talk mics".into(),
+            },
+        )
+        .unwrap();
+        let saved = mixer.capture_scene("Named groups");
+        let restored = MixerControl::new();
+        restored.apply_scene(&saved);
+        assert_eq!(
+            restored
+                .capture_scene("Named groups")
+                .mixer
+                .group_labels
+                .mute[0],
+            "Talk mics"
+        );
         let state = mixer.snapshot_layout(StripLayout::new(2, false, 0), true, vec![]);
         assert_eq!(state.groups.faders[0], 10.0);
         assert_eq!(state.groups.faders[7], -8.0);

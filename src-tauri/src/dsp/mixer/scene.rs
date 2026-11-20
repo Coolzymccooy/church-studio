@@ -3,7 +3,7 @@
 use super::params::{
     BusParams, MixerParams, StripParams, DUCK_DEPTH_DEFAULT_DB, MIN_DB, NUM_BUSES,
 };
-use super::groups::{GroupState, Membership};
+use super::groups::{GroupLabels, GroupState, Membership};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::sync::atomic::Ordering::Relaxed;
 
@@ -146,6 +146,8 @@ pub struct MixerScene {
     pub strips: Vec<StripScene>,
     #[serde(default)]
     pub groups: GroupState,
+    #[serde(default)]
+    pub group_labels: GroupLabels,
     pub buses: Vec<BusScene>,
 }
 
@@ -155,10 +157,12 @@ impl MixerScene {
     }
 
     pub fn capture_named(params: &MixerParams, name: &str) -> Self {
+        let _edit = params.groups.edit.lock();
         MixerScene {
             name: name.to_string(),
             strips: params.strips.iter().map(StripScene::capture).collect(),
             groups: params.groups.capture(),
+            group_labels: params.groups.labels.lock().clone(),
             buses: params.buses.iter().map(BusScene::capture).collect(),
         }
     }
@@ -166,13 +170,19 @@ impl MixerScene {
     /// Store the scene into `params`. Extra strips/buses in the scene are
     /// ignored; strips missing from the scene are left unchanged.
     pub fn apply(&self, params: &MixerParams) {
+        let _edit = params.groups.edit.lock();
         params.groups.store(&self.groups);
+        *params.groups.labels.lock() = self.group_labels.clone();
         for (scene, p) in self.strips.iter().zip(params.strips.iter()) {
             scene.apply(p);
         }
         for (scene, p) in self.buses.iter().zip(params.buses.iter()).take(NUM_BUSES) {
             scene.apply(p);
         }
+        for strip in params.strips.iter().skip(self.strips.len()) {
+            strip.groups.store(Membership::default());
+        }
+        params.groups.publish(&params.strips);
     }
 }
 

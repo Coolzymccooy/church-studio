@@ -1,4 +1,4 @@
-import { applyGroupChange, defaultGroups, mockDcaDb } from './mixerGroups.js';
+import { applyGroupChange, dcaDb, defaultGroups, defaultGroupLabels } from './mixerGroups.js';
 
 /**
  * mixerEngine.js — UI-side mixer controller, matching
@@ -285,6 +285,7 @@ function createInitialMockState() {
     inputChannels: MOCK_STRIP_NAMES.length,
     running: true,
     groups: defaultGroups(),
+    groupLabels: defaultGroupLabels(),
     strips: MOCK_STRIP_NAMES.map((name, index) =>
       defaultStrip(index, name, index === 0 ? { voice_chain: true } : {})),
     // The demo plays mon 2 on a pretend device so the browser build shows a second monitor mix.
@@ -311,7 +312,7 @@ function round1(value) {
 function buildMockMetersPayload(state, tick) {
   const strips = state.strips.map((strip, i) => {
     const pre = clampMeterDb(-18 + Math.sin(tick * 0.3 + i * 1.7) * 6 + (Math.random() - 0.5) * 3);
-    const post = strip.mute || strip.group_muted ? -96 : clampMeterDb(pre + strip.fader_db + mockDcaDb(state.groups, strip.group_membership));
+    const post = strip.mute || strip.group_muted ? -96 : clampMeterDb(pre + Math.min(10, strip.fader_db + dcaDb(state.groups, strip.group_membership)));
     const gateOpen = strip.gate_enabled ? pre > strip.gate_threshold_db : true;
     const overshoot = strip.comp_enabled ? Math.max(0, pre - strip.comp_threshold_db) : 0;
     const grDb = strip.comp_enabled ? Math.min(12, overshoot - overshoot / strip.comp_ratio) : 0;
@@ -353,7 +354,10 @@ function buildMockMetersPayload(state, tick) {
     };
   });
 
-  return { strips: ducked, buses };
+  const dca_peaks = state.groups.faders.map((_, index) => Math.max(-96, ...ducked
+    .filter((_, i) => state.strips[i].group_membership.dca & (1 << index))
+    .map((meter) => meter.post_db)));
+  return { strips: ducked, buses, dca_peaks };
 }
 
 export function createMockMixerController() {
@@ -368,6 +372,7 @@ export function createMockMixerController() {
     return {
       ...cloned,
       groups: { ...cloned.groups, faders: [...cloned.groups.faders] },
+      groupLabels: { dca: [...cloned.groupLabels.dca], mute: [...cloned.groupLabels.mute] },
       strips: cloned.strips.map((strip) => ({ ...strip, group_membership: { ...strip.group_membership } })),
       scenes: Array.from(scenes.keys()),
     };

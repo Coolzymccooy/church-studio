@@ -33,7 +33,7 @@
 //! same source.
 use super::params::{
     clamp_or, fader_db_to_lin, StripParams, BUS_MAIN, BUS_MONITOR, BUS_MONITOR2, BUS_MONITOR3,
-    BUS_STREAM, EQ_MAX_DB, NUM_BUSES, PAN_LAW_NORM, TRIM_MAX_DB, TRIM_MIN_DB,
+    BUS_STREAM, EQ_MAX_DB, FADER_MAX_DB, NUM_BUSES, PAN_LAW_NORM, TRIM_MAX_DB, TRIM_MIN_DB,
 };
 use super::groups::StripGroupGain;
 use super::smooth::LinearSmoother;
@@ -184,7 +184,7 @@ impl Strip {
         let angle = (pan + 1.0) * std::f32::consts::FRAC_PI_4;
         let (pan_l, pan_r) = (angle.cos() * PAN_LAW_NORM, angle.sin() * PAN_LAW_NORM);
 
-        let fader = fader_db_to_lin(p.fader_db.load(Relaxed)) * self.group.level;
+        let fader = (fader_db_to_lin(p.fader_db.load(Relaxed)) * self.group.level).min(fader_db_to_lin(FADER_MAX_DB));
         let mute = if p.mute.load(Relaxed) || self.group.muted { 0.0 } else { 1.0 };
 
         let mut sends = [0.0f32; NUM_BUSES];

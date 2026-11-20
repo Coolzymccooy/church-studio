@@ -1,5 +1,7 @@
-use super::params::{clamp_or, FADER_MAX_DB, MIN_DB};
+use super::group_publication::{GroupPublication, GroupSnapshot};
+use super::params::{clamp_or, StripParams, FADER_MAX_DB, MIN_DB};
 use atomic_float::AtomicF32;
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU8, Ordering::Relaxed};
 
@@ -35,6 +37,9 @@ pub struct GroupParams {
     pub faders: [AtomicF32; GROUP_COUNT],
     pub dca_muted: AtomicU8,
     pub mute_active: AtomicU8,
+    pub edit: Mutex<()>,
+    pub labels: Mutex<GroupLabels>,
+    audio: GroupPublication,
 }
 
 impl GroupParams {
@@ -43,7 +48,18 @@ impl GroupParams {
             faders: std::array::from_fn(|_| AtomicF32::new(0.0)),
             dca_muted: AtomicU8::new(0),
             mute_active: AtomicU8::new(0),
+            edit: Mutex::new(()),
+            labels: Mutex::new(GroupLabels::default()),
+            audio: GroupPublication::default(),
         }
+    }
+
+    pub fn publish(&self, strips: &[StripParams]) {
+        self.audio.publish(self.capture(), strips);
+    }
+
+    pub(super) fn refresh_audio(&self, cached: &mut GroupSnapshot) {
+        self.audio.refresh(cached);
     }
 
     pub fn capture(&self) -> GroupState {
@@ -61,6 +77,13 @@ impl GroupParams {
         self.dca_muted.store(state.dca_muted, Relaxed);
         self.mute_active.store(state.mute_active, Relaxed);
     }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(default)]
+pub struct GroupLabels {
+    pub dca: [String; GROUP_COUNT],
+    pub mute: [String; GROUP_COUNT],
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -88,7 +111,7 @@ impl GroupState {
             total += db;
         }
         // Multiple attenuators can take the sum below the fader's travel.
-        10f32.powf(total.min(FADER_MAX_DB) / 20.0)
+        10f32.powf(total / 20.0)
     }
 
     pub fn muted(&self, membership: Membership) -> bool {

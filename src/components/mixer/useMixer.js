@@ -167,6 +167,9 @@ export function useMixer(controller, refreshKey) {
     withOptimism(
       (prev) => applyGroupChange(prev, change),
       (prev) => {
+        if (type === 'rename') {
+          return (latest) => applyGroupChange(latest, { ...change, name: prev.groupLabels?.[kind]?.[index] ?? '' });
+        }
         if (type === 'fader') {
           return (latest) => applyGroupChange(latest, { ...change, db: prev.groups.faders[index] });
         }

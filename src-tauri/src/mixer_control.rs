@@ -8,6 +8,9 @@
 //! - strip names (control side only; never touched by the audio thread).
 //!
 //! Everything here is pure (no Tauri, no files) so it can be unit-tested.
+mod names;
+pub use names::{clean_strip_name, scene_slug};
+
 use crate::dsp::mixer::leveler::{
     LEVELER_TARGET_DEFAULT, LEVELER_TARGET_MAX, LEVELER_TARGET_MIN,
 };
@@ -18,7 +21,7 @@ use crate::dsp::mixer::params::{
 use crate::dsp::mixer::scene::StripScene;
 use crate::dsp::mixer::groups::{GroupState, Membership};
 use crate::dsp::mixer::{MixerParams, MixerScene};
-use crate::{mixer_groups::{set_group, GroupChange}, mixer_layout::StripLayout};
+use crate::mixer_layout::StripLayout;
 pub use crate::mixer_model::{BusState, MixerState, StoredScene, StripState};
 use atomic_float::AtomicF32;
 use parking_lot::Mutex;
@@ -39,6 +42,7 @@ pub const NO_VOICE_STRIP: usize = usize::MAX;
 /// Version tag written into scene files.
 pub const SCENE_FILE_VERSION: u32 = 1;
 
+/// One f32 key: (name, min, max, default), as listed in the contract.
 type F32Key = (&'static str, f32, f32, f32);
 
 const STRIP_F32_KEYS: &[F32Key] = &[
@@ -159,6 +163,7 @@ pub fn default_strip_name(index: usize) -> String {
 /// today's sound (only channel 1 is heard) until the operator raises it.
 pub const OTHER_STRIPS_FADER_DB: f32 = -90.0;
 
+/// Default fader for strip `index`: 0 dB on strip 0, off on the others.
 pub fn default_fader_db(index: usize) -> f32 {
     if index == 0 {
         0.0
@@ -167,8 +172,10 @@ pub fn default_fader_db(index: usize) -> f32 {
     }
 }
 
+/// Contract defaults for strip `index` (differs from `StripParams::new()`:
+/// HPF on, gate threshold −45 dB, Monitor send 0 dB pre-fader, and every
+/// strip but the first with its fader off).
 fn reset_strip(index: usize, p: &StripParams) {
-    p.groups.store(Membership::default());
     for spec in STRIP_F32_KEYS.iter() {
         if let Some(field) = strip_f32(p, spec.0) {
             field.store(spec.3, Relaxed);
@@ -182,6 +189,7 @@ fn reset_strip(index: usize, p: &StripParams) {
     }
 }
 
+/// Overlay a feed's preset on a freshly reset strip.
 fn apply_preset(preset: StripPreset, p: &StripParams) {
     if let StripPreset::Music { pan } = preset {
         // Music dips while an automix voice speaks (operator can turn it off).
@@ -206,6 +214,8 @@ fn reset_bus(p: &BusParams) {
     p.leveler_target_lufs.store(LEVELER_TARGET_DEFAULT, Relaxed);
 }
 
+/// Re-clamp every value (used after loading a scene file, which may carry
+/// out-of-range or NaN values).
 fn sanitize_strip(index: usize, p: &StripParams) {
     // A NaN fader falls back to this strip's own default (off above strip 0).
     let fader_nan = p.fader_db.load(Relaxed).is_nan();
@@ -225,69 +235,6 @@ fn sanitize_bus(p: &BusParams) {
             field.store(clamp_key(*spec, field.load(Relaxed)), Relaxed);
         }
     }
-}
-
-/// Trim, bound and check a strip name. Empty means "use the default name".
-pub fn clean_strip_name(index: usize, name: &str) -> Result<String, String> {
-    let name = name.trim();
-    if name.is_empty() {
-        return Ok(default_strip_name(index));
-    }
-    if name.chars().count() > MAX_STRIP_NAME_CHARS {
-        return Err(format!(
-            "strip name is longer than {MAX_STRIP_NAME_CHARS} characters"
-        ));
-    }
-    if name.chars().any(char::is_control) {
-        return Err("strip name contains control characters".to_string());
-    }
-    Ok(name.to_string())
-}
-
-/// Validate a scene name and turn it into a file-name slug.
-///
-/// Names are 1–40 characters (after trimming) of ASCII letters, digits,
-/// space, `-` and `_`. The slug is lowercase with spaces replaced by `-`.
-/// Anything else (dots, slashes, unicode) is rejected, so a slug can never
-/// escape the scenes directory. Windows device names are rejected too.
-pub fn scene_slug(name: &str) -> Result<String, String> {
-    let name = name.trim();
-    let len = name.chars().count();
-    if len == 0 {
-        return Err("scene name is empty".to_string());
-    }
-    if len > MAX_SCENE_NAME_CHARS {
-        return Err(format!(
-            "scene name is longer than {MAX_SCENE_NAME_CHARS} characters"
-        ));
-    }
-    let valid = name
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == ' ' || c == '-' || c == '_');
-    if !valid {
-        return Err(
-            "scene name may only contain letters, digits, spaces, '-' and '_'".to_string(),
-        );
-    }
-    let slug: String = name
-        .chars()
-        .map(|c| if c == ' ' { '-' } else { c.to_ascii_lowercase() })
-        .collect();
-    if is_reserved_file_name(&slug) {
-        return Err(format!("'{name}' is a reserved name"));
-    }
-    Ok(slug)
-}
-
-fn is_reserved_file_name(slug: &str) -> bool {
-    const RESERVED: [&str; 4] = ["con", "prn", "aux", "nul"];
-    if RESERVED.contains(&slug) {
-        return true;
-    }
-    let bytes = slug.as_bytes();
-    bytes.len() == 4
-        && (slug.starts_with("com") || slug.starts_with("lpt"))
-        && (b'1'..=b'9').contains(&bytes[3])
 }
 
 /// A live attenuation readout for `mixer_state`: 0 while stopped or NaN.
@@ -443,6 +390,7 @@ fn previous_index(origins: &[StripOrigin], identity: &str, index: usize) -> Opti
 /// is ignored. Strips not in `feeds` keep their record. Returns the indices
 /// that were reset.
 fn assign_feeds(link: &MixerLink, feeds: &[StripFeed]) -> Vec<usize> {
+    let _edit = link.params.groups.edit.lock();
     let mut names = link.names.lock();
     let mut origins = link.origins.lock();
     // Everything as it was, so moves can chain (L 2→3 while R 3→4).
@@ -473,6 +421,7 @@ fn assign_feeds(link: &MixerLink, feeds: &[StripFeed]) -> Vec<usize> {
                 }
                 None => {
                     reset_strip(index, strip);
+                    strip.groups.store(Membership::default());
                     apply_preset(feed.preset, strip);
                     *name = default_strip_name(index);
                     if voice_before == index && voice == voice_before {
@@ -497,6 +446,7 @@ fn assign_feeds(link: &MixerLink, feeds: &[StripFeed]) -> Vec<usize> {
         };
     }
     link.voice_strip.store(voice, Relaxed);
+    link.params.groups.publish(&link.params.strips);
     reset
 }
 
@@ -571,9 +521,6 @@ impl MixerControl {
     }
 
     pub fn set_strip_param(&self, index: u32, key: &str, value: f32) -> Result<(), String> {
-        if key == "dca_fader_db" {
-            return set_group(self, GroupChange::Fader { index: index as usize, db: value });
-        }
         let strip = self.strip(index)?;
         match (f32_spec(STRIP_F32_KEYS, key), strip_f32(strip, key)) {
             (Some(spec), Some(field)) => {
@@ -585,9 +532,6 @@ impl MixerControl {
     }
 
     pub fn set_strip_bool(&self, index: u32, key: &str, value: bool) -> Result<(), String> {
-        if key == "dca_mute" {
-            return set_group(self, GroupChange::DcaMute { index: index as usize, enabled: value });
-        }
         let strip = self.strip(index)?;
         if key == "voice_chain" {
             return self.set_voice_chain(index as usize, value);
@@ -605,6 +549,10 @@ impl MixerControl {
         Ok(())
     }
 
+    /// At most one strip carries the voice chain: turning it on for a strip
+    /// moves it there (clearing the others). Turning it off on the strip that
+    /// holds it leaves no strip with the voice chain (`NO_VOICE_STRIP`);
+    /// turning it off on any other strip is a no-op.
     fn set_voice_chain(&self, index: usize, on: bool) -> Result<(), String> {
         if on {
             self.voice_strip.store(index, Relaxed);
@@ -687,11 +635,16 @@ impl MixerControl {
         }
     }
 
+    /// Build the `MixerState` JSON model. `input_channels` is the running
+    /// engine's channel count (1 when stopped); one strip is listed per
+    /// input channel, capped at `MAX_STRIPS`.
     #[cfg(test)] // tests only; the app uses `snapshot_layout`
     pub fn snapshot(&self, input_channels: u32, running: bool, scenes: Vec<String>) -> MixerState {
         self.snapshot_with_ndi(input_channels, 0, running, scenes)
     }
 
+    /// `snapshot`, plus one strip per running NDI input after the hardware
+    /// strips (`StripLayout`).
     #[cfg(test)] // tests only; the app uses `snapshot_layout`
     pub fn snapshot_with_ndi(
         &self,
@@ -704,6 +657,8 @@ impl MixerControl {
         self.snapshot_layout(layout, running, scenes)
     }
 
+    /// `MixerState` for the strips of `layout` (hardware, computer, NDI),
+    /// with no bus output devices (every bus `output` is null).
     pub fn snapshot_layout(
         &self,
         layout: StripLayout,
@@ -713,6 +668,8 @@ impl MixerControl {
         self.snapshot_outputs(layout, running, scenes, &BusOutputs::default())
     }
 
+    /// `snapshot_layout`, plus the device each bus plays on (`outputs`, in
+    /// `BUS_*` order; the running engine's `bus_outputs`).
     pub fn snapshot_outputs(
         &self,
         layout: StripLayout,
@@ -721,6 +678,7 @@ impl MixerControl {
         outputs: &BusOutputs,
     ) -> MixerState {
         let count = layout.total();
+        let _edit = self.params.groups.edit.lock();
         let groups = self.params.groups.capture();
         let names: Vec<String> = self.names.lock().clone();
         let strips = (0..count)
@@ -750,6 +708,7 @@ impl MixerControl {
             net_strips: layout.net as u32,
             running,
             groups,
+            group_labels: self.params.groups.labels.lock().clone(),
             strips,
             buses,
             scenes,
@@ -757,16 +716,18 @@ impl MixerControl {
     }
 
     pub fn capture_scene(&self, name: &str) -> StoredScene {
+        let strip_names = self.names.lock().clone();
         StoredScene {
             version: SCENE_FILE_VERSION,
             name: name.trim().to_string(),
-            strip_names: self.names.lock().clone(),
+            strip_names,
             voice_strip: self.voice_strip.load(Relaxed),
             mixer: MixerScene::capture_named(&self.params, name.trim()),
         }
     }
 
-    /// Recall a scene with clamped parameters and validated names.
+    /// Recall a scene onto the live params (click-free: the mixer ramps).
+    /// Values are re-clamped; bad names fall back to the defaults.
     pub fn apply_scene(&self, scene: &StoredScene) {
         // Strips the scene does not cover (a scene saved by an older build
         // with fewer strips) go back to their defaults.

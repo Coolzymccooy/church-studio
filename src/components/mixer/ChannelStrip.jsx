@@ -1,3 +1,4 @@
+import { dcaDb, groupLabel, hasGroup } from '../../lib/mixerGroups.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { faderDbToPosition, formatDb, positionToFaderDb } from '../../lib/mixerEngine.js';
@@ -88,7 +89,7 @@ function KeyPair({ children }) {
  * and gain-reduction readout, auto-mix and duck (when the engine reports them), and the fader
  * between pre- and post-fader meters.
  */
-export default function ChannelStrip({ strip, metersRef, onSetParam, onSetBool, onRename, extraMonitors = [] }) {
+export default function ChannelStrip({ strip, metersRef, onSetParam, onSetBool, onRename, extraMonitors = [], groups, groupLabels }) {
   const [nameDraft, setNameDraft] = useState(strip.name);
   const [syncedName, setSyncedName] = useState(strip.name);
   // Reset the draft whenever the committed name changes (e.g. a scene load), during render.
@@ -116,6 +117,12 @@ export default function ChannelStrip({ strip, metersRef, onSetParam, onSetBool, 
   const postDb = useCallback(() => meter().post_db ?? -96, [meter]);
 
   const name = strip.name;
+  const membership = strip.group_membership;
+  const offset = groups && membership ? dcaDb(groups, membership) : 0;
+  const groupOff = offset === -Infinity;
+  const dcaLabel = membership?.dca && groups
+    ? groupOff ? 'DCA off' : `DCA ${formatDb(Math.min(10, strip.fader_db + offset) - strip.fader_db)} dB`
+    : '';
   const toggle = (key) => () => onSetBool(key, !strip[key]);
   const boolKey = (key, text, lit, label) => (
     <Key lit={strip[key] ? lit : null} pressed={strip[key]} onClick={toggle(key)} aria-label={`${name} ${label}`}>{text}</Key>
@@ -148,7 +155,7 @@ export default function ChannelStrip({ strip, metersRef, onSetParam, onSetBool, 
 
   return (
     <div className="fp-strip" role="group" aria-label={`Channel ${strip.index + 1} ${name}`}>
-      <div className={`fp-scrib fp-c-${stripColour(strip.index)}${strip.mute || strip.group_muted ? ' fp-dim' : ''}`}>
+      <div className={`fp-scrib fp-c-${stripColour(strip.index)}${strip.mute || strip.group_muted || groupOff ? ' fp-dim' : ''}`}>
         <span className="fp-no">{String(strip.index + 1).padStart(2, '0')}</span>
         <input
           value={nameDraft}
@@ -177,10 +184,18 @@ export default function ChannelStrip({ strip, metersRef, onSetParam, onSetBool, 
       {hasAutomix(strip) && strip.duck && knobRow(['duck'])}
       <KeyPair>{boolKey('mute', 'mute', 'amber', 'mute')}{boolKey('solo', 'pfl', 'sel', 'listen on monitor')}</KeyPair>
 
-      {strip.group_muted && (
-        <div className="fp-keys items-center">
-          <span className="fp-sub">Group mute</span>
-          <InfoTip label={`${name} group mute`}>A DCA or mute group is muting this channel.</InfoTip>
+      {membership && (
+        <div className="fp-row h-6 justify-start gap-1">
+          <span className="fp-sub truncate">{strip.group_muted ? 'Group mute' : dcaLabel}</span>
+          {Boolean(membership.dca || membership.mute) && (
+            <InfoTip label={`${name} groups`}>
+              {['dca', 'mute'].flatMap((kind) => Array.from({ length: 8 }, (_, i) => i)
+                .filter((i) => hasGroup(membership[kind], i))
+                .map((i) => groupLabel(groupLabels, kind, i))).join(', ')}
+              {strip.group_muted && ' · Group mute active'}
+              {dcaLabel && ` · ${dcaLabel}`}
+            </InfoTip>
+          )}
         </div>
       )}
       <StripDyn getMeter={meter} gateEnabled={strip.gate_enabled} />

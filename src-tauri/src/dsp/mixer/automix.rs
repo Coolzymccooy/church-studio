@@ -17,7 +17,7 @@
 //! happens at engine start, never when the first talker starts mid-service. All state advances per sample (VAD on fixed 480-sample frames,
 //! noise floor on fixed 10 ms frames), so the block size never changes the
 //! result.
-use super::groups::GroupState;
+use super::group_publication::GroupSnapshot;
 use super::params::{clamp_or, StripParams, DUCK_DEPTH_DEFAULT_DB, DUCK_DEPTH_MAX_DB, MIN_DB};
 use nnnoiseless::DenoiseState;
 use std::sync::atomic::Ordering::Relaxed;
@@ -370,12 +370,12 @@ impl AutoMix {
 
     /// Read the strip flags for this block. Muted strips and strips with the
     /// fader off leave the group; `duck` wins over `automix`.
-    fn sync(&mut self, params: &[StripParams], groups: &GroupState) {
+    fn sync(&mut self, params: &[StripParams], groups: &GroupSnapshot) {
         self.any_duck = false;
         self.any_member = false;
-        for (slot, p) in self.slots.iter_mut().zip(params.iter()) {
+        for (i, (slot, p)) in self.slots.iter_mut().zip(params.iter()).enumerate() {
             let duck = p.duck.load(Relaxed);
-            let group = groups.strip_gain(p.groups.capture());
+            let group = groups.state.strip_gain(groups.members[i]);
             let audible = !group.muted && group.level > 0.0
                 && !p.mute.load(Relaxed) && p.fader_db.load(Relaxed) > MIN_DB;
             let automix = p.automix.load(Relaxed) && !duck;
@@ -401,12 +401,12 @@ impl AutoMix {
 
     /// Compute the per-sample gains of this block. `detect(i)` is strip `i`'s
     /// detection signal (after trim and HPF), at least `n` samples long.
-    pub fn process<'a>(
+    pub(super) fn process<'a>(
         &mut self,
         params: &[StripParams],
         n: usize,
         detect: impl Fn(usize) -> &'a [f32],
-        groups: &GroupState,
+        groups: &GroupSnapshot,
     ) {
         if !self.warmed {
             self.warm_up();

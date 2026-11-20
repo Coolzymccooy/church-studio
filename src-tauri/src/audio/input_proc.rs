@@ -252,6 +252,7 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
         let strips = self.chan_bufs.len();
         self.mixer.process(&inputs[..strips], n);
         self.publish_path_latency();
+        self.meter_slots.publish_dca(self.mixer.dca_peaks());
         self.meter_slots
             .publish(self.mixer.strip_meters(), &self.mixer.bus_meters()[..]);
 

@@ -141,6 +141,8 @@ export default function MixerConsole({ controller, refreshKey, demoBanner, onOpe
                 <ChannelStrip
                   key={strip.index}
                   strip={strip}
+                  groups={state.groups}
+                  groupLabels={state.groupLabels}
                   metersRef={metersRef}
                   onSetParam={(key, value) => setStripParam(strip.index, key, value)}
                   onSetBool={(key, value) => setStripBool(strip.index, key, value)}
@@ -149,7 +151,7 @@ export default function MixerConsole({ controller, refreshKey, demoBanner, onOpe
                 />
               ))}
             </div>
-            {showGroups && state.groups && <DcaBank groups={state.groups} strips={state.strips} onChange={setGroup} />}
+            {showGroups && state.groups && <DcaBank groups={state.groups} labels={state.groupLabels} strips={state.strips} metersRef={metersRef} onChange={setGroup} />}
             <div className="fp-buses" role="group" aria-label="Buses">
               {state.buses.filter((bus) => !isExtraMonitor(bus.id) || extraMonitors.some((m) => m.bus === bus.id)).map((bus) => (
                 <BusStrip
