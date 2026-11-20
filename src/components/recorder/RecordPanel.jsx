@@ -15,6 +15,7 @@ import {
 } from '../../lib/recorder.js';
 import { useRecorder } from './useRecorder.js';
 import RecordExportKeys from './RecordExportKeys.jsx';
+import RecordPlayKey from './RecordPlayKey.jsx';
 import RecordTrackChips from './RecordTrackChips.jsx';
 
 const HEALTH_CLASS = { ok: '', warn: 'fp-caution', error: 'fp-fault' };
@@ -164,6 +165,7 @@ function RecordSection({ strips, engineRunning }) {
             saved {summary.files?.length ?? 0} files · {formatElapsed(summary.durationSeconds)} · {summary.markers ?? 0} markers
             {summary.droppedFrames > 0 ? ` · ${summary.droppedFrames} dropped frames` : ''}
           </span>
+          {!recording && <RecordPlayKey key={`play-${summary.folder}`} engineOn={engineOn} />}
           <RecordExportKeys key={summary.folder} summary={summary} />
         </div>
       )}
