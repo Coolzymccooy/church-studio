@@ -18,6 +18,8 @@
   /* lamps: green = running or safe, amber = caution or armed, red = recording, clip or fault */
   --fp-led-g: #3CC777;
   --fp-led-g-dim: #1C3526;
+  /* A lit green key: a softer mint than the LED, so a lit key reads as lit without shouting. */
+  --fp-lit-g: #96DDB5;
   --fp-led-a: #F2B43E;
   --fp-led-a-dim: #3A2E14;
   --fp-led-r: #F0533F;
@@ -187,6 +189,7 @@
   --color-fp-meter-bg: var(--fp-meter-bg);
   --color-fp-led-g: var(--fp-led-g);
   --color-fp-led-g-dim: var(--fp-led-g-dim);
+  --color-fp-lit-g: var(--fp-lit-g);
   --color-fp-led-a: var(--fp-led-a);
   --color-fp-led-a-dim: var(--fp-led-a-dim);
   --color-fp-led-r: var(--fp-led-r);

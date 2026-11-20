@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { faderDbToPosition, formatDb, positionToFaderDb } from '../../lib/mixerEngine.js';
-import { STRIP_KNOBS, STRIP_ROWS, grText, stripColour, stripGateTone } from '../../lib/faceplateStrip.js';
+import {
+  DUCK_KNOB, STRIP_KNOBS, STRIP_ROWS, grText, hasAutomix, reductionText, stripColour, stripGateTone,
+} from '../../lib/faceplateStrip.js';
 import { Fader, Glass, Key, Knob, MeterLadder } from '../faceplate/index.js';
 
 const FADER_HEIGHT = 132;
@@ -35,6 +37,46 @@ function StripDyn({ getMeter, gateEnabled }) {
   );
 }
 
+/**
+ * Auto-mix or duck reduction for one strip, updated from an animation frame like StripDyn.
+ * Auto-mix: a green lamp while the strip hears speech, then "mix -n". Duck: an amber lamp while
+ * the strip is being dipped, then "duck -n".
+ */
+const AUTO_TIP = {
+  automix: 'Speech: lit while this mic hears a voice. The reading is how far auto-mix has turned this mic down (0 while it is the one talking).',
+  duck: 'Ducking: lit while this music strip is being turned down because someone is talking. The reading is how far it is down.',
+};
+
+function StripAuto({ getMeter, mode }) {
+  const boxRef = useRef(null);
+  const ledRef = useRef(null);
+  const textRef = useRef(null);
+  const automix = mode === 'automix';
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      const m = getMeter();
+      const db = automix ? m.automix_gr_db : m.duck_gr_db;
+      const lit = automix ? Boolean(m.speech) : db >= 0.1;
+      if (ledRef.current) ledRef.current.className = lit ? `fp-led ${automix ? 'fp-led-g' : 'fp-led-a'}` : 'fp-led';
+      if (boxRef.current) boxRef.current.classList.toggle('fp-auto-on', lit);
+      if (textRef.current) textRef.current.textContent = reductionText(automix ? 'mix' : 'duck', db);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [getMeter, automix]);
+  return (
+    <Glass className="fp-auto" title={AUTO_TIP[mode]} aria-label={automix ? 'speech and auto-mix reduction' : 'ducking and duck reduction'}>
+      <span ref={boxRef} className="fp-auto-lamp">
+        <span ref={ledRef} className="fp-led" aria-hidden="true" />
+        <span>{automix ? 'speech' : 'ducking'}</span>
+      </span>
+      <span ref={textRef} className="fp-auto-val">{automix ? 'mix 0.0' : 'duck 0'}</span>
+    </Glass>
+  );
+}
+
 function KeyPair({ children }) {
   return <div className="fp-krow">{children}</div>;
 }
@@ -43,7 +85,8 @@ function KeyPair({ children }) {
  * ChannelStrip — one input channel on the faceplate: scribble strip (click the name to rename),
  * polarity and high-pass, trim, filter frequency and pan, gate and compressor with their thresholds
  * and ratio, three-band EQ, three sends, monitor tap and voice chain, mute and PFL, the gate
- * and gain-reduction readout, and the fader between pre- and post-fader meters.
+ * and gain-reduction readout, auto-mix and duck (when the engine reports them), and the fader
+ * between pre- and post-fader meters.
  */
 export default function ChannelStrip({ strip, metersRef, onSetParam, onSetBool, onRename }) {
   const [nameDraft, setNameDraft] = useState(strip.name);
@@ -78,7 +121,7 @@ export default function ChannelStrip({ strip, metersRef, onSetParam, onSetBool, 
     <Key lit={strip[key] ? lit : null} pressed={strip[key]} onClick={toggle(key)} aria-label={`${name} ${label}`}>{text}</Key>
   );
   const knobView = (id) => {
-    const k = STRIP_KNOBS[id];
+    const k = id === 'duck' ? DUCK_KNOB : STRIP_KNOBS[id];
     const value = strip[k.param];
     return (
       <Knob
@@ -125,9 +168,16 @@ export default function ChannelStrip({ strip, metersRef, onSetParam, onSetBool, 
       {knobRow(rowEq)}
       {knobRow(rowSends)}
       <KeyPair>{boolKey('monitor_post_fader', 'post', 'sel', 'monitor send after fader')}{boolKey('voice_chain', 'voice', 'orange', 'voice chain')}</KeyPair>
+      {hasAutomix(strip) && (
+        <KeyPair>{boolKey('automix', 'auto', 'orange', 'auto-mix')}{boolKey('duck', 'duck', 'sel', 'duck under speech')}</KeyPair>
+      )}
+      {hasAutomix(strip) && strip.duck && knobRow(['duck'])}
       <KeyPair>{boolKey('mute', 'mute', 'amber', 'mute')}{boolKey('solo', 'pfl', 'sel', 'listen on monitor')}</KeyPair>
 
       <StripDyn getMeter={meter} gateEnabled={strip.gate_enabled} />
+      {hasAutomix(strip) && (strip.automix || strip.duck) && (
+        <StripAuto getMeter={meter} mode={strip.automix ? 'automix' : 'duck'} />
+      )}
 
       <div className="fp-fz">
         <MeterLadder getDb={preDb} height={LADDER_HEIGHT} width={5} label={`${name} pre-fader level`} />

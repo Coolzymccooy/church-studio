@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { paramRange } from './mixerEngine.js';
 import {
   STRIP_KNOBS, STRIP_ROWS, STRIP_COLOURS, stripColour, stripGateTone, grText, panText, sendText, compactDb,
+  DUCK_KNOB, hasAutomix, reductionText,
   BUS_LIMITER, busLabel,
 } from './faceplateStrip.js';
 
@@ -56,6 +57,11 @@ test('gain reduction text', () => {
   assert.equal(grText(0.05), 'gr 0.0');
   assert.equal(grText(3.24), 'gr -3.2');
   assert.equal(grText(undefined), 'gr 0.0');
+  assert.equal(grText(9.94), 'gr -9.9');
+  assert.equal(grText(9.96), 'gr -10');
+  assert.equal(grText(12.5), 'gr -13');
+  assert.equal(grText(250), 'gr -99');
+  for (const v of [0.3, 5.55, 9.96, 12.5, 40, 250]) assert.ok(grText(v).length <= 7, grText(v));
 });
 
 test('pan and send text', () => {
@@ -94,4 +100,25 @@ test('bus labels are short and lower case', () => {
   assert.equal(busLabel('stream'), 'stream');
   assert.equal(busLabel('monitor'), 'mon');
   assert.equal(busLabel('aux9'), 'aux9');
+});
+
+test('reductionText fits the strip like grText', () => {
+  assert.equal(reductionText('mix', 0), 'mix 0.0');
+  assert.equal(reductionText('mix', 3.24), 'mix -3.2');
+  assert.equal(reductionText('duck', 12), 'duck -12');
+  assert.equal(reductionText('duck', 0.3), 'duck -1');
+  assert.equal(reductionText('duck', 0), 'duck 0');
+  assert.equal(reductionText('duck', 400), 'duck -99');
+  for (const v of [0.3, 9.96, 12, 40]) assert.ok(reductionText('duck', v).length <= 8, reductionText('duck', v));
+});
+
+test('hasAutomix only when the engine reports both keys', () => {
+  assert.equal(hasAutomix({ automix: false, duck: false }), true);
+  assert.equal(hasAutomix({ automix: false }), false);
+  assert.equal(hasAutomix({}), false);
+  assert.equal(hasAutomix(null), false);
+});
+
+test('duck knob uses the contract range', () => {
+  assert.deepEqual([DUCK_KNOB.min, DUCK_KNOB.max, DUCK_KNOB.defaultValue], [0, 40, 12]);
 });

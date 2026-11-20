@@ -12,12 +12,33 @@ pub const MAIN_MIX_BASE: &str = "Main Mix";
 /// Largest accepted UTC offset (±14 h).
 const MAX_OFFSET_MINUTES: i32 = 14 * 60;
 
+/// Strips not fed by an input-device channel, for each track's `source`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct StripSources<'a> {
+    pub ndi: &'a [usize],
+    pub computer: &'a [usize],
+}
+
+impl StripSources<'_> {
+    /// "ndi", "computer" or "hardware".
+    pub fn source(&self, index: usize) -> &'static str {
+        if self.ndi.contains(&index) {
+            "ndi"
+        } else if self.computer.contains(&index) {
+            "computer"
+        } else {
+            "hardware"
+        }
+    }
+}
+
 /// Armed strips (raw, mono), then the Stream mix, then Main when included.
-/// `names[i]` is strip i's name; `ndi_strips` lists the strips fed by NDI.
+/// `names[i]` is strip i's name; `sources` lists the strips fed by NDI and
+/// by computer audio.
 pub fn build_tracks(
     layout: RecordLayout,
     names: &[String],
-    ndi_strips: &[usize],
+    sources: StripSources<'_>,
     config: &RecorderConfig,
 ) -> Vec<TrackPlan> {
     let mut tracks = Vec::with_capacity(layout.strips + 2);
@@ -26,7 +47,7 @@ pub fn build_tracks(
             .get(index)
             .cloned()
             .unwrap_or_else(|| format!("Ch {}", index + 1));
-        let source = if ndi_strips.contains(&index) { "ndi" } else { "hardware" };
+        let source = sources.source(index);
         tracks.push(TrackPlan {
             base: strip_track_base(index, &name),
             name,
@@ -94,10 +115,12 @@ mod tests {
     #[test]
     fn every_strip_and_the_stream_mix_by_default() {
         let layout = RecordLayout { strips: 3 };
-        let tracks = build_tracks(layout, &names(&["Pastor", "Choir", "Zoom"]), &[2], &RecorderConfig::default());
+        let sources = StripSources { ndi: &[2], computer: &[1] };
+        let tracks = build_tracks(layout, &names(&["Pastor", "Choir", "Zoom"]), sources, &RecorderConfig::default());
         let bases: Vec<&str> = tracks.iter().map(|t| t.base.as_str()).collect();
         assert_eq!(bases, vec!["01 Pastor", "02 Choir", "03 Zoom", "Stream Mix"]);
         assert_eq!(tracks[0].source, "hardware");
+        assert_eq!(tracks[1].source, "computer");
         assert_eq!(tracks[2].source, "ndi");
         assert_eq!(tracks[2].first_channel, 2);
         assert_eq!((tracks[3].first_channel, tracks[3].channels), (3, 2));
@@ -112,7 +135,7 @@ mod tests {
             armed_strips: Some(vec![1]),
             ..RecorderConfig::default()
         };
-        let tracks = build_tracks(layout, &names(&["A", "B/C"]), &[], &config);
+        let tracks = build_tracks(layout, &names(&["A", "B/C"]), StripSources::default(), &config);
         let bases: Vec<&str> = tracks.iter().map(|t| t.base.as_str()).collect();
         assert_eq!(bases, vec!["02 BC", "Stream Mix", "Main Mix"]);
         assert_eq!(tracks[0].name, "B/C", "the display name is kept");
@@ -121,7 +144,7 @@ mod tests {
 
     #[test]
     fn missing_names_fall_back() {
-        let tracks = build_tracks(RecordLayout { strips: 1 }, &[], &[], &RecorderConfig::default());
+        let tracks = build_tracks(RecordLayout { strips: 1 }, &[], StripSources::default(), &RecorderConfig::default());
         assert_eq!(tracks[0].base, "01 Ch 1");
     }
 

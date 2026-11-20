@@ -7,6 +7,7 @@
 //! can never address a path outside that directory.
 use crate::audio::EngineState;
 use crate::mixer_control::{scene_slug, MixerControl, MixerState, StoredScene};
+use crate::mixer_layout::StripLayout;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -47,19 +48,16 @@ impl SceneLoadedHook {
     }
 }
 
-/// (input channel count, NDI input count, running). 1 channel and no NDI
-/// inputs when stopped.
-fn engine_info(engine: &EngineState) -> (u32, u32, bool) {
+/// (strip layout, running). One hardware strip and nothing else when
+/// stopped.
+fn engine_info(engine: &EngineState) -> (StripLayout, bool) {
+    let stopped = (StripLayout::new(1, false, 0), false);
     match engine.lock() {
         Ok(guard) => match guard.as_ref() {
-            Some(running) => (
-                running.input_channels.max(1),
-                running.strip_layout().ndi as u32,
-                true,
-            ),
-            None => (1, 0, false),
+            Some(running) => (running.strip_layout(), true),
+            None => stopped,
         },
-        Err(_) => (1, 0, false),
+        Err(_) => stopped,
     }
 }
 
@@ -126,8 +124,8 @@ fn scenes_or_empty(app: &AppHandle) -> Vec<String> {
 }
 
 fn build_state(app: &AppHandle, mixer: &MixerControl, engine: &EngineState) -> MixerState {
-    let (channels, ndi_inputs, running) = engine_info(engine);
-    mixer.snapshot_with_ndi(channels, ndi_inputs, running, scenes_or_empty(app))
+    let (layout, running) = engine_info(engine);
+    mixer.snapshot_layout(layout, running, scenes_or_empty(app))
 }
 
 #[tauri::command]

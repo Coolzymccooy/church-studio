@@ -1,6 +1,6 @@
 //! Mixer scenes: a by-value snapshot of every strip and bus control that can
 //! be saved as JSON and recalled onto the live `MixerParams`.
-use super::params::{BusParams, MixerParams, StripParams, NUM_BUSES};
+use super::params::{BusParams, MixerParams, StripParams, DUCK_DEPTH_DEFAULT_DB, NUM_BUSES};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::Ordering::Relaxed;
 
@@ -24,10 +24,21 @@ pub struct StripScene {
     pub fader_db: f32,
     pub send_db: Vec<f32>,
     pub monitor_post_fader: bool,
+    /// Missing in scene files saved before automix existed: off.
+    #[serde(default)]
+    pub automix: bool,
+    #[serde(default)]
+    pub duck: bool,
+    #[serde(default = "default_duck_depth")]
+    pub duck_depth_db: f32,
+}
+
+fn default_duck_depth() -> f32 {
+    DUCK_DEPTH_DEFAULT_DB
 }
 
 impl StripScene {
-    fn capture(p: &StripParams) -> Self {
+    pub(crate) fn capture(p: &StripParams) -> Self {
         StripScene {
             trim_db: p.trim_db.load(Relaxed),
             polarity_invert: p.polarity_invert.load(Relaxed),
@@ -47,10 +58,13 @@ impl StripScene {
             fader_db: p.fader_db.load(Relaxed),
             send_db: p.send_db.iter().map(|s| s.load(Relaxed)).collect(),
             monitor_post_fader: p.monitor_post_fader.load(Relaxed),
+            automix: p.automix.load(Relaxed),
+            duck: p.duck.load(Relaxed),
+            duck_depth_db: p.duck_depth_db.load(Relaxed),
         }
     }
 
-    fn apply(&self, p: &StripParams) {
+    pub(crate) fn apply(&self, p: &StripParams) {
         p.trim_db.store(self.trim_db, Relaxed);
         p.polarity_invert.store(self.polarity_invert, Relaxed);
         p.hpf_enabled.store(self.hpf_enabled, Relaxed);
@@ -71,6 +85,11 @@ impl StripScene {
             dst.store(src, Relaxed);
         }
         p.monitor_post_fader.store(self.monitor_post_fader, Relaxed);
+        // `duck` and `automix` are exclusive; a hand-edited file with both
+        // keeps `duck` (the engine treats it that way too).
+        p.automix.store(self.automix && !self.duck, Relaxed);
+        p.duck.store(self.duck, Relaxed);
+        p.duck_depth_db.store(self.duck_depth_db, Relaxed);
     }
 }
 

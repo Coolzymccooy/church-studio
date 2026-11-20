@@ -55,8 +55,29 @@ libloading = "0.8"
 # This machine's name, to recognise our own NDI sources (already in the lock file).
 gethostname = "1.1"
 
+# ── Recording export (MP3) ───────────────────────────────────────────────────
+# LAME 3.100, built from the bundled C source (LGPL; see
+# docs/THIRD_PARTY_NOTICES.md). 0.2.x uses mp3lame-sys 0.1 = LAME 3.100, the
+# last stable release (0.3 bundles an unreleased 4.0 snapshot).
+mp3lame-encoder = "0.2.5"
+
 [dev-dependencies]
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "sync", "time"] }
+
+# ── Computer audio on macOS (Core Audio process tap) ─────────────────────────
+# The same objc2 bindings cpal 0.18 already pulls in; nothing new is built.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-core-audio = { version = "0.3", default-features = false, features = ["std", "AudioHardware", "objc2", "objc2-foundation", "objc2-core-audio-types"] }
+objc2-core-audio-types = { version = "0.3", default-features = false, features = ["std", "CoreAudioBaseTypes"] }
+objc2-core-foundation = { version = "0.3.1", default-features = false, features = ["std", "CFArray", "CFDictionary", "CFString", "CFNumber", "CFURL"] }
+# AAC (.m4a) export through ExtAudioFile; already in the tree through cpal.
+objc2-audio-toolbox = { version = "0.3", default-features = false, features = ["std", "AudioConverter", "AudioFile", "ExtendedAudioFile", "objc2-core-audio-types", "objc2-core-foundation"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSString", "NSValue", "NSUUID"] }
+
+# AAC (.m4a) export through Media Foundation's sink writer on Windows.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Media_MediaFoundation", "Win32_System_Com"] }
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-updater = "2"

@@ -52,7 +52,8 @@ Loopback (routing).
 - Buses: **Main** (room), **Stream** (livestream/record), **Monitor** (stage/headphones),
   each with its own limiter and meter. The voice-cleanup chain is a strip preset.
 - Scenes (Worship, Sermon, Announcements) recall the whole console in one click.
-- Auto-ducking: music channels dip when a voice channel is active.
+- Auto-ducking: music channels dip when a voice channel is active. Built with a
+  Dugan-style automixer for several mics (`docs/specs/2026-11-19-automix-ducking-design.md`).
 - Mixer UI in the desktop app with meters per strip.
 
 ### Phase 2 — Routing and I/O

@@ -137,6 +137,35 @@ impl DriftReader {
 
     /// Fill `out` (mono, one value per frame: (L + R) / 2) from `ring`.
     pub fn read<C: Consumer<Item = f32>>(&mut self, ring: &mut C, out: &mut [f32]) -> ReadReport {
+        self.read_frames(ring, out.len(), |index, left, right| {
+            out[index] = (left + right) * 0.5;
+        })
+    }
+
+    /// Fill `left` and `right` (one value per frame each) from `ring`,
+    /// keeping the two sides apart. Reads `min(left.len(), right.len())`
+    /// frames.
+    pub fn read_stereo<C: Consumer<Item = f32>>(
+        &mut self,
+        ring: &mut C,
+        left: &mut [f32],
+        right: &mut [f32],
+    ) -> ReadReport {
+        let frames = left.len().min(right.len());
+        self.read_frames(ring, frames, |index, l, r| {
+            left[index] = l;
+            right[index] = r;
+        })
+    }
+
+    /// Read `frames` frames, handing each (index, left, right) to `write`.
+    /// Silence is written for every frame the ring cannot supply.
+    fn read_frames<C: Consumer<Item = f32>>(
+        &mut self,
+        ring: &mut C,
+        frames: usize,
+        mut write: impl FnMut(usize, f32, f32),
+    ) -> ReadReport {
         let mut report = ReadReport::default();
         let mut fill = ring.occupied_len() / STEREO;
         if fill > self.high {
@@ -149,7 +178,7 @@ impl DriftReader {
 
         if self.buffering {
             if fill < self.target || !self.prime(ring) {
-                out.fill(0.0);
+                silence(&mut write, 0, frames);
                 return report;
             }
             self.controller.reset(fill);
@@ -157,16 +186,16 @@ impl DriftReader {
 
         let ratio = self.controller.update(fill);
         // Frames this block pops at most (one per whole step of `frac`).
-        let needed = (self.frac + out.len() as f64 * ratio).ceil() as usize;
+        let needed = (self.frac + frames as f64 * ratio).ceil() as usize;
         if ring.occupied_len() / STEREO < needed {
-            self.underrun(out, &mut report);
+            self.underrun(&mut write, 0, frames, &mut report);
             return report;
         }
-        for index in 0..out.len() {
+        for index in 0..frames {
             let t = self.frac as f32;
             let left = self.current[0] + (self.next[0] - self.current[0]) * t;
             let right = self.current[1] + (self.next[1] - self.current[1]) * t;
-            out[index] = (left + right) * 0.5;
+            write(index, left, right);
             self.frac += ratio;
             while self.frac >= 1.0 {
                 self.frac -= 1.0;
@@ -174,7 +203,7 @@ impl DriftReader {
                 match pop_frame(ring) {
                     Some(frame) => self.next = frame,
                     None => {
-                        self.underrun(&mut out[index + 1..], &mut report);
+                        self.underrun(&mut write, index + 1, frames, &mut report);
                         return report;
                     }
                 }
@@ -195,10 +224,23 @@ impl DriftReader {
         true
     }
 
-    fn underrun(&mut self, rest: &mut [f32], report: &mut ReadReport) {
-        rest.fill(0.0);
+    fn underrun(
+        &mut self,
+        write: &mut impl FnMut(usize, f32, f32),
+        from: usize,
+        frames: usize,
+        report: &mut ReadReport,
+    ) {
+        silence(write, from, frames);
         self.buffering = true;
         report.underrun = true;
+    }
+}
+
+/// Write silence to frames `from..frames`.
+fn silence(write: &mut impl FnMut(usize, f32, f32), from: usize, frames: usize) {
+    for index in from..frames {
+        write(index, 0.0, 0.0);
     }
 }
 
@@ -249,6 +291,33 @@ mod tests {
         reader.read(&mut c, &mut out);
         assert!(!reader.is_buffering());
         assert!(out.iter().all(|&s| (s - 0.4).abs() < 1e-6), "{out:?}");
+    }
+
+    #[test]
+    fn stereo_read_keeps_the_sides_apart() {
+        let (mut p, mut c) = HeapRb::<f32>::new(10_000).split();
+        let mut reader = DriftReader::with_levels(100, 1_000);
+        let (mut left, mut right) = (vec![1.0f32; 32], vec![1.0f32; 32]);
+        push_constant(&mut p, 50, 0.2, -0.6);
+        reader.read_stereo(&mut c, &mut left, &mut right);
+        assert!(left.iter().chain(right.iter()).all(|&s| s == 0.0));
+        push_constant(&mut p, 100, 0.2, -0.6);
+        let report = reader.read_stereo(&mut c, &mut left, &mut right);
+        assert!(!report.underrun);
+        assert!(left.iter().all(|&s| (s - 0.2).abs() < 1e-6), "{left:?}");
+        assert!(right.iter().all(|&s| (s + 0.6).abs() < 1e-6), "{right:?}");
+    }
+
+    #[test]
+    fn stereo_underrun_silences_both_sides() {
+        let (mut p, mut c) = HeapRb::<f32>::new(10_000).split();
+        let mut reader = DriftReader::with_levels(100, 1_000);
+        push_constant(&mut p, 120, 0.5, 0.5);
+        let (mut left, mut right) = (vec![0.0f32; 64], vec![0.0f32; 64]);
+        reader.read_stereo(&mut c, &mut left, &mut right);
+        let report = reader.read_stereo(&mut c, &mut left, &mut right);
+        assert!(report.underrun && reader.is_buffering());
+        assert!(left.iter().chain(right.iter()).all(|&s| s == 0.0));
     }
 
     #[test]
