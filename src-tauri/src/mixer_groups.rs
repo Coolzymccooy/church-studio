@@ -122,8 +122,12 @@ mod tests {
             },
         )
         .unwrap();
+        mixer.set_strip_param(7, "dca_fader_db", -8.0).unwrap();
+        mixer.set_strip_bool(7, "dca_mute", true).unwrap();
         let state = mixer.snapshot_layout(StripLayout::new(2, false, 0), true, vec![]);
         assert_eq!(state.groups.faders[0], 10.0);
+        assert_eq!(state.groups.faders[7], -8.0);
+        assert_eq!(state.groups.dca_muted, 128);
         assert!(state.strips[0].group_muted && !state.strips[1].group_muted);
         assert!(!state.strips[0].mute);
     }

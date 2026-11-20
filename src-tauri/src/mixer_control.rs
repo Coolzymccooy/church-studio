@@ -18,7 +18,7 @@ use crate::dsp::mixer::params::{
 use crate::dsp::mixer::scene::StripScene;
 use crate::dsp::mixer::groups::{GroupState, Membership};
 use crate::dsp::mixer::{MixerParams, MixerScene};
-use crate::mixer_layout::StripLayout;
+use crate::{mixer_groups::{set_group, GroupChange}, mixer_layout::StripLayout};
 pub use crate::mixer_model::{BusState, MixerState, StoredScene, StripState};
 use atomic_float::AtomicF32;
 use parking_lot::Mutex;
@@ -184,7 +184,6 @@ fn reset_strip(index: usize, p: &StripParams) {
     }
 }
 
-/// Overlay a feed's preset on a freshly reset strip.
 fn apply_preset(preset: StripPreset, p: &StripParams) {
     if let StripPreset::Music { pan } = preset {
         // Music dips while an automix voice speaks (operator can turn it off).
@@ -209,8 +208,6 @@ fn reset_bus(p: &BusParams) {
     p.leveler_target_lufs.store(LEVELER_TARGET_DEFAULT, Relaxed);
 }
 
-/// Re-clamp every value (used after loading a scene file, which may carry
-/// out-of-range or NaN values).
 fn sanitize_strip(index: usize, p: &StripParams) {
     // A NaN fader falls back to this strip's own default (off above strip 0).
     let fader_nan = p.fader_db.load(Relaxed).is_nan();
@@ -576,6 +573,9 @@ impl MixerControl {
     }
 
     pub fn set_strip_param(&self, index: u32, key: &str, value: f32) -> Result<(), String> {
+        if key == "dca_fader_db" {
+            return set_group(self, GroupChange::Fader { index: index as usize, db: value });
+        }
         let strip = self.strip(index)?;
         match (f32_spec(STRIP_F32_KEYS, key), strip_f32(strip, key)) {
             (Some(spec), Some(field)) => {
@@ -587,6 +587,9 @@ impl MixerControl {
     }
 
     pub fn set_strip_bool(&self, index: u32, key: &str, value: bool) -> Result<(), String> {
+        if key == "dca_mute" {
+            return set_group(self, GroupChange::DcaMute { index: index as usize, enabled: value });
+        }
         let strip = self.strip(index)?;
         if key == "voice_chain" {
             return self.set_voice_chain(index as usize, value);
@@ -686,7 +689,8 @@ impl MixerControl {
             duck_gr_db: live_gr(&p.live.duck_gr_db, running),
         }
     }
-    #[cfg(test)]
+
+    #[cfg(test)] // tests only; the app uses `snapshot_layout`
     pub fn snapshot(&self, input_channels: u32, running: bool, scenes: Vec<String>) -> MixerState {
         self.snapshot_with_ndi(input_channels, 0, running, scenes)
     }
@@ -765,8 +769,7 @@ impl MixerControl {
         }
     }
 
-    /// Recall a scene onto the live params (click-free: the mixer ramps).
-    /// Values are re-clamped; bad names fall back to the defaults.
+    /// Recall a scene with clamped parameters and validated names.
     pub fn apply_scene(&self, scene: &StoredScene) {
         // Strips the scene does not cover (a scene saved by an older build
         // with fewer strips) go back to their defaults.
