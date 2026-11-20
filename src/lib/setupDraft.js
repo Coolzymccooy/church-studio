@@ -1,5 +1,5 @@
 /** Device keys the setup panel edits. */
-export const SETUP_KEYS = ['inputId', 'outputId', 'broadcastBus', 'mainOutputId'];
+export const SETUP_KEYS = ['inputId', 'outputId', 'broadcastBus', 'mainOutputId', 'monitor2OutputId', 'monitor3OutputId'];
 
 /** The keys whose draft value differs from the saved one, as a patch object. */
 export function draftChanges(saved, draft, keys = SETUP_KEYS) {

@@ -33,13 +33,31 @@ export function reconcileSelectedDevices(selectedDevices, availableDevices) {
     next.broadcastBus = resolveCurrentDeviceId(next.broadcastBus, outputs, 'Not set');
   }
 
-  // The Main (PA) output is desktop-only and optional; a device that has
+  // The Main (PA) and the mon 2 / mon 3 outputs are desktop-only and optional; a device that has
   // gone away falls back to "Not set" rather than to the system default.
-  next.mainOutputId = resolveMainOutputId(next)
-    ? resolveCurrentDeviceId(next.mainOutputId, outputs, 'Not set')
-    : 'Not set';
+  for (const key of OPTIONAL_OUTPUT_KEYS) {
+    next[key] = resolveOptionalOutputId(next, key)
+      ? resolveCurrentDeviceId(next[key], outputs, 'Not set')
+      : 'Not set';
+  }
 
   return next;
+}
+
+/** Optional desktop outputs: the Main (PA) bus and the mon 2 / mon 3 monitor mixes. */
+export const OPTIONAL_OUTPUT_KEYS = ['mainOutputId', 'monitor2OutputId', 'monitor3OutputId'];
+
+/** Every device choice the engine uses, for comparing two selections. */
+export const DEVICE_KEYS = ['inputId', 'outputId', 'broadcastBus', ...OPTIONAL_OUTPUT_KEYS];
+
+export function devicesEqual(a, b) {
+  return DEVICE_KEYS.every((key) => (a?.[key] ?? null) === (b?.[key] ?? null));
+}
+
+/** The device id for an optional output, or null when it is not set. */
+export function resolveOptionalOutputId(selectedDevices, key) {
+  const id = selectedDevices?.[key];
+  return id && id !== 'default' && id !== 'Not set' ? id : null;
 }
 
 export function resolveDeviceLabel(devices, deviceId, {
@@ -86,6 +104,8 @@ export function buildNativeEngineArgs(selectedDevices) {
     monitorOutputDevice: selectedDevices.outputId !== 'default' ? selectedDevices.outputId : null,
     broadcastOutputDevice: resolveBroadcastDeviceId(selectedDevices),
     mainOutputId: resolveMainOutputId(selectedDevices),
+    monitor2OutputId: resolveOptionalOutputId(selectedDevices, 'monitor2OutputId'),
+    monitor3OutputId: resolveOptionalOutputId(selectedDevices, 'monitor3OutputId'),
   };
 }
 

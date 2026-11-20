@@ -33,6 +33,7 @@ import {
 } from './lib/liveScope.js';
 import {
   describeBroadcastRoute,
+  devicesEqual,
   normalizeTauriDevices,
   reconcileSelectedDevices,
   resolveBroadcastLabel,
@@ -95,6 +96,15 @@ const TiwatonApp = () => {
 };
 
 // --- STUDIO COMPONENT ---
+const DEFAULT_DEVICES = {
+  inputId: 'default',
+  outputId: 'default',
+  broadcastBus: 'Not set',
+  mainOutputId: 'Not set',
+  monitor2OutputId: 'Not set',
+  monitor3OutputId: 'Not set',
+};
+
 const MAIN_TABS = [
   { id: 'live', label: 'live' },
   { id: 'editor', label: 'editor' },
@@ -193,8 +203,8 @@ const AudioProcessor = ({ goHome }) => {
   const [selectedDevices, setSelectedDevices] = useState(() => {
     try {
       const saved = window.localStorage.getItem('tiwaton:devices');
-      return saved ? JSON.parse(saved) : { inputId: 'default', outputId: 'default', broadcastBus: 'Not set', mainOutputId: 'Not set' };
-    } catch { return { inputId: 'default', outputId: 'default', broadcastBus: 'Not set', mainOutputId: 'Not set' }; }
+      return { ...DEFAULT_DEVICES, ...(saved ? JSON.parse(saved) : {}) };
+    } catch { return { ...DEFAULT_DEVICES }; }
   });
 
   const [audioStats, setAudioStats] = useState({
@@ -404,12 +414,7 @@ const AudioProcessor = ({ goHome }) => {
 
   const resetDeviceState = useCallback(() => {
     setAvailableDevices({ inputs: [], outputs: [] });
-    setSelectedDevices({
-      inputId: 'default',
-      outputId: 'default',
-      broadcastBus: 'Not set',
-      mainOutputId: 'Not set',
-    });
+    setSelectedDevices({ ...DEFAULT_DEVICES });
   }, []);
 
   const getDevices = useCallback(async () => {
@@ -446,12 +451,7 @@ const AudioProcessor = ({ goHome }) => {
   useEffect(() => {
     setSelectedDevices((prev) => {
       const next = reconcileSelectedDevices(prev, availableDevices);
-      return (
-        next.inputId === prev.inputId
-        && next.outputId === prev.outputId
-        && next.broadcastBus === prev.broadcastBus
-        && next.mainOutputId === prev.mainOutputId
-      ) ? prev : next;
+      return devicesEqual(next, prev) ? prev : next;
     });
   }, [availableDevices]);
 
@@ -1290,12 +1290,7 @@ const AudioProcessor = ({ goHome }) => {
         cleanupAudio({ stopNative: false });
         const latestDevices = await getDevices();
         const resolvedDevices = reconcileSelectedDevices(selectedDevices, latestDevices);
-        if (
-          resolvedDevices.inputId !== selectedDevices.inputId
-          || resolvedDevices.outputId !== selectedDevices.outputId
-          || resolvedDevices.broadcastBus !== selectedDevices.broadcastBus
-          || resolvedDevices.mainOutputId !== selectedDevices.mainOutputId
-        ) {
+        if (!devicesEqual(resolvedDevices, selectedDevices)) {
           setSelectedDevices(resolvedDevices);
         }
 

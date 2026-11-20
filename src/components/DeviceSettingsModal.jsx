@@ -217,6 +217,19 @@ function SetupPanel({
           </DeviceRow>
         )}
 
+        {isTauri && [
+          { key: 'monitor2OutputId', bus: 'monitor2', id: 'dev-mon2', label: 'Monitor 2' },
+          { key: 'monitor3OutputId', bus: 'monitor3', id: 'dev-mon3', label: 'Monitor 3' },
+        ].map((m) => (
+          <DeviceRow key={m.key} id={m.id} label={m.label}
+            tip={`A second person's own monitor mix (${m.label.toLowerCase().replace('monitor', 'mon')} on the mixer). Use a device no other output uses.`}
+            status={status(m.key)} value={draft[m.key] || 'Not set'} onChange={set(m.key)}
+            getDb={() => busPeakDb(feed.current, m.bus)}>
+            <option value="Not set">Not set</option>
+            {deviceOptions(availableDevices.outputs, 'Output')}
+          </DeviceRow>
+        ))}
+
         <div className="fp-glass fp-setup-fmt">
           <Lamp tone={isLive ? 'g' : 'off'}>{isLive ? 'engine on' : 'engine off'}</Lamp>
           <span className={`fp-num ${lowRate ? 'fp-caution' : ''}`}>

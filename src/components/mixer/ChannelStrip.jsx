@@ -78,7 +78,7 @@ function KeyPair({ children }) {
  * and gain-reduction readout, auto-mix and duck (when the engine reports them), and the fader
  * between pre- and post-fader meters.
  */
-export default function ChannelStrip({ strip, metersRef, onSetParam, onSetBool, onRename }) {
+export default function ChannelStrip({ strip, metersRef, onSetParam, onSetBool, onRename, extraMonitors = [] }) {
   const [nameDraft, setNameDraft] = useState(strip.name);
   const [syncedName, setSyncedName] = useState(strip.name);
   // Reset the draft whenever the committed name changes (e.g. a scene load), during render.
@@ -157,6 +157,7 @@ export default function ChannelStrip({ strip, metersRef, onSetParam, onSetBool, 
       {knobRow(rowDyn)}
       {knobRow(rowEq)}
       {knobRow(rowSends)}
+      {extraMonitors.length > 0 && knobRow(extraMonitors.map((m) => m.knob))}
       <KeyPair>{boolKey('monitor_post_fader', 'post', 'sel', 'monitor send after fader')}{boolKey('voice_chain', 'voice', 'orange', 'voice chain')}</KeyPair>
       {hasAutomix(strip) && (
         <KeyPair>{boolKey('automix', 'auto', 'orange', 'auto-mix')}{boolKey('duck', 'duck', 'sel', 'duck under speech')}</KeyPair>
