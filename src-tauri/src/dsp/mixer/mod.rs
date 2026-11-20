@@ -26,6 +26,7 @@
 
 pub mod automix;
 pub mod bus;
+pub mod channel_proc;
 mod fx;
 pub mod fx_params;
 mod fx_rack;
@@ -45,6 +46,8 @@ mod leveler_tests;
 mod monitor_mix_tests;
 #[cfg(test)]
 mod group_tests;
+#[cfg(test)]
+mod split_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -179,6 +182,18 @@ impl Mixer {
 
     /// Process one block. See the module docs for the contract.
     pub fn process(&mut self, inputs: &[&[f32]], frames: usize) -> usize {
+        self.process_split(inputs, None, frames)
+    }
+
+    /// `process` with a Stream-only signal for one strip: `(strip, signal)`.
+    /// The voice strip uses it so Main and the monitors hear its live (fast)
+    /// path while Stream hears the full voice chain.
+    pub fn process_split(
+        &mut self,
+        inputs: &[&[f32]],
+        stream_alt: Option<(usize, &[f32])>,
+        frames: usize,
+    ) -> usize {
         let n = frames.min(self.max_block);
         let snap = !self.primed;
         self.primed = true;
@@ -201,7 +216,8 @@ impl Mixer {
             let input = inputs.get(i).copied().unwrap_or(empty);
             let params = &params.strips[i];
             strip.set_group_gain(groups.state.strip_gain(groups.members[i]));
-            strip.process_pre(input, n, params, any_solo, snap);
+            let alt = stream_alt.and_then(|(s, sig)| (s == i).then_some(sig));
+            strip.process_pre_split(input, alt, n, params, any_solo, snap);
         }
 
         // Automix and ducking gains across the strips, sample by sample.

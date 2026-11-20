@@ -10,9 +10,12 @@
 //!    (left, right), and each NDI input the strip after those, all read from
 //!    their rings with drift correction (`crate::netaudio`,
 //!    `crate::computer_audio`, `crate::ndi::receive`).
-//! 2. The strip holding `voice_chain` runs the `DspChain` in place on its
-//!    buffer (history for noise-profile capture, noise-profile install,
-//!    params sync, spectrum and `audio-meters` all follow that strip).
+//! 2. The strip holding `voice_chain` runs two voice paths: the full
+//!    `DspChain` on a copy (Stream, and so the stream recording, hears it)
+//!    and the live `FastVoiceChain` in place (Main and the monitors hear it,
+//!    without the 60+ ms the full chain waits ahead). History for
+//!    noise-profile capture, noise-profile install, params sync, spectrum
+//!    and `audio-meters` all follow that strip.
 //! 3. `Mixer::process` sums the strips into Main, Stream, Monitor (mon 1),
 //!    Monitor 2 and Monitor 3; the strip and bus meters are published to
 //!    lock-free slots.
@@ -28,7 +31,7 @@ use super::{db_to_lin, EngineShared, MAX_CALLBACK_FRAMES};
 use crate::computer_audio::ComputerAudioFeed;
 use crate::dsp::mixer::{Mixer, BUS_MAIN, BUS_MONITOR, BUS_STREAM};
 use crate::mixer_layout::COMPUTER_STRIPS;
-use crate::dsp::{DspChain, DspParams, MetersPayload};
+use crate::dsp::{DspChain, DspParams, FastVoiceChain, MetersPayload};
 use crate::mixer_control::{MixerLink, MAX_STRIPS};
 use crate::mixer_meters::MixerMeterSlots;
 use crate::ndi::receive::NdiInputFeed;
@@ -140,6 +143,10 @@ pub(super) struct InputProcessor<P> {
     /// NDI inputs, feeding the strips after the hardware and computer ones.
     ndi_inputs: Vec<NdiInputFeed<HeapCons<f32>>>,
     dsp: DspChain,
+    /// The voice strip's live path (Main, monitors), and the full chain's
+    /// output for Stream.
+    fast: FastVoiceChain,
+    full_buf: Vec<f32>,
     /// Record preview ("play"), mixed into the Monitor output only.
     preview: PreviewTap,
     preview_l: Vec<f32>,
@@ -209,6 +216,8 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
             computer,
             ndi_inputs,
             dsp,
+            fast: FastVoiceChain::new(sample_rate as f64),
+            full_buf: vec![0.0f32; MAX_CALLBACK_FRAMES],
             preview,
             preview_l: vec![0.0f32; MAX_CALLBACK_FRAMES],
             preview_r: vec![0.0f32; MAX_CALLBACK_FRAMES],
@@ -274,7 +283,8 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
             *slot = &buf[..n];
         }
         let strips = self.chan_bufs.len();
-        self.mixer.process(&inputs[..strips], n);
+        let stream_alt = (voice < strips).then(|| (voice, &self.full_buf[..n]));
+        self.mixer.process_split(&inputs[..strips], stream_alt, n);
         self.publish_path_latency();
         self.meter_slots.publish_dca(self.mixer.dca_peaks());
         self.meter_slots
@@ -390,15 +400,19 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
     /// `EngineShared::path_latency_samples`).
     fn publish_path_latency(&self) {
         let voice = self.voice_strip.load(Ordering::Relaxed);
-        let voice_latency = if voice < self.chan_bufs.len() {
-            self.dsp.total_latency_samples()
+        let (live, full) = if voice < self.chan_bufs.len() {
+            (self.fast.latency_samples(), self.dsp.total_latency_samples())
         } else {
-            0
+            (0, 0)
         };
-        let path = self.mixer.path_latency_samples(voice, voice_latency);
+        let path = self.mixer.path_latency_samples(voice, live);
+        let stream = self.mixer.path_latency_samples(voice, full);
         self.shared
             .path_latency_samples
             .store(path as u64, Ordering::Relaxed);
+        self.shared
+            .stream_path_latency_samples
+            .store(stream as u64, Ordering::Relaxed);
     }
 
     /// Run the voice chain in place on the strip that holds `voice_chain`.
@@ -417,8 +431,13 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
         self.shared.poll_noise_profile(&mut self.dsp);
 
         self.dsp.sync_params(&self.params);
+        self.fast.sync_params(&self.params);
         let bypass = self.params.bypass.load(Ordering::Relaxed);
-        self.dsp.process_block(&mut *buf, bypass);
+        // Full chain on a copy for Stream; the live path in place for the room.
+        let full = &mut self.full_buf[..n];
+        full.copy_from_slice(buf);
+        self.dsp.process_block(full, bypass);
+        self.fast.process_block(&mut *buf, bypass, self.dsp.auto_gain());
         self.shared
             .dsp_latency_samples
             .store(self.dsp.total_latency_samples() as u64, Ordering::Relaxed);
