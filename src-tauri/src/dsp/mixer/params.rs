@@ -1,6 +1,7 @@
 //! Lock-free mixer controls shared between the UI/control thread and the
 //! audio thread. Every field is an atomic, same style as `DspParams`: the UI
 //! stores, the audio thread loads once per block.
+use super::fx_params::{FxParams, FX_COUNT};
 use super::leveler::LEVELER_TARGET_DEFAULT;
 use atomic_float::AtomicF32;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -82,6 +83,7 @@ pub struct StripParams {
     pub fader_db: AtomicF32,
     /// Send level per bus (index with `BUS_*`).
     pub send_db: [AtomicF32; NUM_BUSES],
+    pub fx_send_db: [AtomicF32; FX_COUNT],
     /// Mon 1 send taken after the fader instead of before it (mon 2 and
     /// mon 3 are always pre-fader).
     pub monitor_post_fader: AtomicBool,
@@ -147,6 +149,7 @@ impl StripParams {
                 AtomicF32::new(MIN_DB), // Mon 2: off, a new mix starts silent
                 AtomicF32::new(MIN_DB), // Mon 3: off
             ],
+            fx_send_db: std::array::from_fn(|_| AtomicF32::new(MIN_DB)),
             monitor_post_fader: AtomicBool::new(false),
             automix: AtomicBool::new(false),
             duck: AtomicBool::new(false),
@@ -197,6 +200,7 @@ impl Default for BusParams {
 pub struct MixerParams {
     pub strips: Vec<StripParams>,
     pub buses: [BusParams; NUM_BUSES],
+    pub fx: FxParams,
 }
 
 impl MixerParams {
@@ -204,6 +208,7 @@ impl MixerParams {
         MixerParams {
             strips: (0..num_strips).map(|_| StripParams::new()).collect(),
             buses: std::array::from_fn(|_| BusParams::new()),
+            fx: FxParams::new(),
         }
     }
 

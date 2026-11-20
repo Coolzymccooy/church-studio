@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { applyStripChange, clampStripValue, createCoalescer } from '../../lib/mixerEngine.js';
 
+import { applyFxChange } from '../../lib/mixerFx.js';
+
 const TOAST_MS = 4000;
 
 /**
@@ -213,6 +215,19 @@ export function useMixer(controller, refreshKey) {
     );
   }, [controller, withOptimism]);
 
+  const setFxControl = useCallback((id, key, value) => {
+    const next = typeof value === 'boolean' ? value : clampStripValue(key, value);
+    const call = typeof value === 'boolean' ? controller.setFxBool : controller.setFxParam;
+    withOptimism(
+      (prev) => applyFxChange(prev, id, key, next),
+      (prev) => {
+        const previousValue = prev.fxReturns.find((ret) => ret.id === id)?.[key];
+        return (latest) => applyFxChange(latest, id, key, previousValue);
+      },
+      () => coalesce(`fx:${id}:${key}`, () => call(id, key, next)),
+    );
+  }, [controller, coalesce, withOptimism]);
+
   const saveScene = useCallback(async (name) => {
     try {
       await controller.saveScene(name);
@@ -260,6 +275,7 @@ export function useMixer(controller, refreshKey) {
     renameStrip,
     setBusParam,
     setBusBool,
+    setFxControl,
     saveScene,
     loadScene,
     deleteScene,

@@ -8,6 +8,9 @@
 //! - strip names (control side only; never touched by the audio thread).
 //!
 //! Everything here is pure (no Tauri, no files) so it can be unit-tested.
+mod bus_controls;
+
+use crate::dsp::mixer::fx_params::FX_SEND_KEYS;
 use crate::dsp::mixer::leveler::{
     LEVELER_TARGET_DEFAULT, LEVELER_TARGET_MAX, LEVELER_TARGET_MIN,
 };
@@ -58,6 +61,8 @@ const STRIP_F32_KEYS: &[F32Key] = &[
     // Mon 2 / mon 3: off by default, so a new monitor mix starts silent.
     ("send_monitor2_db", -90.0, 10.0, -90.0),
     ("send_monitor3_db", -90.0, 10.0, -90.0),
+    (FX_SEND_KEYS[0], -90.0, 10.0, -90.0),
+    (FX_SEND_KEYS[1], -90.0, 10.0, -90.0),
     ("duck_depth_db", 0.0, DUCK_DEPTH_MAX_DB, DUCK_DEPTH_DEFAULT_DB),
 ];
 
@@ -113,7 +118,7 @@ fn strip_f32<'a>(p: &'a StripParams, key: &str) -> Option<&'a AtomicF32> {
         "send_monitor2_db" => &p.send_db[BUS_MONITOR2],
         "send_monitor3_db" => &p.send_db[BUS_MONITOR3],
         "duck_depth_db" => &p.duck_depth_db,
-        _ => return None,
+        key => &p.fx_send_db[FX_SEND_KEYS.iter().position(|name| *name == key)?],
     };
     Some(field)
 }
@@ -628,28 +633,6 @@ impl MixerControl {
         Ok(())
     }
 
-    pub fn set_bus_param(&self, bus: &str, key: &str, value: f32) -> Result<(), String> {
-        let p = &self.params.buses[bus_index(bus)?];
-        match (f32_spec(BUS_F32_KEYS, key), bus_f32(p, key)) {
-            (Some(spec), Some(field)) => {
-                field.store(clamp_key(spec, value), Relaxed);
-                Ok(())
-            }
-            _ => Err(format!("unknown bus key '{key}'")),
-        }
-    }
-
-    pub fn set_bus_bool(&self, bus: &str, key: &str, value: bool) -> Result<(), String> {
-        let p = &self.params.buses[bus_index(bus)?];
-        let field = match key {
-            "mute" => &p.mute,
-            "leveler_enabled" => &p.leveler_enabled,
-            _ => return Err(format!("unknown bus key '{key}'")),
-        };
-        field.store(value, Relaxed);
-        Ok(())
-    }
-
     fn strip_state(&self, index: usize, name: String, running: bool) -> StripState {
         let p = &self.params.strips[index];
         let f = |key: &str| strip_f32(p, key).map(|a| a.load(Relaxed)).unwrap_or(0.0);
@@ -678,6 +661,8 @@ impl MixerControl {
             send_monitor_db: f("send_monitor_db"),
             send_monitor2_db: f("send_monitor2_db"),
             send_monitor3_db: f("send_monitor3_db"),
+            send_fx_a_db: f(FX_SEND_KEYS[0]),
+            send_fx_b_db: f(FX_SEND_KEYS[1]),
             monitor_post_fader: b("monitor_post_fader"),
             voice_chain: self.voice_strip.load(Relaxed) == index,
             automix: b("automix"),
@@ -760,6 +745,7 @@ impl MixerControl {
             running,
             strips,
             buses,
+            fx_returns: self.fx_state(),
             scenes,
         }
     }
