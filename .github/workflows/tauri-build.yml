@@ -69,6 +69,14 @@ jobs:
           cargo test --manifest-path src-tauri/Cargo.toml --all-targets
           if [ "$stale" = "1" ]; then exit 1; fi
 
+      - name: Check FX worst-block CPU in release mode
+        shell: bash
+        run: |
+          test_name=dsp::mixer::fx_tests::both_effects_fit_the_block_budget
+          log="$RUNNER_TEMP/fx-cpu-test.log"
+          cargo test --manifest-path src-tauri/Cargo.toml --locked --release --lib "$test_name" -- --exact --nocapture | tee "$log"
+          grep -Fq "test $test_name ... ok" "$log"
+
       - name: Upload resolved Cargo.lock when it was stale
         if: always() && env.LOCK_STALE == '1'
         uses: actions/upload-artifact@v4
