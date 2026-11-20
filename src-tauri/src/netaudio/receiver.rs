@@ -36,6 +36,9 @@ const PING_INTERVAL_MS: u64 = 1_000;
 const MAX_DATAGRAM: usize = 65_536;
 /// Windows `WSAEMSGSIZE`: the datagram did not fit the buffer.
 const WSAEMSGSIZE: i32 = 10_040;
+/// OS receive buffer: about a second of stereo packets, so a burst after
+/// a Wi-Fi stall is not dropped (Windows defaults are small).
+pub(super) const RECV_BUFFER_BYTES: usize = 1 << 20;
 /// Back off only after this many unexpected receive errors in a row.
 const ERRORS_BEFORE_BACKOFF: u32 = 3;
 
@@ -60,7 +63,7 @@ pub struct NetReceiver {
 impl NetReceiver {
     /// Bind the port (all IPv4 interfaces) and start the thread.
     pub fn start(plan: ReceivePlan) -> Result<NetReceiver, String> {
-        let socket = UdpSocket::bind(("0.0.0.0", plan.port))
+        let socket = bind_socket(plan.port)
             .map_err(|e| format!("cannot listen on UDP port {}: {e}", plan.port))?;
         socket
             .set_read_timeout(Some(POLL))
@@ -321,6 +324,19 @@ impl Receiver {
     }
 }
 
+/// A UDP socket on `port` (all IPv4 interfaces) with a large receive
+/// buffer. A buffer the OS refuses to grow is logged, not fatal.
+pub(super) fn bind_socket(port: u16) -> std::io::Result<UdpSocket> {
+    use socket2::{Domain, Protocol, Socket, Type};
+    let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
+    if let Err(err) = socket.set_recv_buffer_size(RECV_BUFFER_BYTES) {
+        log::warn!("network audio receive buffer left at the OS default: {err}");
+    }
+    let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
+    socket.bind(&addr.into())?;
+    Ok(socket.into())
+}
+
 /// Receive errors that only mean "nothing yet" or a stale ICMP report.
 pub(super) fn is_benign(kind: ErrorKind) -> bool {
     matches!(
@@ -340,4 +356,16 @@ pub(super) fn clean_name(payload: &[u8]) -> String {
         .take(super::settings::MAX_NAME_CHARS)
         .collect();
     kept.trim().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_listening_socket_has_room_for_a_burst() {
+        let socket = bind_socket(0).unwrap();
+        let size = socket2::SockRef::from(&socket).recv_buffer_size().unwrap();
+        assert!(size >= RECV_BUFFER_BYTES / 2, "receive buffer only {size} bytes");
+    }
 }
