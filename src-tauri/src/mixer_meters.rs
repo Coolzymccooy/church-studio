@@ -7,6 +7,8 @@
 //! reduction are held at their maximum until the meters thread reads them,
 //! so short peaks between two reads are not lost. A read racing with a write
 //! can lose at most one block's peak, which is harmless for a meter.
+use crate::dsp::mixer::fx_params::FX_COUNT;
+use crate::dsp::mixer::groups::GROUP_COUNT;
 use crate::dsp::mixer::{BusMeters, StripMeters, NUM_BUSES};
 use crate::mixer_control::BUS_IDS;
 use atomic_float::AtomicF32;
@@ -44,11 +46,20 @@ pub struct BusMeterPayload {
     pub leveler_db: f32,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct FxMeterPayload {
+    peak_l_db: f32,
+    peak_r_db: f32,
+}
+
 /// `mixer-meters` event payload.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct MixerMetersPayload {
     pub strips: Vec<StripMeterPayload>,
     pub buses: Vec<BusMeterPayload>,
+    #[serde(rename = "fxReturns")]
+    pub fx_returns: [FxMeterPayload; FX_COUNT],
+    pub dca_peaks: [f32; GROUP_COUNT],
 }
 
 struct StripSlot {
@@ -84,6 +95,8 @@ impl BusSlot {
 pub struct MixerMeterSlots {
     strips: Vec<StripSlot>,
     buses: [BusSlot; NUM_BUSES],
+    fx_returns: [[AtomicF32; 2]; FX_COUNT],
+    dca_peaks: [AtomicF32; GROUP_COUNT],
 }
 
 /// Clamp a dB reading for the event (NaN → floor).
@@ -144,6 +157,8 @@ impl MixerMeterSlots {
                 })
                 .collect(),
             buses: std::array::from_fn(|_| BusSlot::new()),
+            fx_returns: std::array::from_fn(|_| [AtomicF32::new(RESET_DB), AtomicF32::new(RESET_DB)]),
+            dca_peaks: std::array::from_fn(|_| AtomicF32::new(RESET_DB)),
         }
     }
 
@@ -169,7 +184,21 @@ impl MixerMeterSlots {
         }
     }
 
+    pub fn publish_fx(&self, returns: [[f32; 2]; FX_COUNT]) {
+        for (slots, peaks) in self.fx_returns.iter().zip(returns) {
+            for (slot, peak) in slots.iter().zip(peaks) {
+                hold_max(slot, peak);
+            }
+        }
+    }
+
     /// Meters thread: build the event payload and reset the held peaks.
+    pub fn publish_dca(&self, peaks: &[f32; GROUP_COUNT]) {
+        for (slot, value) in self.dca_peaks.iter().zip(peaks) {
+            hold_max(slot, *value);
+        }
+    }
+
     pub fn take_payload(&self) -> MixerMetersPayload {
         let strips = self
             .strips
@@ -196,6 +225,11 @@ impl MixerMeterSlots {
                 leveler_db: finite_or_zero(slot.leveler_db.load(Relaxed)),
             })
             .collect();
-        MixerMetersPayload { strips, buses }
+        let fx_returns = std::array::from_fn(|i| FxMeterPayload {
+            peak_l_db: clamp_db(self.fx_returns[i][0].swap(RESET_DB, Relaxed)),
+            peak_r_db: clamp_db(self.fx_returns[i][1].swap(RESET_DB, Relaxed)),
+        });
+        let dca_peaks = self.dca_peaks.each_ref().map(|slot| clamp_db(take(slot, RESET_DB)));
+        MixerMetersPayload { strips, buses, fx_returns, dca_peaks }
     }
 }

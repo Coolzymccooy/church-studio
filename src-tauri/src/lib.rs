@@ -14,7 +14,9 @@ mod history;
 mod link;
 mod mixer_commands;
 mod mixer_control;
+mod mixer_groups;
 mod mixer_layout;
+mod mixer_fx;
 #[cfg(test)]
 mod automix_control_tests;
 #[cfg(test)]
@@ -427,10 +429,13 @@ pub fn run() {
             mixer_commands::mixer_rename_strip,
             mixer_commands::mixer_set_bus_param,
             mixer_commands::mixer_set_bus_bool,
+            mixer_fx::mixer_set_fx_param,
+            mixer_fx::mixer_set_fx_bool,
             mixer_commands::mixer_list_scenes,
             mixer_commands::mixer_save_scene,
             mixer_commands::mixer_load_scene,
             mixer_commands::mixer_delete_scene,
+            mixer_groups::mixer_set_group,
             link::commands::link_get_config,
             link::commands::link_set_enabled,
             link::commands::link_set_rules,

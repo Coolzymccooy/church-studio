@@ -108,6 +108,8 @@
 }
 
 /* ---------- mixer size ---------- */
+/* The input and FX banks share the first column. */
+.fp-desk-scale[data-group-bank] > :first-child { display: none; }
 .fp-desk-scale { display: flex; flex: 1; min-width: 0; min-height: 0; }
 
 /* An inline link inside legends: underlined so it is not told apart by colour alone. */
