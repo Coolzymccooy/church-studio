@@ -38,6 +38,7 @@ use crate::ndi::receive::NdiInputFeed;
 use crate::netaudio::{NetInputFeed, NetSendRoute};
 use crate::recorder::tap::RecordTap;
 use crate::routing::{deinterleave, push_stereo};
+use crate::soundcheck::PlaybackTap;
 use ringbuf::traits::Producer;
 use ringbuf::HeapCons;
 use rustfft::{num_complex::Complex32, Fft, FftPlanner};
@@ -156,6 +157,7 @@ pub(super) struct InputProcessor<P> {
     ndi_outputs: Vec<OutputRoute<P>>,
     /// Multitrack recording tap (idle unless a recording is active).
     recorder: RecordTap<P>,
+    playback: Option<PlaybackTap>,
     spectrum: Spectrum,
     meters_tx: mpsc::SyncSender<MetersPayload>,
     meter_interval_samples: usize,
@@ -216,6 +218,7 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
             outputs,
             ndi_outputs,
             recorder,
+            playback: None,
             spectrum: Spectrum::new(),
             meters_tx,
             // Meters are sent ~50 times per second, as before.
@@ -225,6 +228,11 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
         // Report a sensible latency before the first callback.
         processor.publish_path_latency();
         processor
+    }
+
+    pub(super) fn with_playback(mut self, playback: PlaybackTap) -> Self {
+        self.playback = Some(playback);
+        self
     }
 
     /// Process one device callback of interleaved samples of any length,
@@ -250,6 +258,9 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
         // Raw strips are recorded before the voice chain works in place.
         let voice = self.voice_strip.load(Ordering::Relaxed);
         self.recorder.capture_raw(&self.chan_bufs, voice, n);
+        if let Some(playback) = &mut self.playback {
+            playback.process(&mut self.chan_bufs, n);
+        }
         self.run_voice_chain(n, monitor_gain);
 
         // Mixer: strip i reads input channel i.
@@ -262,8 +273,10 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
         let stream_alt = (voice < strips).then(|| (voice, &self.full_buf[..n]));
         self.mixer.process_split(&inputs[..strips], stream_alt, n);
         self.publish_path_latency();
+        self.meter_slots.publish_dca(self.mixer.dca_peaks());
         self.meter_slots
             .publish(self.mixer.strip_meters(), &self.mixer.bus_meters()[..]);
+        self.meter_slots.publish_fx(self.mixer.fx_peaks());
 
         // Outputs: one stereo bus per device.
         let mut dropped = 0u64;

@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useState } from 'react';
 
 import { isTauri } from '../../lib/platform';
 import { formatTimeAgo } from '../../lib/linkControl.js';
+import { copyText } from '../../lib/copyText.js';
 import InfoTip from '../faceplate/InfoTip.jsx';
 import Key from '../faceplate/Key.jsx';
 import Lamp from '../faceplate/Lamp.jsx';
@@ -12,17 +13,17 @@ import LinkActivityLog from './LinkActivityLog.jsx';
 
 const INLINE = { display: 'inline-flex', alignItems: 'center', gap: 6 };
 
+const COPY_LABEL = { idle: 'copy', copied: 'copied', failed: 'select' };
+
 function CopyField({ label, value, secret = false, tip = null }) {
-  const [copied, setCopied] = useState(false);
+  // idle → copied, or failed: then the value is shown and selectable for Cmd+C.
+  const [state, setState] = useState('idle');
   const [revealed, setRevealed] = useState(!secret);
   const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      setCopied(false);
-    }
+    const ok = await copyText(value);
+    setState(ok ? 'copied' : 'failed');
+    if (!ok) setRevealed(true);
+    setTimeout(() => setState('idle'), ok ? 1500 : 6000);
   };
   return (
     <div>
@@ -35,16 +36,26 @@ function CopyField({ label, value, secret = false, tip = null }) {
           className="fp-field"
           style={{
             display: 'block', flex: 1, lineHeight: '26px', overflow: 'hidden',
-            textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer',
+            textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'text', userSelect: 'text',
+            WebkitUserSelect: 'text',
           }}
           onClick={() => setRevealed(true)}
           title={revealed ? value : 'Click to reveal'}
         >
           {revealed ? value : '•'.repeat(24)}
         </code>
-        <Key onClick={copy} disabled={!value} aria-label={`copy ${label}`} style={{ minWidth: 48 }}>
-          {copied ? 'copied' : 'copy'}
+        <Key
+          onClick={copy}
+          disabled={!value}
+          lit={state === 'copied' ? 'sel' : state === 'failed' ? 'amber' : null}
+          aria-label={`copy ${label}`}
+          style={{ minWidth: 48 }}
+        >
+          {COPY_LABEL[state]}
         </Key>
+        <span className="fp-sr" role="status" aria-live="polite">
+          {state === 'copied' ? `${label} copied` : state === 'failed' ? `Copy failed. Select the ${label.toLowerCase()} and press Cmd+C.` : ''}
+        </span>
       </div>
     </div>
   );
