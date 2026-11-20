@@ -1,12 +1,23 @@
 //! The `recorder_status` / `recorder-status` payload (design decision 9) and
 //! the summary of the last finished recording. camelCase, like the other
 //! Tauri payloads.
+use super::session::TrackKind;
 use super::writer::WriterOutcome;
 use serde::Serialize;
 
 pub const STATE_UNAVAILABLE: &str = "unavailable";
 pub const STATE_IDLE: &str = "idle";
 pub const STATE_RECORDING: &str = "recording";
+
+/// One recorded track, for export: its name and first file.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SummaryTrack {
+    pub name: String,
+    pub file: String,
+    /// "strip" or "bus".
+    pub kind: String,
+}
 
 /// What the last recording left behind.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -18,6 +29,8 @@ pub struct RecordingSummary {
     pub markers: usize,
     /// Every file written, in track order.
     pub files: Vec<String>,
+    /// Every track, in track order (buses last).
+    pub tracks: Vec<SummaryTrack>,
     pub error: Option<String>,
 }
 
@@ -32,6 +45,18 @@ impl RecordingSummary {
                 .tracks
                 .iter()
                 .flat_map(|t| t.files.iter().cloned())
+                .collect(),
+            tracks: outcome
+                .tracks
+                .iter()
+                .map(|t| SummaryTrack {
+                    name: t.name.clone(),
+                    file: t.file.clone(),
+                    kind: match t.kind {
+                        TrackKind::Strip => "strip".to_string(),
+                        TrackKind::Bus => "bus".to_string(),
+                    },
+                })
                 .collect(),
             error: outcome.error.clone(),
         }
@@ -97,7 +122,7 @@ impl RecorderStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::recorder::session::{SessionTrack, TrackKind};
+    use crate::recorder::session::SessionTrack;
     use std::path::PathBuf;
 
     #[test]
@@ -133,6 +158,10 @@ mod tests {
         };
         let summary = RecordingSummary::from_outcome(&outcome);
         assert_eq!(summary.files, vec!["a.wav".to_string(), "a part 2.wav".to_string()]);
+        assert_eq!(
+            summary.tracks,
+            vec![SummaryTrack { name: "A".to_string(), file: "a.wav".to_string(), kind: "strip".to_string() }]
+        );
         let status = RecorderStatus::idle(true, Some(summary));
         assert_eq!(status.state, STATE_IDLE);
         assert_eq!(status.last_error.as_deref(), Some("disk full"));

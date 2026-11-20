@@ -37,7 +37,7 @@ impl RecorderControl {
         *lock(&self.config) = next;
     }
 
-    fn last_summary(&self) -> Option<RecordingSummary> {
+    pub(crate) fn last_summary(&self) -> Option<RecordingSummary> {
         lock(&self.last).clone()
     }
 }
