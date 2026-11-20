@@ -590,6 +590,18 @@ pub fn run() {
                 )
                 .build()?;
 
+            // macOS routes Cmd+C / Cmd+V / Cmd+A in text fields through the Edit menu; without
+            // one, copying or pasting a token or a name silently does nothing.
+            let edit_menu = SubmenuBuilder::new(app, "Edit")
+                .undo()
+                .redo()
+                .separator()
+                .cut()
+                .copy()
+                .paste()
+                .select_all()
+                .build()?;
+
             let window_menu = SubmenuBuilder::new(app, "Window")
                 .minimize()
                 .maximize()
@@ -599,6 +611,7 @@ pub fn run() {
 
             let menu = MenuBuilder::new(app)
                 .item(&tiwaton_menu)
+                .item(&edit_menu)
                 .item(&engine_menu)
                 .item(&view_menu)
                 .item(&export_menu)
