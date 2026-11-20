@@ -13,7 +13,7 @@ The desktop operator chooses a role and generates a single-use, six-digit code. 
 | Role | Snapshot and writable controls |
 | --- | --- |
 | Mon 1, Mon 2, Mon 3 | Each active input's send to the assigned monitor only. −90 to +10 dB. −90 is off. |
-| Desk | Active input and output bus faders and mutes. −90 to +10 dB. Mute is on or off. |
+| Desk | Active input and output bus faders and mutes, plus FX returns and DCA masters when present. −90 to +10 dB. Mute is on or off. |
 
 The phone uses 44 px touch controls. Desk mode supports tablet and desktop widths. Both use the faceplate finishes, keyboard controls, and an explicit connected state. Control commands validate IDs against the current layout, and write the same parameters that the local mixer uses. A stopped engine can show its settings but rejects remote writes. Pairing is possible with the engine stopped.
 

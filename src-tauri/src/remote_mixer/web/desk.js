@@ -38,7 +38,7 @@ function showError(text) {
 }
 
 function targetKey(target) {
-  return target.type === 'strip' ? `strip:${target.index}` : `bus:${target.id}`;
+  return `${target.type}:${target.index ?? target.id}`;
 }
 
 function makeRow(item, key) {
@@ -72,7 +72,7 @@ function makeRow(item, key) {
     mute.onclick = () => write(key, item.target, 'mute', mute.getAttribute('aria-pressed') !== 'true');
     row.append(mute);
   }
-  (item.target.type === 'bus' ? buses : channels).append(row);
+  (item.target.type === 'strip' ? channels : buses).append(row);
   return { row, name, value, input, mute };
 }
 

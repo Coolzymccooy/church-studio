@@ -1,5 +1,6 @@
 mod auth;
 pub mod desktop;
+mod extensions;
 mod tls;
 mod web;
 
@@ -50,6 +51,8 @@ impl Role {
 pub enum Target {
     Strip { index: u32 },
     Bus { id: String },
+    Return { id: String },
+    Dca { index: u32 },
 }
 
 #[derive(Deserialize)]

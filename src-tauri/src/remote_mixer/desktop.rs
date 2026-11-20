@@ -1,4 +1,5 @@
 use super::auth::{Auth, Device};
+use super::extensions;
 use super::tls::{self, ListenerSettings};
 use super::{router, Board, Change, Control, MixerView, Role, Status, Target, ViewControl};
 use crate::audio::{EngineState, RunningEngine};
@@ -47,10 +48,17 @@ impl Board for DesktopBoard {
         let engine = self.0.state::<EngineState>();
         let running = engine.lock().map_err(|_| Status::SERVICE_UNAVAILABLE)?;
         let (layout, signature) = layout(running.as_ref());
-        let state =
-            self.0
-                .state::<MixerControl>()
-                .snapshot_layout(layout, running.is_some(), Vec::new());
+        let is_running = running.is_some();
+        let state = self
+            .0
+            .state::<MixerControl>()
+            .snapshot_layout(layout, is_running, Vec::new());
+        drop(running);
+        let extras = if role == Role::Desk {
+            extensions::read(&state)?
+        } else {
+            Vec::new()
+        };
 
         let mut controls: Vec<_> = state
             .strips
@@ -87,9 +95,10 @@ impl Board for DesktopBoard {
                 }
             }));
         }
+        controls.extend(extras);
         Ok(MixerView {
             role,
-            running: running.is_some(),
+            running: is_running,
             layout: signature,
             controls,
         })
@@ -136,6 +145,16 @@ fn write_control(
         (Target::Bus { id }, change) if bus_index(&id).is_ok() => match change {
             Change::Level { db } => mixer.set_bus_param(&id, "fader_db", db),
             Change::Mute { muted } => mixer.set_bus_bool(&id, "mute", muted),
+        },
+        (Target::Return { id }, change) if ["fx_a", "fx_b"].contains(&id.as_str()) => {
+            match change {
+                Change::Level { db } => mixer.set_bus_param(&id, "fader_db", db),
+                Change::Mute { muted } => mixer.set_bus_bool(&id, "mute", muted),
+            }
+        }
+        (Target::Dca { index }, change) if index < 8 => match change {
+            Change::Level { db } => mixer.set_strip_param(index, "dca_fader_db", db),
+            Change::Mute { muted } => mixer.set_strip_bool(index, "dca_mute", muted),
         },
         _ => return Err(Status::BAD_REQUEST),
     };
