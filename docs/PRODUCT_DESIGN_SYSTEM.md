@@ -143,6 +143,14 @@ two-press timing, the knob arc and keyboard steps, and the meter scale, zones an
 To see every part in both finishes, run `npm run dev` and open `/?kit`. The kit page exists only
 in development builds.
 
+## Website
+
+The web build's root is a short website (`src/site/`); the studio opens at `/?app`, `#app` or
+`/studio`. It is a reading surface, so it uses 16px body text and larger display sizes, defined as
+`--site-*` tokens in `src/site/site.css`; every colour, font and radius still comes from the
+faceplate tokens. Its one call to action is a lit key (`lit-g` fill, `on-green` legend, 11.7:1).
+The demo desk on it is built from the real faceplate parts and works.
+
 ## Text restraint
 
 A control shows its label and its state in one to three words. Explanations and how-tos go in an
@@ -188,8 +196,8 @@ Order of work:
    faceplate parts. Desk-level classes are in `src/styles/faceplate-desk.css`. The strips scale
    to fill the height (`size fit`) or to 1×, 1.25× or 1.5× (`src/lib/stripScale.js`).
 5. The `[data-theme]` accent system is retired: `ThemeContext` holds the finish and the header
-   finish key cycles graphite, bone and auto. `--accent` stays at one fixed value only for the
-   two browser landing pages, which the desktop app never shows; remove it when they move.
+   finish key cycles graphite, bone and auto. The two old browser landing pages and `--accent`
+   are gone (20 Nov 2026): the website in `src/site/` replaced them (see "Website" below).
 6. The mixer frame (done): bank keys above the strips (eight inputs per bank, then NDI), and a
    footer of plates: scenes (now window with who loaded it, numbered keys, two presses to load,
    store, a red delete mode), OBS (program scene with ‹ ›, two-press go-live and record keys with
