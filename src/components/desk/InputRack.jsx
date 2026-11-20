@@ -33,7 +33,8 @@ export default function InputRack({ mode, onModeSwitch, core, voice, profiles, s
         <Key lit={mode === 'live' ? 'sel' : null} pressed={mode === 'live'} onClick={() => onModeSwitch('live')}>live</Key>
         {mode === 'live' && core.isLive
           ? (
-            <TwoPressKey label="stop the engine and switch to file playback" onConfirm={() => onModeSwitch('file')}>
+            <TwoPressKey label="stop the engine and switch to file playback" onConfirm={() => onModeSwitch('file')}
+              tip="Press twice within 3 seconds. File playback stops the live engine first.">
               file
             </TwoPressKey>
           )

@@ -4,6 +4,8 @@
   <dict>
     <key>NSMicrophoneUsageDescription</key>
     <string>TIWATON AI Studio uses your selected audio input for live church audio processing and recording.</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>TIWATON AI Studio brings the sound other apps play (music, video, a browser) into the mixer as its computer audio input.</string>
     <key>NSLocalNetworkUsageDescription</key>
     <string>TIWATON AI Studio finds and connects to NDI sources and OBS devices on your local network.</string>
   </dict>

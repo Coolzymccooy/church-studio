@@ -81,3 +81,37 @@ export const CHECKLIST = [
   { step: '10-second test recording sounds clear', group: 'Sound Check' },
   { step: 'Press LIVE — status shows green Live Processing', group: 'Go Live' },
 ];
+
+/** Auto-mix and ducking, end to end (condensed from docs/guides/auto-mix-and-ducking.md). */
+export const AUTOMIX_SECTIONS = [
+  {
+    title: 'Set up',
+    steps: [
+      'Use one input device for all speech mics. On a Mac with separate USB mics, open Audio MIDI Setup, press +, choose Create Aggregate Device and tick the mics.',
+      "Don't use a Bluetooth mic as the input. Use Bluetooth only for the monitor.",
+      'Start the engine. Each mic gets a strip; raise each fader.',
+      'With someone talking normally into each mic in turn, set trim so the meters peak about the same.',
+      'Press auto on every speech mic. Press duck on music strips (Computer L/R, playback).',
+      'Store a scene so the setup comes back next week.',
+    ],
+  },
+  {
+    title: 'During the service',
+    steps: [
+      "The talker's mic reads mix 0 to -3 and its speech lamp lights. The other mics drop.",
+      "When nobody talks, the readouts hold. The last talker's mic stays open.",
+      'Music strips read duck -12 while someone talks, then recover in about 1.5 s.',
+      'Set the dip depth with the duck knob (0–40 dB, default 12).',
+      'Muting a mic or pulling its fader down takes it out of auto-mix. It comes back where it was.',
+    ],
+  },
+];
+
+export const AUTOMIX_FIXES = [
+  { title: "The talker's mic reads mix -20 or lower", content: 'A music or noisy strip has auto on; set it to duck or off.' },
+  { title: 'Music never dips', content: 'Press auto on the speech mics.' },
+  { title: 'Music dips with nobody talking', content: 'Lower the PA near that mic, or reduce the duck depth.' },
+  { title: 'Music pumps in and out', content: 'Set the duck knob to 6–9 dB.' },
+  { title: 'Fewer strips than mics', content: 'Check Input in setup, then stop (two presses) and start.' },
+  { title: 'Sound stops mid-service', content: 'The output device dropped (often Bluetooth); stop and start, and use a wired monitor.' },
+];

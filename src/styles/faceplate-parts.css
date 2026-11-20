@@ -184,6 +184,9 @@
 @keyframes fp-arm-drain { from { transform: scaleX(1); } to { transform: scaleX(0); } }
 @media (prefers-reduced-motion: reduce) { .fp-key.fp-timed::after { animation: none; } }
 
+/* A two-press key sits in a tip wrapper; the key still fills the cell its wrapper is given. */
+.fp-tipwrap > .fp-key { flex: 1 1 auto; min-width: 0; }
+
 /* Auto-mix / duck readout: a labelled lamp ("speech", "ducking") over the reduction value. */
 .fp-auto { display: flex; flex-direction: column; gap: 2px; padding: 3px 5px; font-size: var(--fp-text-xs); line-height: 1.2; white-space: nowrap; }
 .fp-auto-lamp { display: flex; align-items: center; gap: 5px; color: var(--fp-glass-dim); }

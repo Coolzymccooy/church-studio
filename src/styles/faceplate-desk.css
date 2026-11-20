@@ -296,3 +296,7 @@
 .fp-knobrow { display: flex; align-items: center; gap: 12px; }
 .fp-railkey-badge.fp-railkey-badge-a { background: var(--fp-led-a); color: var(--fp-ink); }
 .fp-arm-ask { color: var(--fp-arm-r); font: var(--fp-weight-semibold) var(--fp-text-md)/1 var(--fp-font-mono); }
+/* Help lists keep their markers (Tailwind's base styles remove them). */
+.fp-read-text ol { list-style: decimal; }
+.fp-read-text ul { list-style: disc; }
+.fp-read-text li::marker { color: var(--fp-muted); }

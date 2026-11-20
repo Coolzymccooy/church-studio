@@ -5,9 +5,10 @@
 //!
 //! Per chunk of at most `MAX_CALLBACK_FRAMES` frames:
 //! 1. De-interleave every input channel (up to `MAX_STRIPS`) into its own
-//!    buffer; strip i reads input channel i. No mono fold. Each NDI input
-//!    then fills the buffer of its strip after the hardware ones, read from
-//!    its ring with drift correction (`crate::ndi::receive`).
+//!    buffer; strip i reads input channel i. No mono fold. Computer audio
+//!    then fills the next two strips (left, right), and each NDI input the
+//!    strip after those, all read from their rings with drift correction
+//!    (`crate::computer_audio`, `crate::ndi::receive`).
 //! 2. The strip holding `voice_chain` runs the `DspChain` in place on its
 //!    buffer (history for noise-profile capture, noise-profile install,
 //!    params sync, spectrum and `audio-meters` all follow that strip).
@@ -21,7 +22,9 @@
 //!    chain works on its strip) plus Stream and Main go to the record ring
 //!    as whole frames (`crate::recorder::tap`).
 use super::{db_to_lin, EngineShared, MAX_CALLBACK_FRAMES};
+use crate::computer_audio::ComputerAudioFeed;
 use crate::dsp::mixer::{Mixer, BUS_MAIN, BUS_MONITOR, BUS_STREAM};
+use crate::mixer_layout::COMPUTER_STRIPS;
 use crate::dsp::{DspChain, DspParams, MetersPayload};
 use crate::mixer_control::{MixerLink, MAX_STRIPS};
 use crate::mixer_meters::MixerMeterSlots;
@@ -112,9 +115,12 @@ pub(super) struct InputProcessor<P> {
     stride: usize,
     /// Strips fed by input channels: min(stride, MAX_STRIPS).
     hardware: usize,
-    /// One buffer per strip (hardware, then NDI), MAX_CALLBACK_FRAMES long.
+    /// One buffer per strip (hardware, computer, then NDI),
+    /// MAX_CALLBACK_FRAMES long.
     chan_bufs: Vec<Vec<f32>>,
-    /// NDI inputs, feeding strips `hardware..`.
+    /// Computer audio, feeding strips `hardware` (left) and `hardware + 1`.
+    computer: Option<ComputerAudioFeed<HeapCons<f32>>>,
+    /// NDI inputs, feeding the strips after the hardware and computer ones.
     ndi_inputs: Vec<NdiInputFeed<HeapCons<f32>>>,
     dsp: DspChain,
     params: Arc<DspParams>,
@@ -146,14 +152,17 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
         meter_slots: Arc<MixerMeterSlots>,
         outputs: Vec<OutputRoute<P>>,
         ndi_outputs: Vec<OutputRoute<P>>,
+        computer: Option<ComputerAudioFeed<HeapCons<f32>>>,
         mut ndi_inputs: Vec<NdiInputFeed<HeapCons<f32>>>,
         recorder: RecordTap<P>,
         meters_tx: mpsc::SyncSender<MetersPayload>,
     ) -> Self {
         let stride = stride.max(1);
         let hardware = stride.min(MAX_STRIPS);
-        ndi_inputs.truncate(MAX_STRIPS - hardware);
-        let strips = hardware + ndi_inputs.len();
+        let computer = computer.filter(|_| MAX_STRIPS - hardware >= COMPUTER_STRIPS);
+        let computer_strips = if computer.is_some() { COMPUTER_STRIPS } else { 0 };
+        ndi_inputs.truncate(MAX_STRIPS - hardware - computer_strips);
+        let strips = hardware + computer_strips + ndi_inputs.len();
         let chan_bufs = (0..strips)
             .map(|_| vec![0.0f32; MAX_CALLBACK_FRAMES])
             .collect();
@@ -167,6 +176,7 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
             stride,
             hardware,
             chan_bufs,
+            computer,
             ndi_inputs,
             dsp,
             params,
@@ -205,6 +215,7 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
 
     fn process_frames(&mut self, n: usize) {
         let monitor_gain = db_to_lin(self.params.monitor_gain_db.load(Ordering::Relaxed));
+        self.pull_computer(n);
         self.pull_ndi_inputs(n);
         // Raw strips are recorded before the voice chain works in place.
         let voice = self.voice_strip.load(Ordering::Relaxed);
@@ -243,10 +254,26 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
         self.send_voice_meters(n);
     }
 
+    /// Fill the computer-audio pair from its ring (silence while it
+    /// buffers). Lock- and allocation-free.
+    fn pull_computer(&mut self, n: usize) {
+        let Some(feed) = self.computer.as_mut() else {
+            return;
+        };
+        let (left, right) = self.chan_bufs[self.hardware..].split_at_mut(1);
+        feed.pull(&mut left[0][..n], &mut right[0][..n]);
+    }
+
+    /// First strip after the hardware and computer ones.
+    fn first_ndi_strip(&self) -> usize {
+        self.hardware + if self.computer.is_some() { COMPUTER_STRIPS } else { 0 }
+    }
+
     /// Fill each NDI strip's buffer from its input ring (silence while it
     /// buffers). Lock- and allocation-free.
     fn pull_ndi_inputs(&mut self, n: usize) {
-        let ndi_bufs = &mut self.chan_bufs[self.hardware..];
+        let first = self.first_ndi_strip();
+        let ndi_bufs = &mut self.chan_bufs[first..];
         for (feed, buf) in self.ndi_inputs.iter_mut().zip(ndi_bufs.iter_mut()) {
             feed.pull(&mut buf[..n]);
         }

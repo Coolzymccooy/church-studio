@@ -1,4 +1,6 @@
 mod audio;
+mod computer_audio;
+mod computer_audio_commands;
 mod dsp;
 mod engine_stopping;
 mod history;
@@ -157,6 +159,7 @@ async fn start_audio_engine(
     mixer: State<'_, MixerControl>,
     ndi: State<'_, NdiSettings>,
     ndi_inputs: State<'_, NdiInputSettings>,
+    computer_audio: State<'_, computer_audio::ComputerAudioSettings>,
     input_device: Option<String>,
     monitor_output_device: Option<String>,
     broadcast_output_device: Option<String>,
@@ -185,6 +188,7 @@ async fn start_audio_engine(
             outputs: ndi.snapshot(),
             inputs: ndi_inputs.snapshot(),
         },
+        computer_audio.snapshot().enabled,
     )?;
     let info = serde_json::json!({
         "sample_rate": engine.sample_rate,
@@ -201,6 +205,7 @@ async fn start_audio_engine(
         "broadcast_output_name": engine.broadcast_output_name,
         "main_output_name": engine.main_output_name,
         "inputChannels": engine.input_channels,
+        "computerStrips": engine.strip_layout().computer,
         "ndiStrips": engine.ndi_inputs.len(),
     });
 
@@ -306,6 +311,11 @@ fn serialize_engine_status(engine: &RunningEngine) -> serde_json::Value {
         "dsp_latency_samples": engine.dsp_latency_samples(),
         "dropped_output_samples": engine.dropped_output_samples(),
         "ndi": ndi_commands::engine_ndi_status(Some(engine)),
+        "computer_audio": computer_audio::status_json(
+            engine.computer_audio_applied,
+            engine.computer_audio.as_ref(),
+            engine.sample_rate,
+        ),
     })
 }
 
@@ -355,6 +365,7 @@ pub fn run() {
         .manage(mixer_commands::CurrentScene::default())
         .manage(NdiSettings::new())
         .manage(NdiInputSettings::new())
+        .manage(computer_audio::ComputerAudioSettings::new())
         .manage(recorder_commands::RecorderControl::default())
         .invoke_handler(tauri::generate_handler![
             start_audio_engine,
@@ -396,6 +407,8 @@ pub fn run() {
             ndi_input_commands::ndi_list_sources,
             ndi_input_commands::ndi_get_inputs,
             ndi_input_commands::ndi_set_inputs,
+            computer_audio_commands::computer_audio_get,
+            computer_audio_commands::computer_audio_set,
             recorder_commands::recorder_status,
             recorder_commands::recorder_get_config,
             recorder_commands::recorder_set_config,
@@ -412,6 +425,8 @@ pub fn run() {
             app.state::<NdiSettings>().replace(saved_ndi);
             let saved_inputs = ndi_input_commands::load_saved_inputs(app.handle());
             app.state::<NdiInputSettings>().replace(saved_inputs);
+            let saved_computer_audio = computer_audio_commands::load_saved(app.handle());
+            app.state::<computer_audio::ComputerAudioSettings>().replace(saved_computer_audio);
             let saved_recorder = recorder_commands::load_saved_config(app.handle());
             app.state::<recorder_commands::RecorderControl>()
                 .replace_config(saved_recorder);

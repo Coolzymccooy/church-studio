@@ -4,6 +4,7 @@ import {
   clampPanel, draftChanges, draftFrom, isDirty, readPanelPos, rowStatus,
 } from '../lib/setupDraft.js';
 import { isTauri } from '../lib/platform';
+import ComputerAudioToggle from './ComputerAudioToggle';
 import InfoTip from './faceplate/InfoTip.jsx';
 import Key from './faceplate/Key.jsx';
 import Lamp from './faceplate/Lamp.jsx';
@@ -112,6 +113,12 @@ function SetupPanel({
   const { pos, handlers, nudge } = useDragPanel(panelRef);
   const [draft, setDraft] = useState(() => draftFrom(selectedDevices));
   const [savedWhileLive, setSavedWhileLive] = useState(false);
+  // Saved devices apply when the engine next starts, so once it stops the note no longer holds.
+  const [prevLive, setPrevLive] = useState(isLive);
+  if (isLive !== prevLive) {
+    setPrevLive(isLive);
+    if (!isLive) setSavedWhileLive(false);
+  }
   // Only the desktop engine has real meters; the browser's demo mixer simulates levels, which
   // must never pass for a working device.
   const feed = useMeterFeed(isTauri ? mixerController : null, isTauri);
@@ -182,6 +189,7 @@ function SetupPanel({
           <option value="default">System default</option>
           {deviceOptions(availableDevices.inputs, 'Mic')}
         </DeviceRow>
+        <ComputerAudioToggle />
 
         <DeviceRow id="dev-monitor" label="Monitor" tip="What you hear: headphones or speakers for the sound engineer."
           status={status('outputId')} value={draft.outputId ?? 'default'} onChange={set('outputId')}

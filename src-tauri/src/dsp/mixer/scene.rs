@@ -27,7 +27,7 @@ pub struct StripScene {
 }
 
 impl StripScene {
-    fn capture(p: &StripParams) -> Self {
+    pub(crate) fn capture(p: &StripParams) -> Self {
         StripScene {
             trim_db: p.trim_db.load(Relaxed),
             polarity_invert: p.polarity_invert.load(Relaxed),
@@ -50,7 +50,7 @@ impl StripScene {
         }
     }
 
-    fn apply(&self, p: &StripParams) {
+    pub(crate) fn apply(&self, p: &StripParams) {
         p.trim_db.store(self.trim_db, Relaxed);
         p.polarity_invert.store(self.polarity_invert, Relaxed);
         p.hpf_enabled.store(self.hpf_enabled, Relaxed);
