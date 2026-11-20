@@ -27,6 +27,8 @@ import { getExportAvailability } from './lib/exportFlow';
 import { loadRnnoiseAssets } from './lib/rnnoise';
 import { pickVideoMimeType } from './lib/mediaFormats';
 import { readVisualiserPalette } from './lib/visualiserPalette.js';
+import { computerAudioFromEngineStatus } from './lib/computerAudio.js';
+import { MONITOR_PREF_KEY, readMonitorPref, setNativeMonitor } from './lib/nativeMonitor.js';
 import {
   analyserRange, bandEdges, bandLevels, createScope, createWaterfall, dbFraction, drawScope, fitCanvas, gateState, stepScope,
 } from './lib/liveScope.js';
@@ -113,7 +115,12 @@ const AudioProcessor = ({ goHome }) => {
   const [showLink, setShowLink] = useState(false);
   const [showObs, setShowObs] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
-  const [isMonitoring, setIsMonitoring] = useState(false);
+  // Desktop: the monitor choice is remembered between sessions. Browser: off at start, to avoid
+  // speaker feedback with a laptop mic.
+  const [isMonitoring, setIsMonitoring] = useState(() => {
+    if (!isTauri) return false;
+    try { return readMonitorPref(window.localStorage.getItem(MONITOR_PREF_KEY)); } catch { return false; }
+  });
   const [isBypassed, setIsBypassed] = useState(false);
   const [exportStatus, setExportStatus] = useState(null);
   const [inputGainValue, setInputGainValue] = useState(1.0);
@@ -322,6 +329,8 @@ const AudioProcessor = ({ goHome }) => {
   });
   const [nativeNoiseProfileCaptured, setNativeNoiseProfileCaptured] = useState(false);
   const [nativeRouteStatus, setNativeRouteStatus] = useState(null);
+  // Whether computer-audio capture has muted the tapped apps at the speakers (macOS).
+  const [computerMutesSpeakers, setComputerMutesSpeakers] = useState(false);
   const [roomName, setRoomName] = useState(() => {
     return window.localStorage.getItem('tiwaton:roomName') || 'Main Sanctuary';
   });
@@ -3002,6 +3011,7 @@ const AudioProcessor = ({ goHome }) => {
             state: 'running',
           }));
           setNativeNoiseProfileCaptured(Boolean(status.noise_profile_ready));
+          setComputerMutesSpeakers(computerAudioFromEngineStatus(status).mutesSpeakers);
           setNativeRouteStatus({
             input: status.input_device_name || status.device_name || null,
             monitor: status.monitor_output_name || null,
@@ -3025,6 +3035,19 @@ const AudioProcessor = ({ goHome }) => {
       }
     };
   }, [isLive]);
+
+  // ── Tauri: the monitor key drives the native Monitor bus level ────────────────
+  // The native engine scales the Monitor bus by monitor_gain_db; without this the key changed only
+  // the browser path and the desktop monitor stayed on whatever the key showed.
+  useEffect(() => {
+    if (!isTauri) return;
+    const on = isMonitoring && recordingState !== 'review';
+    try { window.localStorage.setItem(MONITOR_PREF_KEY, isMonitoring ? 'on' : 'off'); } catch { /* storage may be blocked */ }
+    if (!isLive) return;
+    import('@tauri-apps/api/core')
+      .then(({ invoke }) => setNativeMonitor(invoke, on))
+      .catch(() => {});
+  }, [isLive, isMonitoring, recordingState]);
 
   // ── Tauri: adopt an engine that is already running ──────────────────────────
   // After a reload the screen starts with the engine "off" while the Rust engine may still run.
@@ -3383,6 +3406,7 @@ const AudioProcessor = ({ goHome }) => {
           cpuPct: audioStats.cpuLoadPct,
           lufsST,
           target: loudnessTarget,
+          computerMutesSpeakers: isLive && computerMutesSpeakers,
           onShowSettings: () => setShowSettings(true),
           isLive,
           isPlayingFile,
