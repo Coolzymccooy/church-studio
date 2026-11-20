@@ -22,3 +22,10 @@ test('the transport clock displays elapsed time with tabular fields', () => {
   assert.equal(durationLabel(75.95), '1:15');
   assert.equal(durationLabel(3650), '1:00:50');
 });
+
+test('armed playback stays visible after the transport stops', async () => {
+  const { soundcheckLamp } = await import('./soundcheck.js');
+  assert.equal(soundcheckLamp({ selected: 2, playing: false }), 'a');
+  assert.equal(soundcheckLamp({ selected: 2, playing: true }), 'g');
+  assert.equal(soundcheckLamp({ selected: 0, playing: false }), 'off');
+});

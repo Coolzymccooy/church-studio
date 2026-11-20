@@ -160,5 +160,5 @@ fn seek_and_loop_keep_mapped_strips_in_step_and_leave_live_inputs_alone() {
     assert_eq!(inputs[0][..3], [0.0, 0.25, 0.5]);
     control.stop().unwrap();
     tap.process(&mut inputs, 3);
-    assert_eq!(inputs[0][..3], [0.0; 3]);
+    assert!(inputs[0][0] > 0.0, "stop must fade from the last playing sample");
 }
