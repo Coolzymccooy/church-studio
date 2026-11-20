@@ -44,6 +44,9 @@ export const STRIP_KNOBS = {
 };
 
 /** Knob rows, top to bottom; the toggle keys sit between them in the component. */
+/** Duck depth: how far a music strip dips while someone on an auto-mix strip speaks. */
+export const DUCK_KNOB = knob('duck_depth_db', 'duck', 'dyn', 1, 12, (v) => String(Math.round(v)));
+
 export const STRIP_ROWS = [['trim', 'hz', 'pan'], ['gthr', 'cthr', 'ratio'], ['hi', 'mid', 'lo'], ['main', 'strm', 'mon']];
 
 export const STRIP_COLOURS = ['amber', 'clay', 'teal', 'olive', 'sky', 'rose', 'stone'];
@@ -59,8 +62,24 @@ export function stripGateTone(gateEnabled, gateOpen) {
   return gateOpen === false ? 'a' : 'g';
 }
 
+/** "mix -3.2" / "duck -12": a reduction readout that always fits the strip, like grText. */
+export function reductionText(prefix, db) {
+  // At most eight characters: a four-letter prefix ("duck") reads in whole dB.
+  const decimals = prefix.length <= 3;
+  if (!Number.isFinite(db) || db < 0.1) return decimals ? `${prefix} 0.0` : `${prefix} 0`;
+  if (decimals && db < 9.95) return `${prefix} -${db.toFixed(1)}`;
+  return `${prefix} -${Math.min(99, Math.max(1, Math.round(db)))}`;
+}
+
+/** True when the engine reports auto-mix and ducking for this strip (newer engines only). */
+export function hasAutomix(strip) {
+  return Boolean(strip) && 'automix' in strip && 'duck' in strip;
+}
+
 export function grText(grDb) {
-  return Number.isFinite(grDb) && grDb >= 0.1 ? `gr -${grDb.toFixed(1)}` : 'gr 0.0';
+  if (!Number.isFinite(grDb) || grDb < 0.1) return 'gr 0.0';
+  // Ten dB and more drop the decimal, so the reading always fits the strip ("gr -12").
+  return grDb < 9.95 ? `gr -${grDb.toFixed(1)}` : `gr -${Math.min(99, Math.round(grDb))}`;
 }
 
 // ---------- buses ----------

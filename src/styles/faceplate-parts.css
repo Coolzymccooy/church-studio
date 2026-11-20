@@ -20,7 +20,7 @@
 .fp-key:active { transform: translateY(1px); }
 .fp-key:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
 .fp-key:focus-visible { outline: 2px solid var(--fp-focus); outline-offset: 2px; }
-.fp-key.fp-on-green { background: var(--fp-led-g); border-color: var(--fp-led-g); color: var(--fp-on-green); }
+.fp-key.fp-on-green { background: var(--fp-lit-g); border-color: var(--fp-lit-g); color: var(--fp-on-green); }
 .fp-key.fp-on-amber { background: var(--fp-led-a); border-color: var(--fp-led-a); color: var(--fp-ink); }
 .fp-key.fp-on-orange { background: var(--fp-orange); border-color: var(--fp-orange); color: var(--fp-ink); }
 .fp-key.fp-on-sel { background: var(--fp-sel); border-color: var(--fp-sel); color: var(--fp-sel-ink); }
@@ -172,3 +172,14 @@
 .fp-scrib.fp-c-bus { color: var(--fp-bus-line); }
 .fp-scrib .fp-busname { grid-column: 1 / 3; font: var(--fp-weight-semibold) var(--fp-text-md)/1.1 var(--fp-font-legend); }
 .fp-buses { display: flex; gap: 4px; padding: 8px; flex-shrink: 0; overflow-y: auto; background: var(--fp-plate); border-left: 1px solid var(--fp-seam); }
+
+/* An armed two-press key: a bar along the bottom runs down the arm window, so the time left to
+   press again is visible. Only TwoPressKey (fp-timed) gets it: other armed keys, such as the
+   recorder's stop, stay armed with no time limit. */
+.fp-key.fp-timed { position: relative; overflow: hidden; }
+.fp-key.fp-timed::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; transform-origin: left;
+  background: currentColor; animation: fp-arm-drain var(--fp-arm-timeout) linear forwards;
+}
+@keyframes fp-arm-drain { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+@media (prefers-reduced-motion: reduce) { .fp-key.fp-timed::after { animation: none; } }
