@@ -39,7 +39,6 @@ pub const NO_VOICE_STRIP: usize = usize::MAX;
 /// Version tag written into scene files.
 pub const SCENE_FILE_VERSION: u32 = 1;
 
-/// One f32 key: (name, min, max, default), as listed in the contract.
 type F32Key = (&'static str, f32, f32, f32);
 
 const STRIP_F32_KEYS: &[F32Key] = &[
@@ -160,7 +159,6 @@ pub fn default_strip_name(index: usize) -> String {
 /// today's sound (only channel 1 is heard) until the operator raises it.
 pub const OTHER_STRIPS_FADER_DB: f32 = -90.0;
 
-/// Default fader for strip `index`: 0 dB on strip 0, off on the others.
 pub fn default_fader_db(index: usize) -> f32 {
     if index == 0 {
         0.0
@@ -607,7 +605,6 @@ impl MixerControl {
         Ok(())
     }
 
-    /// Assign the single voice chain, or clear it if this strip owns it.
     fn set_voice_chain(&self, index: usize, on: bool) -> Result<(), String> {
         if on {
             self.voice_strip.store(index, Relaxed);
