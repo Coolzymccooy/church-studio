@@ -25,7 +25,7 @@ The desk exposes two FX send knobs per input and an FX key that opens the return
 
 ## Control, events and persistence
 
-Input sends use `mixer_set_strip_param`. Return settings use `mixer_set_fx_param(id, key, value)` and `mixer_set_fx_bool(id, key, value)`. The IDs are `fx_a` and `fx_b`. Return keys are `fader_db`, the five `send_*_db` output keys, `mute`, `solo` and `monitor_post_fader`. Effect keys are `decay_s` for A and `tempo_bpm` and `feedback_pct` for B. Tap is resolved by the desk to a tempo write. `mixer_state.fxReturns` holds the two returns in A/B order. `mixer-meters.fxReturns` carries ordered stereo post-fader peaks. The existing scene load and state refresh paths carry the new settings.
+Input sends use `mixer_set_strip_param`. Return settings use `mixer_set_fx_param(id, key, value)` and `mixer_set_fx_bool(id, key, value)`. The IDs are `fx_a` and `fx_b`. Return keys are `fader_db`, the five `send_*_db` output keys, `mute`, `solo` and `monitor_post_fader`. Effect keys are `decay_s` for A and `tempo_bpm` and `feedback_pct` for B. Tap is resolved by the desk to a tempo write. The shared bus setters also address the return fader and mute by FX ID for the remote tablet. `mixer_state.fxReturns` holds the two returns in A/B order. `mixer-meters.fxReturns` carries ordered stereo post-fader peaks. The existing scene load and state refresh paths carry the new settings.
 
 Scenes store the input sends and both return and effect settings. Loading a scene created before FX resets the effect settings and turns off FX sends. Signal history and tap timestamps live in memory. A fresh engine starts with empty effect buffers and the current desk settings. A scene recall uses the same ramps as live adjustments.
 
