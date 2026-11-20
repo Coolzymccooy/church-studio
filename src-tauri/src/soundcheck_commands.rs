@@ -1,6 +1,7 @@
 use crate::audio::{EngineState, RunningEngine};
-use crate::soundcheck::{open_session, PlaybackStatus};
-use std::{path::PathBuf, sync::Arc};
+use crate::mixer_control::MixerControl;
+use crate::soundcheck::{open_session, PlaybackInput, PlaybackStatus};
+use std::path::PathBuf;
 use tauri::State;
 
 fn with_engine<T>(
@@ -14,24 +15,26 @@ fn with_engine<T>(
 #[tauri::command]
 pub async fn soundcheck_load(
     engine: State<'_, EngineState>,
+    mixer: State<'_, MixerControl>,
     path: String,
 ) -> Result<PlaybackStatus, String> {
     let (identity, inputs, rate) = with_engine(engine.inner(), |running| {
-        Ok((
-            running.playback.identity.clone(),
-            running.strip_layout().total(),
-            running.sample_rate,
-        ))
+        let layout = running.strip_layout();
+        let inputs: Vec<_> = mixer
+            .snapshot_layout(layout, true, Vec::new())
+            .strips
+            .into_iter()
+            .map(|strip| PlaybackInput::for_strip(strip.index as usize, strip.name, layout))
+            .collect();
+        Ok((running.playback.identity(), inputs, running.sample_rate))
     })?;
     let session = tauri::async_runtime::spawn_blocking(move || {
-        open_session(&PathBuf::from(path), inputs, rate)
+        open_session(&PathBuf::from(path), &inputs, rate)
     })
     .await
     .map_err(|_| "Cannot open soundcheck session")??;
     with_engine(engine.inner(), |running| {
-        if !Arc::ptr_eq(&identity, &running.playback.identity) {
-            return Err("Engine restarted. Reopen session".into());
-        }
+        running.playback.ensure_owner(&identity)?;
         running.playback.load(session)?;
         Ok(running.playback.status())
     })
@@ -49,8 +52,8 @@ pub fn soundcheck_set_source(
     playback: bool,
 ) -> Result<(), String> {
     with_engine(engine.inner(), |running| {
-        if playback && running.recorder.is_recording() {
-            return Err("Stop recording for soundcheck".into());
+        if playback {
+            require_idle_recorder(running.recorder.is_recording())?;
         }
         running.playback.set_source(index, playback)
     })
@@ -59,9 +62,7 @@ pub fn soundcheck_set_source(
 #[tauri::command]
 pub fn soundcheck_play(engine: State<'_, EngineState>) -> Result<(), String> {
     with_engine(engine.inner(), |running| {
-        if running.recorder.is_recording() {
-            return Err("Stop recording for soundcheck".into());
-        }
+        require_idle_recorder(running.recorder.is_recording())?;
         running.playback.play()
     })
 }
@@ -87,4 +88,23 @@ pub fn soundcheck_status(engine: State<'_, EngineState>) -> Result<PlaybackStatu
     Ok(guard
         .as_ref()
         .map_or_else(PlaybackStatus::stopped, |running| running.playback.status()))
+}
+
+pub(crate) fn require_idle_recorder(recording: bool) -> Result<(), String> {
+    if recording {
+        Err("Stop recording for soundcheck".into())
+    } else {
+        Ok(())
+    }
+}
+
+#[tauri::command]
+pub fn soundcheck_signal(
+    engine: State<'_, EngineState>,
+) -> Result<crate::soundcheck::PlaybackSignal, String> {
+    let guard = engine.try_lock().map_err(|_| "Engine unavailable")?;
+    Ok(guard
+        .as_ref()
+        .map(|running| running.playback.signal())
+        .unwrap_or_default())
 }

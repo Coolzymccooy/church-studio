@@ -1,6 +1,10 @@
+mod fade;
+mod mapping;
 mod session;
 mod transport;
 
+use fade::PlaybackFade;
+pub use mapping::PlaybackInput;
 pub use session::{open_session, SessionInfo, Source};
 use transport::Transport;
 
@@ -16,8 +20,8 @@ use std::sync::atomic::{
 use std::sync::{mpsc, Arc};
 use std::time::Duration;
 
-const CHUNK_FRAMES: usize = 128;
-const CHUNKS: usize = 64;
+const CHUNK_FRAMES: usize = 256;
+const PREFETCH_MS: usize = 1200;
 const POLL: Duration = Duration::from_millis(2);
 
 struct Chunk {
@@ -51,6 +55,12 @@ pub struct PlaybackStatus {
     error: Option<&'static str>,
 }
 
+#[derive(Default, Serialize)]
+pub struct PlaybackSignal {
+    selected: u32,
+    playing: bool,
+}
+
 impl PlaybackStatus {
     pub fn stopped() -> Self {
         Self {
@@ -77,10 +87,30 @@ pub struct PlaybackPort {
     info: Option<SessionInfo>,
     shared: Arc<Shared>,
     // Identifies this running engine without holding its mutex during file I/O.
-    pub identity: Arc<()>,
+    identity: Arc<()>,
 }
 
 impl PlaybackPort {
+    pub fn identity(&self) -> Arc<()> {
+        self.identity.clone()
+    }
+
+    pub fn ensure_owner(&self, identity: &Arc<()>) -> Result<(), String> {
+        if Arc::ptr_eq(identity, &self.identity) {
+            Ok(())
+        } else {
+            Err("Engine restarted. Reopen session".into())
+        }
+    }
+
+    pub fn ensure_recording_compatible(&self) -> Result<(), String> {
+        if self.active() {
+            Err("Turn off soundcheck before recording".into())
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn load(&mut self, source: Source) -> Result<(), String> {
         let id = self.shared.session.load(Relaxed).wrapping_add(1);
         let info = source.info.clone();
@@ -199,21 +229,29 @@ impl PlaybackPort {
         self.shared.failed_session.load(Relaxed) == self.shared.session.load(Relaxed)
     }
 
+    pub fn signal(&self) -> PlaybackSignal {
+        PlaybackSignal {
+            selected: self.shared.selected.load(Relaxed),
+            playing: self.shared.transport.get().playing() && !self.shared.buffering.load(Relaxed),
+        }
+    }
+
     pub fn status(&self) -> PlaybackStatus {
         let Some(info) = &self.info else {
             return PlaybackStatus::stopped();
         };
         let cursor = self.shared.transport.get();
         let rate = f64::from(info.rate);
+        let failed = self.failed();
         PlaybackStatus {
             session: Some(info.clone()),
             selected: self.shared.selected.load(Relaxed),
             seconds: cursor.frame() as f64 / rate,
             duration: info.frames as f64 / rate,
-            playing: cursor.playing(),
+            playing: cursor.playing() && !failed,
             looping: cursor.looping(),
             buffering: cursor.playing() && self.shared.buffering.load(Relaxed),
-            error: self.failed().then_some("Playback read failed"),
+            error: failed.then_some("Playback read failed"),
         }
     }
 }
@@ -225,6 +263,8 @@ pub struct PlaybackTap {
     gains: [LinearSmoother; MAX_STRIPS],
     channels: usize,
     fading: u32,
+    transport_fade: PlaybackFade,
+    generation: Option<(u64, u64)>,
 }
 
 impl PlaybackTap {
@@ -232,6 +272,12 @@ impl PlaybackTap {
         let id = self.shared.session.load(Acquire);
         let cursor = self.shared.transport.get();
         let selected = self.shared.selected.load(Relaxed);
+        let generation = (id, cursor.epoch());
+        if self.generation != Some(generation) {
+            self.generation = Some(generation);
+            self.transport_fade.release();
+            self.skip_stale(id, cursor.epoch());
+        }
         if !cursor.playing() && selected == 0 && self.fading == 0 {
             return;
         }
@@ -239,7 +285,7 @@ impl PlaybackTap {
         let mut pos = cursor.frame();
         let mut playing = cursor.playing() && pos < length;
         let mut buffering = false;
-        let mut discards = 8;
+
         let channels = if selected | self.fading == 0 {
             0
         } else {
@@ -249,15 +295,18 @@ impl PlaybackTap {
             self.gains[i].set_target(f32::from(selected & (1 << i) != 0));
         }
         for i in 0..frames {
-            let values = if playing {
-                self.next_frame(id, cursor.epoch(), pos, &mut discards)
+            let releasing = self.transport_fade.is_releasing();
+            let values = if playing && !releasing {
+                self.next_frame(id, cursor.epoch(), pos)
             } else {
                 None
             };
-            buffering |= playing && values.is_none();
+            buffering |= playing && !releasing && values.is_none();
+            let frame = self.transport_fade.render(values, pos, length);
             if values.is_some() {
                 pos += 1;
                 if pos == length {
+                    self.transport_fade.restart();
                     if cursor.looping() {
                         pos = 0;
                     } else {
@@ -271,7 +320,7 @@ impl PlaybackTap {
                 }
                 let gain = self.gains[channel].next();
                 let sample = &mut inputs[channel][i];
-                let playback = values.as_ref().map_or(0.0, |frame| frame[channel]);
+                let playback = frame[channel];
                 *sample = if gain == 1.0 {
                     playback
                 } else {
@@ -291,40 +340,59 @@ impl PlaybackTap {
         }
     }
 
-    fn next_frame(
-        &mut self,
-        id: u64,
-        epoch: u64,
-        pos: u64,
-        discards: &mut usize,
-    ) -> Option<[f32; MAX_STRIPS]> {
-        loop {
-            if let Some(chunk) = self.chunk.as_ref() {
-                if chunk.session == id && chunk.epoch == epoch {
-                    if let Some(index) = pos
-                        .checked_sub(chunk.start)
-                        .filter(|i| *i < chunk.len as u64)
-                    {
-                        let sample = chunk.samples[index as usize];
-                        if index as usize + 1 == chunk.len {
-                            self.chunk = None;
-                        }
-                        return Some(sample);
-                    }
+    fn skip_stale(&mut self, id: u64, epoch: u64) {
+        self.chunk = None;
+        let (first, second) = self.fifo.as_slices();
+        let stale = first
+            .iter()
+            .chain(second)
+            .take_while(|chunk| {
+                chunk.session < id
+                    || (chunk.session == id && transport::is_older(chunk.epoch, epoch))
+            })
+            .count();
+        self.fifo.skip(stale);
+    }
+
+    fn next_frame(&mut self, id: u64, epoch: u64, pos: u64) -> Option<[f32; MAX_STRIPS]> {
+        if self.chunk.is_none() {
+            if !self
+                .fifo
+                .first()
+                .is_some_and(|chunk| chunk.session == id && chunk.epoch == epoch)
+            {
+                // The old producer may have finished one more block while the
+                // callback invalidated its generation.
+                self.skip_stale(id, epoch);
+                if !self
+                    .fifo
+                    .first()
+                    .is_some_and(|chunk| chunk.session == id && chunk.epoch == epoch)
+                {
+                    return None;
                 }
-                self.chunk = None;
-                *discards = discards.saturating_sub(1);
             }
-            if *discards == 0 {
-                return None;
-            }
-            self.chunk = Some(self.fifo.try_pop()?);
+            self.chunk = self.fifo.try_pop();
         }
+        let chunk = self.chunk.as_ref()?;
+        let i = pos
+            .checked_sub(chunk.start)
+            .filter(|i| *i < chunk.len as u64)? as usize;
+        let sample = chunk.samples[i];
+        if i + 1 == chunk.len {
+            self.chunk = None;
+        }
+        Some(sample)
     }
 }
 
 pub fn playback_channel(rate: u32, channels: usize) -> Result<(PlaybackTap, PlaybackPort), String> {
-    let (producer, fifo) = HeapRb::new(CHUNKS).split();
+    let (producer, fifo) = HeapRb::new(
+        (rate as usize * PREFETCH_MS / 1000)
+            .div_ceil(CHUNK_FRAMES)
+            .max(2),
+    )
+    .split();
     let (tx, rx) = mpsc::channel();
     let shared = Arc::new(Shared::default());
     let worker_shared = shared.clone();
@@ -339,6 +407,8 @@ pub fn playback_channel(rate: u32, channels: usize) -> Result<(PlaybackTap, Play
         gains: std::array::from_fn(|_| LinearSmoother::new(0.0, ramp_samples(f64::from(rate)))),
         channels: channels.min(MAX_STRIPS),
         fading: 0,
+        transport_fade: PlaybackFade::new(rate),
+        generation: None,
     };
     Ok((
         tap,
@@ -439,4 +509,21 @@ fn worker(mut fifo: HeapProd<Chunk>, rx: mpsc::Receiver<Command>, shared: &Share
             }
         }
     }
+}
+
+#[cfg(test)]
+#[test]
+fn an_empty_prefetch_holds_the_shared_playhead() {
+    let (mut tap, _port) = playback_channel(48_000, 2).unwrap();
+    tap.shared.session.store(1, Relaxed);
+    tap.shared.frames.store(48_000, Relaxed);
+    tap.shared.selected.store(3, Relaxed);
+    tap.shared
+        .transport
+        .update(|cursor| cursor.move_to(7, true));
+    let mut inputs = vec![vec![0.1; 480], vec![0.2; 480]];
+    tap.process(&mut inputs, 480);
+    assert_eq!(tap.shared.transport.get().frame(), 7);
+    assert!(tap.shared.buffering.load(Relaxed));
+    assert_eq!([inputs[0][479], inputs[1][479]], [0.0, 0.0]);
 }

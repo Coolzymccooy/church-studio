@@ -39,12 +39,15 @@ function useSoundcheck(engineOn, mixer) {
       }
     };
     void refresh();
-    mixer.getState().then((state) => {
+    const refreshNames = () => mixer.getState().then((state) => {
       if (active) setStrips(state.strips);
     }).catch(() => {});
+    void refreshNames();
+    const names = mixer.subscribeStripRenames?.(refreshNames);
     const interval = window.setInterval(refresh, POLL_MS);
     return () => {
       active = false;
+      names?.dispose();
       window.clearInterval(interval);
     };
   }, [engineOn, mixer]);
@@ -115,6 +118,14 @@ export default function SoundcheckPanel({ engineOn, mixer }) {
         <Transport session={session} status={status} title={title} clock={clock} position={position}
           setPosition={setPosition} busy={busy} run={run} locate={locate} />
       )}
+      {Boolean(session?.warnings?.length) && (
+        <div className="fp-keys items-center" role="status">
+          <Lamp tone="a">{session.warnings.length} skipped</Lamp>
+          <InfoTip label="Skipped tracks">
+            {session.warnings.map(({ name, reason }) => <div key={`${name}:${reason}`}>{name} · {reason}</div>)}
+          </InfoTip>
+        </div>
+      )}
       {session?.tracks.map((track) => {
         const playback = Boolean(status.selected & (1 << track.index));
         const label = strips.find((strip) => strip.index === track.index)?.name ?? `Ch ${track.index + 1}`;
@@ -154,11 +165,15 @@ function Transport({ session, status, title, clock, position, setPosition, busy,
         <Key disabled={busy || !status.playing} onClick={() => run(desktop.stop)}>Stop</Key>
         <Key lit={status.looping ? 'sel' : null} pressed={status.looping} disabled={busy}
           onClick={() => run(() => desktop.loop(!status.looping))}>Loop</Key>
-        <Key disabled={busy || position === null} onClick={() => locate(position)}>Locate</Key>
       </div>
       <input type="range" className="fp-range" min="0" max={status.duration} step="any"
         value={clock} aria-label="Locate time" aria-valuetext={durationLabel(clock)} disabled={busy}
-        onChange={(event) => setPosition(Number(event.target.value))} />
+        onChange={(event) => setPosition(Number(event.target.value))}
+        onPointerUp={(event) => { if (position !== null) void locate(Number(event.currentTarget.value)); }}
+        onPointerCancel={() => setPosition(null)}
+        onKeyUp={(event) => {
+          if (position !== null && /^(Arrow|Home|End|Page)/.test(event.key)) void locate(Number(event.currentTarget.value));
+        }} />
       {session.markers.length > 0 && (
         <select value="" className="fp-field" aria-label="Locate marker" disabled={busy}
           onChange={(event) => locate(session.markers[Number(event.target.value)].timeSeconds)}>

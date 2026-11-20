@@ -4,7 +4,7 @@ import { faderDbToPosition, formatDb, positionToFaderDb } from '../../lib/mixerE
 import {
   DUCK_KNOB, STRIP_KNOBS, STRIP_ROWS, grText, hasAutomix, reductionText, stripColour, stripGateTone,
 } from '../../lib/faceplateStrip.js';
-import { Fader, Glass, Key, Knob, MeterLadder } from '../faceplate/index.js';
+import { Fader, Glass, Key, Knob, Lamp, MeterLadder } from '../faceplate/index.js';
 
 const FADER_HEIGHT = 132;
 const LADDER_HEIGHT = FADER_HEIGHT - 18;
@@ -88,7 +88,7 @@ function KeyPair({ children }) {
  * and gain-reduction readout, auto-mix and duck (when the engine reports them), and the fader
  * between pre- and post-fader meters.
  */
-export default function ChannelStrip({ strip, metersRef, onSetParam, onSetBool, onRename, extraMonitors = [] }) {
+export default function ChannelStrip({ playbackTone, strip, metersRef, onSetParam, onSetBool, onRename, extraMonitors = [] }) {
   const [nameDraft, setNameDraft] = useState(strip.name);
   const [syncedName, setSyncedName] = useState(strip.name);
   // Reset the draft whenever the committed name changes (e.g. a scene load), during render.
@@ -149,7 +149,9 @@ export default function ChannelStrip({ strip, metersRef, onSetParam, onSetBool, 
   return (
     <div className="fp-strip" role="group" aria-label={`Channel ${strip.index + 1} ${name}`}>
       <div className={`fp-scrib fp-c-${stripColour(strip.index)}${strip.mute ? ' fp-dim' : ''}`}>
-        <span className="fp-no">{String(strip.index + 1).padStart(2, '0')}</span>
+        {playbackTone
+          ? <Lamp tone={playbackTone} className="fp-playback"><span className="sr-only">Playback source</span><span aria-hidden="true">play</span></Lamp>
+          : <span className="fp-no">{String(strip.index + 1).padStart(2, '0')}</span>}
         <input
           value={nameDraft}
           maxLength={24}

@@ -1,5 +1,6 @@
 import { AudioLines, Gauge, Mic, Rewind, UserRound } from 'lucide-react';
 
+import { soundcheckLamp } from '../../lib/soundcheck.js';
 import SoundcheckPanel from '../soundcheck/SoundcheckPanel.jsx';
 import { isTauri } from '../../lib/platform.js';
 import InputRackAiTab from '../InputRackAiTab.jsx';
@@ -16,7 +17,7 @@ const VOICE_KEYS = ['lookaheadGate', 'dynamicDeEsser', 'multibandComp', 'derever
  * The input rack as a rail of faceplate icon keys: live or file source at the top, then input
  * (level and Hyper gate), voice, profiles and session. LEDs show signal, processing and health.
  */
-export default function InputRack({ mode, onModeSwitch, core, voice, profiles, session, mixer }) {
+export default function InputRack({ mode, onModeSwitch, core, voice, profiles, session, mixer, soundcheckSignal }) {
   const signal = core.isLive || core.isPlayingFile;
   const voiceOn = VOICE_KEYS.some((k) => voice.features[k]);
   const stats = session.stats || {};
@@ -28,7 +29,7 @@ export default function InputRack({ mode, onModeSwitch, core, voice, profiles, s
     { id: 'profiles', icon: UserRound, label: 'profiles', title: 'Profiles', led: profiles.streamSafe ? 'g' : 'off', render: () => <RackProfiles p={profiles} /> },
     { id: 'session', icon: Gauge, label: 'session', title: 'Session', led: sessionWarn ? 'a' : 'off', render: () => <RackSession s={session} /> },
     ...(isTauri ? [{
-      id: 'soundcheck', icon: Rewind, label: 'Soundcheck', title: 'Soundcheck',
+      id: 'soundcheck', icon: Rewind, label: 'soundcheck', title: 'Soundcheck', led: soundcheckLamp(soundcheckSignal),
       render: () => <SoundcheckPanel engineOn={core.isLive} mixer={mixer} />,
     }] : []),
   ];

@@ -421,6 +421,7 @@ pub fn run() {
             soundcheck_commands::soundcheck_set_loop,
             soundcheck_commands::soundcheck_locate,
             soundcheck_commands::soundcheck_status,
+            soundcheck_commands::soundcheck_signal,
             mixer_commands::mixer_set_strip_param,
             mixer_commands::mixer_set_strip_bool,
             mixer_commands::mixer_rename_strip,

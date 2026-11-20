@@ -237,9 +237,7 @@ pub async fn recorder_start(
         if running.recorder.is_recording() {
             return Err("A recording is already running".to_string());
         }
-        if running.playback.active() {
-            return Err("Turn off soundcheck before recording".to_string());
-        }
+        running.playback.ensure_recording_compatible()?;
         let ndi_strips: Vec<usize> = running.ndi_inputs.iter().map(|input| input.strip).collect();
         let computer_strips: Vec<usize> = running
             .computer_audio
@@ -286,7 +284,7 @@ pub async fn recorder_start(
     let leftover = {
         let mut guard = lock(engine.inner());
         match guard.as_mut().filter(|running| running.recorder.owns(&shared)) {
-            Some(running) if !running.playback.active() => {
+            Some(running) if running.playback.ensure_recording_compatible().is_ok() => {
                 running.recorder.start_prepared(plan, prepared, on_status)?;
                 None
             }

@@ -1,3 +1,4 @@
+use super::mapping::{matching_input, warning, MappingWarning, PlaybackInput};
 use crate::export::request::is_plain_file_name;
 use crate::export::wav_read::WavReader;
 use crate::mixer_control::MAX_STRIPS;
@@ -11,7 +12,6 @@ use std::fs::File;
 use std::io::{self, BufReader, Read};
 use std::path::Path;
 
-const CACHE_FRAMES: usize = 4096;
 const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
 const MAX_PARTS_PER_TRACK: usize = 64;
 
@@ -32,6 +32,7 @@ pub struct SessionInfo {
     pub tracks: Vec<TrackInfo>,
     pub markers: Vec<Marker>,
     pub dropped_frames: u64,
+    pub warnings: Vec<MappingWarning>,
 }
 
 struct Part {
@@ -44,11 +45,13 @@ struct Track {
     parts: Vec<Part>,
     cache: Vec<f32>,
     cache_start: u64,
+    cache_frames: u64,
+    first_read: u64,
     prior_last: Option<(u64, f32)>,
 }
 
 impl Track {
-    fn open(folder: &Path, track: &SessionTrack, rate: u32) -> Result<Self, String> {
+    fn open(folder: &Path, track: &SessionTrack, rate: u32, index: usize) -> Result<Self, String> {
         let names = if track.files.is_empty() {
             std::slice::from_ref(&track.file)
         } else {
@@ -78,9 +81,12 @@ impl Track {
                 .ok_or("Session is too long")?;
             parts.push(Part { start, end, wav });
         }
+        let cache_frames = (rate as u64 / 3).clamp(8192, 65536);
         Ok(Self {
             parts,
-            cache: Vec::with_capacity(CACHE_FRAMES),
+            cache: Vec::with_capacity(cache_frames as usize),
+            cache_frames,
+            first_read: cache_frames - (cache_frames - 2048) * index as u64 / MAX_STRIPS as u64,
             cache_start: 0,
             prior_last: None,
         })
@@ -115,9 +121,16 @@ impl Track {
             .last()
             .map(|&sample| (self.cache_start + self.cache.len() as u64 - 1, sample));
         let local = frame - part.start;
-        let cache_frame = local / CACHE_FRAMES as u64 * CACHE_FRAMES as u64;
+        let (cache_frame, block) = if local < self.first_read {
+            (0, self.first_read)
+        } else {
+            (
+                self.first_read + (local - self.first_read) / self.cache_frames * self.cache_frames,
+                self.cache_frames,
+            )
+        };
         part.wav.seek_frame(cache_frame)?;
-        let expected = (part.end - part.start - cache_frame).min(CACHE_FRAMES as u64) as usize;
+        let expected = (part.end - part.start - cache_frame).min(block) as usize;
         if part.wav.read_frames(expected, &mut self.cache)? != expected {
             return Err(io::Error::other("Recording part changed during playback"));
         }
@@ -165,7 +178,7 @@ impl Source {
     }
 }
 
-pub fn open_session(path: &Path, active: usize, rate: u32) -> Result<Source, String> {
+pub fn open_session(path: &Path, inputs: &[PlaybackInput], rate: u32) -> Result<Source, String> {
     if path.file_name().and_then(|name| name.to_str()) != Some(SESSION_FILE) {
         return Err("Choose session.json".into());
     }
@@ -195,6 +208,8 @@ pub fn open_session(path: &Path, active: usize, rate: u32) -> Result<Source, Str
     let mut mapped = Vec::new();
     let mut indices = HashSet::new();
     let mut length = 0;
+    let mut used = HashSet::new();
+    let mut warnings = Vec::new();
     for track in manifest
         .tracks
         .iter()
@@ -204,10 +219,19 @@ pub fn open_session(path: &Path, active: usize, rate: u32) -> Result<Source, Str
         if !indices.insert(index) {
             return Err("Duplicate strip mapping".into());
         }
-        if index >= active.min(MAX_STRIPS) {
-            continue;
-        }
-        let source = Track::open(&folder, track, manifest.sample_rate)?;
+        let input = match matching_input(track, inputs, index) {
+            Ok(input) if input.index < MAX_STRIPS && used.insert(input.index) => input,
+            Ok(_) => {
+                warnings.push(warning(track, "Destination already used"));
+                continue;
+            }
+            Err(reason) => {
+                warnings.push(reason);
+                continue;
+            }
+        };
+        let index = input.index;
+        let source = Track::open(&folder, track, manifest.sample_rate, index)?;
         length = length.max(source.frames());
         mapped.push(TrackInfo {
             index,
@@ -216,7 +240,7 @@ pub fn open_session(path: &Path, active: usize, rate: u32) -> Result<Source, Str
         tracks.push((index, source));
     }
     if length == 0 {
-        return Err("No playable tracks".into());
+        return Err("No playable tracks match the active strip names and source kinds".into());
     }
     let frames = length
         .checked_mul(u64::from(rate))
@@ -240,6 +264,7 @@ pub fn open_session(path: &Path, active: usize, rate: u32) -> Result<Source, Str
             tracks: mapped,
             markers: manifest.markers,
             dropped_frames: manifest.dropped_frames,
+            warnings,
         },
         tracks,
     })

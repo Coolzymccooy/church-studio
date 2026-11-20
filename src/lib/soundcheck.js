@@ -17,3 +17,7 @@ export function durationLabel(seconds) {
   const clock = formatElapsed(seconds);
   return clock.startsWith('0:') ? clock.slice(2).replace(/^0/, '') : clock;
 }
+
+export function soundcheckLamp(signal) {
+  return signal?.playing ? 'g' : signal?.selected ? 'a' : 'off';
+}

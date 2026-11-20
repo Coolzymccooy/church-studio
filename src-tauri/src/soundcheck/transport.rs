@@ -2,6 +2,11 @@ use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 
 const POSITION_BITS: u32 = 42;
 const EPOCH_MASK: u64 = (1 << 20) - 1;
+pub(super) fn is_older(epoch: u64, current: u64) -> bool {
+    let distance = current.wrapping_sub(epoch) & EPOCH_MASK;
+    distance != 0 && distance <= EPOCH_MASK / 2
+}
+
 const PLAYING: u64 = 1 << 62;
 const LOOP: u64 = 1 << 63;
 pub(super) const MAX_POSITION: u64 = (1 << POSITION_BITS) - 1;
