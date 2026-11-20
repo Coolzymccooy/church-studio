@@ -87,6 +87,26 @@ impl NeuralDenoiser {
         self.last_vad
     }
 
+    /// VAD for the gate: Some while the network runs on the audio (enabled,
+    /// filling or fading), None when the stage is off or unavailable.
+    pub fn vad(&self) -> Option<f32> {
+        if self.state.is_some() && self.switch.is_running() {
+            Some(self.last_vad)
+        } else {
+            None
+        }
+    }
+
+    /// Samples until the current RNNoise frame completes (the VAD changes
+    /// only on that sample). A stopped stage restarts at a frame start.
+    pub fn samples_to_frame_end(&self) -> usize {
+        if self.switch.is_running() {
+            FRAME - self.pos
+        } else {
+            FRAME
+        }
+    }
+
     /// Drop the streaming state; the next enabled block fades in from dry.
     /// Used when the whole chain comes back from bypass.
     pub fn restart(&mut self) {
@@ -113,6 +133,7 @@ impl NeuralDenoiser {
         }
         self.pos = 0;
         self.current_mix = self.target_mix();
+        self.last_vad = 0.0;
     }
 
     pub fn process_block(&mut self, buf: &mut [f32]) {
