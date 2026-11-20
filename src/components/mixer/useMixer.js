@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { applyStripChange, clampStripValue, createCoalescer } from '../../lib/mixerEngine.js';
+import { keepHeldFaders } from '../../lib/heldFaders.js';
 
 const TOAST_MS = 4000;
 
@@ -32,6 +33,43 @@ export function useMixer(controller, refreshKey) {
   // dragging; send at most one engine command per control per frame.
   const [coalesce] = useState(() => createCoalescer());
   const stripCountRef = useRef(0);
+  const heldFaders = useRef(new Set());
+  const pendingFaders = useRef(new Map());
+  const touchCalls = useRef(new Map());
+
+  const receiveState = useCallback((next) => {
+    const held = new Set(heldFaders.current);
+    setState((current) => keepHeldFaders(current, next, held));
+  }, []);
+
+  const setFaderTouch = useCallback((id, down) => {
+    const previous = touchCalls.current.get(id);
+    if (down) heldFaders.current.add(id);
+    const send = () => controller.setFaderTouch?.(id, down);
+    const settle = down ? previous : Promise.allSettled([previous, pendingFaders.current.get(id)]);
+    const pending = Promise.resolve(settle).then(send).catch(() => {});
+    touchCalls.current.set(id, pending);
+    void pending.finally(() => {
+      if (touchCalls.current.get(id) !== pending) return;
+      touchCalls.current.delete(id);
+      if (!down) {
+        heldFaders.current.delete(id);
+        controller.getState().then(receiveState).catch(() => {});
+      }
+    });
+  }, [controller, receiveState]);
+
+  const writeFader = useCallback((id, key, write) => {
+    const pending = coalesce(`${id}:${key}`, write);
+    if (key === 'fader_db') {
+      pendingFaders.current.set(id, pending);
+      const clear = () => {
+        if (pendingFaders.current.get(id) === pending) pendingFaders.current.delete(id);
+      };
+      void pending.then(clear, clear);
+    }
+    return pending;
+  }, [coalesce]);
 
   useEffect(() => {
     stripCountRef.current = state?.strips?.length ?? 0;
@@ -45,15 +83,15 @@ export function useMixer(controller, refreshKey) {
 
   const refresh = useCallback(async () => {
     const next = await controller.getState();
-    setState(next);
+    receiveState(next);
     return next;
-  }, [controller]);
+  }, [controller, receiveState]);
 
   useEffect(() => {
     let cancelled = false;
     controller.getState()
       .then((next) => {
-        if (!cancelled) setState(next);
+        if (!cancelled) receiveState(next);
       })
       .catch((err) => {
         if (!cancelled) showToast(describeMixerError(err));
@@ -73,7 +111,7 @@ export function useMixer(controller, refreshKey) {
       if (running > 0 && running !== stripCountRef.current && !refetching && !cancelled) {
         refetching = true;
         controller.getState()
-          .then((next) => { if (!cancelled) setState(next); })
+          .then((next) => { if (!cancelled) receiveState(next); })
           .catch(() => {})
           .finally(() => { refetching = false; });
       }
@@ -84,7 +122,7 @@ export function useMixer(controller, refreshKey) {
     const refetch = () => {
       if (cancelled) return;
       controller.getState()
-        .then((next) => { if (!cancelled) setState(next); })
+        .then((next) => { if (!cancelled) receiveState(next); })
         .catch(() => {});
     };
     const stateSub = controller.subscribeStateChanges?.(refetch);
@@ -101,7 +139,7 @@ export function useMixer(controller, refreshKey) {
       sceneSub?.dispose();
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     };
-  }, [controller, showToast]);
+  }, [controller, receiveState, showToast]);
 
   const refreshKeyRef = useRef(refreshKey);
   useEffect(() => {
@@ -109,10 +147,10 @@ export function useMixer(controller, refreshKey) {
     refreshKeyRef.current = refreshKey;
     let cancelled = false;
     controller.getState()
-      .then((next) => { if (!cancelled) setState(next); })
+      .then((next) => { if (!cancelled) receiveState(next); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [controller, refreshKey]);
+  }, [controller, receiveState, refreshKey]);
 
   // withOptimism applies an optimistic change immediately and, on failure,
   // reverts only the field this specific call touched — and reverts it
@@ -135,9 +173,9 @@ export function useMixer(controller, refreshKey) {
       if (revert) setState((prev) => (prev ? revert(prev) : prev));
       // With coalescing, the value before this change may never have reached
       // the engine; re-read the engine so the UI shows what it really has.
-      controller.getState().then(setState).catch(() => {});
+      controller.getState().then(receiveState).catch(() => {});
     });
-  }, [controller, showToast]);
+  }, [controller, receiveState, showToast]);
 
   const setStripParam = useCallback((index, key, value) => {
     withOptimism(
@@ -146,9 +184,9 @@ export function useMixer(controller, refreshKey) {
         const previousValue = prev.strips[index]?.[key];
         return (latest) => applyStripChange(latest, index, key, previousValue);
       },
-      () => coalesce(`strip:${index}:${key}`, () => controller.setStripParam(index, key, value)),
+      () => writeFader(`strip:${index}`, key, () => controller.setStripParam(index, key, value)),
     );
-  }, [controller, coalesce, withOptimism]);
+  }, [controller, withOptimism, writeFader]);
 
   const setStripBool = useCallback((index, key, value) => {
     withOptimism(
@@ -192,9 +230,9 @@ export function useMixer(controller, refreshKey) {
           buses: latest.buses.map((b) => (b.id === bus ? { ...b, [key]: previousValue } : b)),
         });
       },
-      () => coalesce(`bus:${bus}:${key}`, () => controller.setBusParam(bus, key, value)),
+      () => writeFader(`bus:${bus}`, key, () => controller.setBusParam(bus, key, value)),
     );
-  }, [controller, coalesce, withOptimism]);
+  }, [controller, withOptimism, writeFader]);
 
   const setBusBool = useCallback((bus, key, value) => {
     withOptimism(
@@ -227,14 +265,14 @@ export function useMixer(controller, refreshKey) {
   const loadScene = useCallback(async (name) => {
     try {
       const next = await controller.loadScene(name);
-      setState(next);
+      receiveState(next);
       setCurrentScene({ name, source: 'desk' });
       return true;
     } catch (err) {
       showToast(describeMixerError(err));
       return false;
     }
-  }, [controller, showToast]);
+  }, [controller, receiveState, showToast]);
 
   const deleteScene = useCallback(async (name) => {
     try {
@@ -260,6 +298,7 @@ export function useMixer(controller, refreshKey) {
     renameStrip,
     setBusParam,
     setBusBool,
+    setFaderTouch,
     saveScene,
     loadScene,
     deleteScene,

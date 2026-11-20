@@ -236,12 +236,28 @@ async fn slow_board_writes_leave_authentication_and_requests_responsive() {
     let code = auth.lock().issue(Role::Desk).unwrap();
     let body = serde_json::json!({ "name": "Rehearsal desk", "code": code }).to_string();
     let paired = send(&app, "POST", "/api/pair", HOST, Some(ORIGIN), None, body).await;
-    let cookie = paired.headers()[header::SET_COOKIE].to_str().unwrap().split(';').next().unwrap().to_owned();
+    let cookie = paired.headers()[header::SET_COOKIE]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
     let pending = {
         let app = app.clone();
         tokio::spawn(async move {
-            send(&app, "POST", "/api/control", HOST, Some(ORIGIN), Some(&cookie),
-                r#"{"layout":"v1","target":{"type":"strip","index":0},"kind":"level","db":-12}"#.into()).await.status()
+            send(
+                &app,
+                "POST",
+                "/api/control",
+                HOST,
+                Some(ORIGIN),
+                Some(&cookie),
+                r#"{"layout":"v1","target":{"type":"strip","index":0},"kind":"level","db":-12}"#
+                    .into(),
+            )
+            .await
+            .status()
         })
     };
     let started = Instant::now();
@@ -251,6 +267,170 @@ async fn slow_board_writes_leave_authentication_and_requests_responsive() {
     assert!(auth.try_lock().is_some());
     let response = send(&app, "GET", "/api/state", HOST, None, None, String::new()).await;
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    assert!(started.elapsed() < Duration::from_millis(100), "slow board starved unrelated requests");
+    assert!(
+        started.elapsed() < Duration::from_millis(100),
+        "slow board starved unrelated requests"
+    );
     assert_eq!(pending.await.unwrap(), StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn updates_push_changes_to_two_paired_clients_and_enforce_revocation() {
+    use futures_util::StreamExt;
+    let auth = Arc::new(Mutex::new(Auth::default()));
+    let app = router(Arc::new(TestBoard::default()), auth.clone(), HOST);
+    let mut cookies = Vec::new();
+    for name in ["Fixture A", "Fixture B"] {
+        let code = auth.lock().issue(Role::Desk).unwrap();
+        let pair = send(
+            &app,
+            "POST",
+            "/api/pair",
+            HOST,
+            Some(ORIGIN),
+            None,
+            serde_json::json!({ "name": name, "code": code }).to_string(),
+        )
+        .await;
+        assert_eq!(pair.status(), Status::NO_CONTENT);
+        cookies.push(
+            pair.headers()[header::SET_COOKIE]
+                .to_str()
+                .unwrap()
+                .split(';')
+                .next()
+                .unwrap()
+                .to_owned(),
+        );
+    }
+    assert_eq!(
+        send(&app, "GET", "/api/events", HOST, None, None, String::new())
+            .await
+            .status(),
+        Status::UNAUTHORIZED
+    );
+    let first = send(
+        &app,
+        "GET",
+        "/api/events",
+        HOST,
+        None,
+        Some(&cookies[0]),
+        String::new(),
+    )
+    .await;
+    let second = send(
+        &app,
+        "GET",
+        "/api/events",
+        HOST,
+        None,
+        Some(&cookies[1]),
+        String::new(),
+    )
+    .await;
+    let mut a = first.into_body().into_data_stream();
+    let mut b = second.into_body().into_data_stream();
+    let next = |chunk: axum::body::Bytes| String::from_utf8(chunk.to_vec()).unwrap();
+    assert!(next(a.next().await.unwrap().unwrap()).contains("event: state"));
+    assert!(next(b.next().await.unwrap().unwrap()).contains("event: state"));
+    let response = send(
+        &app,
+        "POST",
+        "/api/control",
+        HOST,
+        Some(ORIGIN),
+        Some(&cookies[0]),
+        r#"{"layout":"v1","target":{"type":"strip","index":0},"kind":"level","db":-17}"#.into(),
+    )
+    .await;
+    assert_eq!(response.status(), Status::NO_CONTENT);
+    let updates = tokio::time::timeout(Duration::from_millis(150), async {
+        tokio::join!(a.next(), b.next())
+    })
+    .await
+    .unwrap();
+    for entry in [updates.0, updates.1] {
+        assert!(next(entry.unwrap().unwrap()).contains(r#""db":-17.0"#));
+    }
+    let id = auth.lock().devices()[0].id;
+    auth.lock().revoke(id);
+    let closed = tokio::time::timeout(Duration::from_secs(1), a.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(next(closed).contains("event: revoked"));
+    assert!(a.next().await.is_none());
+}
+
+#[tokio::test]
+async fn writes_share_desktop_notifications_and_device_limits() {
+    #[derive(Default)]
+    struct PulseBoard {
+        board: TestBoard,
+        notifications: Mutex<Vec<Instant>>,
+    }
+
+    impl Board for PulseBoard {
+        fn view(&self, role: Role) -> Result<MixerView, Status> {
+            self.board.view(role)
+        }
+        fn apply(&self, role: Role, control: Control) -> Result<(), Status> {
+            self.board.apply(role, control)
+        }
+        fn notify(&self) {
+            self.notifications.lock().push(Instant::now());
+        }
+    }
+
+    let board = Arc::new(PulseBoard::default());
+    let auth = Arc::new(Mutex::new(Auth::default()));
+    let app = router(board.clone(), auth.clone(), HOST);
+    let code = auth.lock().issue(Role::Desk).unwrap();
+    let pair = send(
+        &app,
+        "POST",
+        "/api/pair",
+        HOST,
+        Some(ORIGIN),
+        None,
+        serde_json::json!({ "name": "Desk fixture", "code": code }).to_string(),
+    )
+    .await;
+    let cookie = pair.headers()[header::SET_COOKIE]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap();
+    let write = || {
+        send(
+            &app,
+            "POST",
+            "/api/control",
+            HOST,
+            Some(ORIGIN),
+            Some(cookie),
+            r#"{"layout":"v1","target":{"type":"strip","index":0},"kind":"level","db":-3}"#.into(),
+        )
+    };
+    // Generate a burst while the test runtime is on the same event loop.
+    let burst = futures_util::future::join_all((0..24).map(|_| write())).await;
+    let accepted = burst
+        .iter()
+        .filter(|response| response.status() == Status::NO_CONTENT)
+        .count();
+    assert!(accepted > 0 && accepted <= 8);
+    assert!(burst
+        .iter()
+        .any(|response| response.status() == Status::TOO_MANY_REQUESTS));
+    tokio::time::sleep(Duration::from_millis(125)).await;
+    assert_eq!(write().await.status(), Status::NO_CONTENT);
+    tokio::time::sleep(Duration::from_millis(125)).await;
+    let pulses = board.notifications.lock();
+    assert!(pulses.len() >= 2 && pulses.len() <= 3);
+    assert!(pulses
+        .windows(2)
+        .all(|pair| pair[1] - pair[0] >= Duration::from_millis(50)));
 }

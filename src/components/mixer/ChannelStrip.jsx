@@ -88,7 +88,7 @@ function KeyPair({ children }) {
  * and gain-reduction readout, auto-mix and duck (when the engine reports them), and the fader
  * between pre- and post-fader meters.
  */
-export default function ChannelStrip({ strip, metersRef, onSetParam, onSetBool, onRename, extraMonitors = [] }) {
+export default function ChannelStrip({ strip, metersRef, onSetParam, onSetBool, onFaderTouch, onRename, extraMonitors = [] }) {
   const [nameDraft, setNameDraft] = useState(strip.name);
   const [syncedName, setSyncedName] = useState(strip.name);
   // Reset the draft whenever the committed name changes (e.g. a scene load), during render.
@@ -186,6 +186,7 @@ export default function ChannelStrip({ strip, metersRef, onSetParam, onSetBool, 
         <MeterLadder getDb={preDb} height={LADDER_HEIGHT} width={5} label={`${name} pre-fader level`} />
         <Fader
           position={faderDbToPosition(strip.fader_db)}
+          onTouch={onFaderTouch}
           onChange={(p) => onSetParam('fader_db', positionToFaderDb(p))}
           label={`${name} fader`}
           valueText={`${formatDb(strip.fader_db)} dB`}

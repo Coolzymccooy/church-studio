@@ -22,3 +22,13 @@ test('the pairing URL keeps the code in a fragment', async () => {
   assert.equal(pairCodeFromHash(url.hash), '012345');
   assert.equal(pairCodeFromHash('#code=12345x'), '');
 });
+
+test('incoming desk changes preserve only the faders held by the local operator', async () => {
+  const { keepHeldFaders } = await import('./heldFaders.js');
+  const state = { strips: [{ index: 0, fader_db: 0 }, { index: 1, fader_db: -8 }], buses: [{ id: 'main', fader_db: -10 }] };
+  const next = { strips: [{ index: 0, fader_db: -20, mute: true }, { index: 1, fader_db: -16 }], buses: [{ id: 'main', fader_db: -30 }] };
+  const result = keepHeldFaders(state, next, new Set(['strip:0', 'bus:main']));
+  assert.deepEqual(result.strips, [{ index: 0, fader_db: 0, mute: true }, next.strips[1]]);
+  assert.equal(result.buses[0].fader_db, -10);
+  assert.equal(keepHeldFaders(result, next, new Set()), next);
+});

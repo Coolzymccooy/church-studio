@@ -88,7 +88,7 @@ export default function MixerConsole({ controller, refreshKey, demoBanner, onOpe
   const {
     state, loading, toast, dismissToast, metersRef, currentScene,
     setStripParam, setStripBool, renameStrip,
-    setBusParam, setBusBool,
+    setBusParam, setBusBool, setFaderTouch,
     saveScene, loadScene, deleteScene,
   } = useMixer(controller, refreshKey);
   const extraMonitors = activeExtraMonitors(state?.buses);
@@ -134,6 +134,7 @@ export default function MixerConsole({ controller, refreshKey, demoBanner, onOpe
                   metersRef={metersRef}
                   onSetParam={(key, value) => setStripParam(strip.index, key, value)}
                   onSetBool={(key, value) => setStripBool(strip.index, key, value)}
+                  onFaderTouch={(down) => setFaderTouch(`strip:${strip.index}`, down)}
                   onRename={(name) => renameStrip(strip.index, name)}
                   extraMonitors={extraMonitors}
                 />
@@ -147,6 +148,7 @@ export default function MixerConsole({ controller, refreshKey, demoBanner, onOpe
                   metersRef={metersRef}
                   onSetParam={(key, value) => setBusParam(bus.id, key, value)}
                   onSetBool={(key, value) => setBusBool(bus.id, key, value)}
+                  onFaderTouch={(down) => setFaderTouch(`bus:${bus.id}`, down)}
                   onCopyFromMon1={isExtraMonitor(bus.id) ? () => copyMon1Into(bus.id) : null}
                 />
               ))}

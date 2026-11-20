@@ -1,7 +1,9 @@
 mod auth;
 pub mod desktop;
 mod extensions;
+mod settings;
 mod tls;
+mod updates;
 mod web;
 
 pub use auth::Auth;
@@ -13,11 +15,16 @@ use axum::http::{header, HeaderMap, HeaderValue, Method};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use axum::{Json, Router};
+use axum::{Extension, Json, Router};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::net::{IpAddr, Ipv4Addr};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use std::time::Duration;
+use tokio::sync::Semaphore;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -38,12 +45,22 @@ impl Role {
         }
     }
 
+    fn monitor_bus(self) -> Option<&'static str> {
+        match self {
+            Self::Monitor1 => Some("monitor"),
+            Self::Monitor2 => Some("monitor2"),
+            Self::Monitor3 => Some("monitor3"),
+            Self::Desk => None,
+        }
+    }
+
     fn permits(self, change: &Control) -> bool {
-        self == Self::Desk
-            || matches!(
-                (&change.target, &change.change),
-                (Target::Strip { .. }, Change::Level { .. })
-            )
+        match (&change.target, &change.change) {
+            (Target::Personal, Change::Mute { .. }) => self.monitor_bus().is_some(),
+            (Target::Personal, _) => false,
+            (Target::Strip { .. }, Change::Level { .. }) => true,
+            _ => self == Self::Desk,
+        }
     }
 }
 
@@ -54,6 +71,7 @@ pub enum Target {
     Bus { id: String },
     Return { id: String },
     Dca { index: u32 },
+    Personal,
 }
 
 #[derive(Deserialize)]
@@ -91,6 +109,7 @@ pub struct MixerView {
 pub trait Board: Send + Sync + 'static {
     fn view(&self, role: Role) -> Result<MixerView, Status>;
     fn apply(&self, role: Role, control: Control) -> Result<(), Status>;
+    fn notify(&self) {}
 }
 
 struct Context {
@@ -98,15 +117,34 @@ struct Context {
     auth: Arc<Mutex<Auth>>,
     hosts: [String; 1],
     origin: String,
+    fingerprint: String,
+    jobs: Arc<Semaphore>,
+    dirty: AtomicBool,
+    updates: updates::Channels,
 }
 
+#[cfg(test)]
 pub fn router(board: Arc<dyn Board>, auth: Arc<Mutex<Auth>>, host: &str) -> Router {
+    router_with_identity(board, auth, host, String::new())
+}
+
+fn router_with_identity(
+    board: Arc<dyn Board>,
+    auth: Arc<Mutex<Auth>>,
+    host: &str,
+    fingerprint: String,
+) -> Router {
     let ctx = Arc::new(Context {
         board,
         auth,
         hosts: [host.into()],
         origin: format!("https://{host}"),
+        fingerprint,
+        jobs: Arc::new(Semaphore::new(8)),
+        dirty: AtomicBool::new(false),
+        updates: updates::Channels::default(),
     });
+    tokio::spawn(updates::publish(Arc::downgrade(&ctx)));
     Router::new()
         .route("/", get(web::index))
         .route("/desk.css", get(web::css))
@@ -116,6 +154,9 @@ pub fn router(board: Arc<dyn Board>, auth: Arc<Mutex<Auth>>, host: &str) -> Rout
         .route("/mono.woff2", get(web::mono))
         .route("/api/pair", post(pair))
         .route("/api/state", get(state))
+        .route("/api/events", get(updates::events))
+        .route("/api/renew", post(renew))
+        .route("/api/identity", get(identity))
         .route("/api/control", post(control))
         .layer(DefaultBodyLimit::max(1024))
         .layer(middleware::from_fn_with_state(ctx.clone(), checked_request))
@@ -166,34 +207,95 @@ async fn checked_request(
 struct PairRequest {
     code: String,
     name: String,
+    #[serde(default)]
+    renew: bool,
 }
 
-async fn pair(State(ctx): State<Arc<Context>>, Json(body): Json<PairRequest>) -> Response {
-    match ctx.auth.lock().pair(&body.code, &body.name) {
-        Ok(cookie) => match HeaderValue::from_str(&cookie) {
-            Ok(cookie) => (Status::NO_CONTENT, [(header::SET_COOKIE, cookie)]).into_response(),
-            Err(_) => Status::INTERNAL_SERVER_ERROR.into_response(),
-        },
+fn client_ip(peer: Option<Extension<IpAddr>>) -> IpAddr {
+    peer.map_or(Ipv4Addr::LOCALHOST.into(), |Extension(ip)| ip)
+}
+
+fn cookie_response(cookie: String) -> Response {
+    match HeaderValue::from_str(&cookie) {
+        Ok(cookie) => (Status::NO_CONTENT, [(header::SET_COOKIE, cookie)]).into_response(),
+        Err(_) => Status::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
+async fn pair(
+    State(ctx): State<Arc<Context>>,
+    peer: Option<Extension<IpAddr>>,
+    Json(body): Json<PairRequest>,
+) -> Response {
+    let result = ctx
+        .auth
+        .lock()
+        .pair(&body.code, &body.name, client_ip(peer), body.renew);
+    match result {
+        Ok(cookie) => cookie_response(cookie),
         Err(error) => match error {
             PairError::Code => Status::UNAUTHORIZED,
             PairError::Name => Status::BAD_REQUEST,
-            PairError::Full => Status::TOO_MANY_REQUESTS,
+            PairError::Full | PairError::Backoff => Status::TOO_MANY_REQUESTS,
             PairError::Random => Status::SERVICE_UNAVAILABLE,
         }
         .into_response(),
     }
 }
 
-fn authorized(auth: &Auth, headers: &HeaderMap) -> Option<Role> {
-    auth.role(one_header(headers, header::COOKIE)?)
+async fn renew(
+    State(ctx): State<Arc<Context>>,
+    peer: Option<Extension<IpAddr>>,
+    headers: HeaderMap,
+) -> Response {
+    let Some(cookie) = one_header(&headers, header::COOKIE) else {
+        return Status::UNAUTHORIZED.into_response();
+    };
+    match ctx.auth.lock().renew(cookie, client_ip(peer)) {
+        Some(cookie) => cookie_response(cookie),
+        None => Status::FORBIDDEN.into_response(),
+    }
 }
 
-async fn state(State(ctx): State<Arc<Context>>, headers: HeaderMap) -> Response {
-    let role = { authorized(&ctx.auth.lock(), &headers) };
+async fn identity(State(ctx): State<Arc<Context>>) -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "fingerprint": ctx.fingerprint }))
+}
+
+impl Context {
+    async fn run_board<T: Send + 'static>(
+        &self,
+        operation: impl FnOnce(&dyn Board) -> Result<T, Status> + Send + 'static,
+    ) -> Result<T, Status> {
+        let permit = self
+            .jobs
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| Status::SERVICE_UNAVAILABLE)?;
+        let board = self.board.clone();
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            operation(board.as_ref())
+        })
+        .await
+        .map_err(|_| Status::SERVICE_UNAVAILABLE)?
+    }
+
+    fn role(&self, cookie: &str, ip: IpAddr) -> Option<Role> {
+        self.auth.lock().role(cookie, ip)
+    }
+}
+
+async fn state(
+    State(ctx): State<Arc<Context>>,
+    peer: Option<Extension<IpAddr>>,
+    headers: HeaderMap,
+) -> Response {
+    let role =
+        one_header(&headers, header::COOKIE).and_then(|cookie| ctx.role(cookie, client_ip(peer)));
     let Some(role) = role else {
         return Status::UNAUTHORIZED.into_response();
     };
-    match ctx.board.view(role) {
+    match ctx.run_board(move |board| board.view(role)).await {
         Ok(view) => Json(view).into_response(),
         Err(code) => code.into_response(),
     }
@@ -201,12 +303,17 @@ async fn state(State(ctx): State<Arc<Context>>, headers: HeaderMap) -> Response 
 
 async fn control(
     State(ctx): State<Arc<Context>>,
+    peer: Option<Extension<IpAddr>>,
     headers: HeaderMap,
     Json(change): Json<Control>,
 ) -> Status {
-    let auth = ctx.auth.lock();
-    let Some(role) = authorized(&auth, &headers) else {
+    let Some(cookie) = one_header(&headers, header::COOKIE) else {
         return Status::UNAUTHORIZED;
+    };
+    let result = ctx.auth.lock().write_role(cookie, client_ip(peer));
+    let role = match result {
+        Ok(role) => role,
+        Err(code) => return code,
     };
     if !role.permits(&change) {
         return Status::FORBIDDEN;
@@ -214,7 +321,15 @@ async fn control(
     if matches!(change.change, Change::Level { db } if !db.is_finite()) {
         return Status::BAD_REQUEST;
     }
-    match ctx.board.apply(role, change) {
+    let written = ctx.clone();
+    match ctx
+        .run_board(move |board| {
+            board.apply(role, change)?;
+            written.dirty.store(true, Ordering::Release);
+            Ok(())
+        })
+        .await
+    {
         Ok(()) => Status::NO_CONTENT,
         Err(code) => code,
     }

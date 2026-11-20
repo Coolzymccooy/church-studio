@@ -54,7 +54,7 @@ obws = { version = "0.14", features = ["events"] }
 futures-util = "0.3"   # StreamExt for the obws event stream
 
 # tokio is already in the tree via tauri: net/sync for Link, time for OBS.
-tokio = { version = "1", features = ["net", "sync", "time"] }
+tokio = { version = "1", features = ["net", "process", "sync", "time"] }
 
 # ── NDI (runtime-loaded; nothing linked at build time) ───────────────────────
 libloading = "0.8"
@@ -76,6 +76,7 @@ sha2 = "0.10"
 socket2 = "0.6"
 
 [dev-dependencies]
+tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "sync", "time"] }
 

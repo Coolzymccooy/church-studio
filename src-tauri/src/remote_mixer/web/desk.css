@@ -51,10 +51,12 @@ h1 span { color: var(--fp-muted); font-size: var(--fp-text-xl); font-weight: 400
 .desk .channel { justify-items: stretch; text-align: center; }
 .desk .readout { display: grid; }
 .desk .level {
-  writing-mode: vertical-lr; direction: rtl; width: 44px; height: 132px;
+  writing-mode: vertical-lr; direction: rtl; width: 44px; height: 196px;
   justify-self: center;
 }
 @media (min-width: 900px) {
   main { max-width: 1440px; margin-inline: auto; }
   body:not(.desk) .channels { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+#fingerprint { overflow-wrap: anywhere; font-family: var(--fp-font-mono); }

@@ -99,6 +99,7 @@ pub struct AudioEngine {
     pub buffer_frames: u32,
     pub latency_ms: f32,
     pub input_device_name: String,
+    pub(crate) input_device_identity: String,
     pub monitor_output_name: String,
     pub broadcast_output_name: Option<String>,
     /// Main (PA) output, when one was selected and opened.
@@ -115,7 +116,6 @@ pub struct AudioEngine {
 pub type EngineState = std::sync::Mutex<Option<RunningEngine>>;
 
 pub struct RunningEngine {
-    pub remote_layout_generation: u64,
     stop_tx: mpsc::Sender<EngineCommand>,
     join_handle: Option<JoinHandle<()>>,
     shared: Arc<EngineShared>,
@@ -123,6 +123,7 @@ pub struct RunningEngine {
     pub buffer_frames: u32,
     pub latency_ms: f32,
     pub input_device_name: String,
+    pub(crate) input_device_identity: String,
     pub monitor_output_name: String,
     pub broadcast_output_name: Option<String>,
     /// Main (PA) output, when one was selected and opened.
@@ -165,6 +166,7 @@ struct EngineInfo {
     buffer_frames: u32,
     latency_ms: f32,
     input_device_name: String,
+    input_device_identity: String,
     monitor_output_name: String,
     broadcast_output_name: Option<String>,
     main_output_name: Option<String>,
@@ -274,6 +276,7 @@ impl AudioEngine {
             buffer_frames: self.buffer_frames,
             latency_ms: self.latency_ms,
             input_device_name: self.input_device_name.clone(),
+            input_device_identity: self.input_device_identity.clone(),
             monitor_output_name: self.monitor_output_name.clone(),
             broadcast_output_name: self.broadcast_output_name.clone(),
             main_output_name: self.main_output_name.clone(),
@@ -425,6 +428,11 @@ impl AudioEngine {
         let in_channels = (in_cfg.channels() as usize).max(1);
         let input_device_name = device_name(&in_dev)
             .unwrap_or_else(|_| "Unknown input".to_string());
+
+        let input_device_identity = in_dev
+            .id()
+            .map(|id| id.to_string())
+            .unwrap_or_else(|_| input_device_name.clone());
 
         let buf_frames = 256u32;
         let latency_ms = (buf_frames as f32 * 2.0 / out_sr as f32) * 1000.0;
@@ -696,6 +704,7 @@ impl AudioEngine {
             buffer_frames: buf_frames,
             latency_ms,
             input_device_name,
+            input_device_identity,
             monitor_output_name,
             broadcast_output_name,
             main_output_name,
@@ -891,9 +900,7 @@ impl RunningEngine {
             .recv()
             .map_err(|_| "Audio thread exited before initialization completed".to_string())??;
 
-        static NEXT_LAYOUT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         Ok(Self {
-            remote_layout_generation: NEXT_LAYOUT.fetch_add(1, Ordering::Relaxed),
             stop_tx,
             join_handle: Some(join_handle),
             shared,
@@ -901,6 +908,7 @@ impl RunningEngine {
             buffer_frames: info.buffer_frames,
             latency_ms: info.latency_ms,
             input_device_name: info.input_device_name,
+            input_device_identity: info.input_device_identity,
             monitor_output_name: info.monitor_output_name,
             broadcast_output_name: info.broadcast_output_name,
             main_output_name: info.main_output_name,

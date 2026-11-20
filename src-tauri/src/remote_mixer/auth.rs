@@ -2,20 +2,30 @@ use super::Role;
 use crate::link::config::constant_time_eq;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::{
+    collections::HashMap,
+    net::IpAddr,
+    time::{Duration, Instant},
+};
 
-pub(super) const COOKIE: &str = "__Host-tiwaton_remote";
+const COOKIE: &str = "__Host-tiwaton_remote";
 const CODE_TTL: Duration = Duration::from_secs(120);
 const DEVICE_TTL: Duration = Duration::from_secs(12 * 60 * 60);
-const CODE_ATTEMPTS: u8 = 8;
 const MAX_DEVICES: usize = 32;
+const MAX_FAILURE_RECORDS: usize = 256;
+const WRITE_RATE: f32 = 30.0;
+const WRITE_BURST: f32 = 8.0;
 
 struct PairCode {
     code: String,
     role: Role,
     expires: Instant,
-    remaining: u8,
+}
+
+struct Failure {
+    strikes: u8,
+    until: Instant,
+    last: Instant,
 }
 
 #[derive(Clone, Serialize)]
@@ -25,20 +35,39 @@ pub struct Device {
     role: Role,
     #[serde(skip)]
     expires: Instant,
+    #[serde(skip)]
+    ip: IpAddr,
+    #[serde(skip)]
+    renewable: bool,
+    #[serde(skip)]
+    tokens: f32,
+    #[serde(skip)]
+    last_write: Instant,
 }
 
 #[derive(Default)]
 pub struct Auth {
     pair: Option<PairCode>,
     devices: HashMap<[u8; 32], Device>,
+    failures: HashMap<IpAddr, Failure>,
     next_id: u32,
 }
 
+#[derive(Debug, PartialEq)]
 pub(super) enum PairError {
     Code,
     Name,
     Full,
     Random,
+    Backoff,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PairStatus {
+    pub state: &'static str,
+    pub remaining_seconds: u64,
+    pub locked_clients: usize,
 }
 
 fn secret<const N: usize>() -> Result<[u8; N], PairError> {
@@ -57,6 +86,27 @@ fn pairing_code() -> Result<String, PairError> {
     }
 }
 
+fn token(cookie: &str) -> Option<&str> {
+    let mut matches = cookie.split(';').filter_map(|part| {
+        let (name, value) = part.trim().split_once('=')?;
+        (name == COOKIE).then_some(value)
+    });
+    let value = matches.next()?;
+    (matches.next().is_none() && value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit()))
+        .then_some(value)
+}
+
+fn digest(token: &str) -> [u8; 32] {
+    Sha256::digest(token.as_bytes()).into()
+}
+
+fn set_cookie(token: &str) -> String {
+    format!(
+        "{COOKIE}={token}; Path=/; Max-Age={}; Secure; HttpOnly; SameSite=Strict",
+        DEVICE_TTL.as_secs()
+    )
+}
+
 impl Auth {
     pub fn issue(&mut self, role: Role) -> Result<String, String> {
         let code = pairing_code().map_err(|_| "Cannot create pairing code")?;
@@ -64,7 +114,6 @@ impl Auth {
             code: code.clone(),
             role,
             expires: Instant::now() + CODE_TTL,
-            remaining: CODE_ATTEMPTS,
         });
         Ok(code)
     }
@@ -84,22 +133,73 @@ impl Auth {
         self.devices.retain(|_, device| device.id != id);
     }
 
+    pub fn pair_status(&self) -> PairStatus {
+        let now = Instant::now();
+        let locked_clients = self
+            .failures
+            .values()
+            .filter(|entry| entry.until > now)
+            .count();
+        let (state, remaining) = match &self.pair {
+            None => ("idle", Duration::ZERO),
+            Some(code) if code.expires <= now => ("expired", Duration::ZERO),
+            Some(code) => (
+                if locked_clients == 0 {
+                    "ready"
+                } else {
+                    "locked"
+                },
+                code.expires - now,
+            ),
+        };
+        PairStatus {
+            state,
+            remaining_seconds: remaining.as_secs(),
+            locked_clients,
+        }
+    }
+
+    pub(super) fn paired_ip(&self, ip: IpAddr) -> bool {
+        let now = Instant::now();
+        self.devices
+            .values()
+            .any(|device| device.ip == ip && device.expires > now)
+    }
+
     fn prune(&mut self) {
         let now = Instant::now();
         self.devices.retain(|_, device| device.expires > now);
     }
 
-    pub(super) fn pair(&mut self, code: &str, name: &str) -> Result<String, PairError> {
-        let pair = self.pair.as_mut().ok_or(PairError::Code)?;
-        if pair.expires <= Instant::now() || pair.remaining == 0 {
-            self.pair = None;
-            return Err(PairError::Code);
+    pub(super) fn pair(
+        &mut self,
+        code: &str,
+        name: &str,
+        ip: IpAddr,
+        renewable: bool,
+    ) -> Result<String, PairError> {
+        let now = Instant::now();
+        self.failures
+            .retain(|_, entry| now.duration_since(entry.last) < Duration::from_secs(600));
+        if self
+            .failures
+            .get(&ip)
+            .is_some_and(|entry| entry.until > now)
+        {
+            return Err(PairError::Backoff);
         }
-        pair.remaining -= 1;
-        if !constant_time_eq(pair.code.as_bytes(), code.as_bytes()) {
-            return Err(PairError::Code);
+        if !self.failures.contains_key(&ip) && self.failures.len() >= MAX_FAILURE_RECORDS {
+            return Err(PairError::Backoff);
         }
-        let role = pair.role;
+        let valid = self
+            .pair
+            .as_ref()
+            .filter(|pair| pair.expires > now)
+            .filter(|pair| constant_time_eq(pair.code.as_bytes(), code.as_bytes()));
+        let Some(role) = valid.map(|pair| pair.role) else {
+            self.record_failure(ip, now);
+            return Err(PairError::Code);
+        };
         let name: String = name
             .trim()
             .chars()
@@ -113,44 +213,79 @@ impl Auth {
         if self.devices.len() >= MAX_DEVICES {
             return Err(PairError::Full);
         }
-        let token: String = secret::<32>()?
+        let value: String = secret::<32>()?
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect();
         self.next_id = self.next_id.checked_add(1).ok_or(PairError::Full)?;
         self.devices.insert(
-            Sha256::digest(token.as_bytes()).into(),
+            digest(&value),
             Device {
                 id: self.next_id,
                 name,
                 role,
-                expires: Instant::now() + DEVICE_TTL,
+                expires: now + DEVICE_TTL,
+                ip,
+                renewable,
+                tokens: WRITE_BURST,
+                last_write: now,
             },
         );
         self.pair = None;
-        Ok(format!(
-            "{COOKIE}={token}; Path=/; Max-Age={}; Secure; HttpOnly; SameSite=Strict",
-            DEVICE_TTL.as_secs()
-        ))
+        self.failures.remove(&ip);
+        Ok(set_cookie(&value))
     }
 
-    pub(super) fn role(&self, cookie: &str) -> Option<Role> {
-        let prefix = format!("{COOKIE}=");
-        let mut tokens = cookie
-            .split(';')
-            .filter_map(|part| part.trim().strip_prefix(&prefix));
-        let token = tokens.next()?;
-        if tokens.next().is_some()
-            || token.len() != 64
-            || !token.bytes().all(|b| b.is_ascii_hexdigit())
-        {
+    fn record_failure(&mut self, ip: IpAddr, now: Instant) {
+        let entry = self.failures.entry(ip).or_insert(Failure {
+            strikes: 0,
+            until: now,
+            last: now,
+        });
+        entry.strikes = entry.strikes.saturating_add(1);
+        entry.last = now;
+        if entry.strikes >= 3 {
+            let seconds = (2u64 << entry.strikes.saturating_sub(3).min(5)).min(60);
+            entry.until = now + Duration::from_secs(seconds);
+        }
+    }
+
+    fn device_mut(&mut self, cookie: &str, ip: IpAddr) -> Option<&mut Device> {
+        let device = self.devices.get_mut(&digest(token(cookie)?))?;
+        if device.expires <= Instant::now() {
             return None;
         }
-        let digest: [u8; 32] = Sha256::digest(token.as_bytes()).into();
-        self.devices
-            .get(&digest)
-            .filter(|device| device.expires > Instant::now())
-            .map(|device| device.role)
+        device.ip = ip;
+        Some(device)
+    }
+
+    pub(super) fn role(&mut self, cookie: &str, ip: IpAddr) -> Option<Role> {
+        self.device_mut(cookie, ip).map(|device| device.role)
+    }
+
+    pub(super) fn write_role(&mut self, cookie: &str, ip: IpAddr) -> Result<Role, super::Status> {
+        let device = self
+            .device_mut(cookie, ip)
+            .ok_or(super::Status::UNAUTHORIZED)?;
+        let now = Instant::now();
+        device.tokens = (device.tokens
+            + now.duration_since(device.last_write).as_secs_f32() * WRITE_RATE)
+            .min(WRITE_BURST);
+        device.last_write = now;
+        if device.tokens < 1.0 {
+            return Err(super::Status::TOO_MANY_REQUESTS);
+        }
+        device.tokens -= 1.0;
+        Ok(device.role)
+    }
+
+    pub(super) fn renew(&mut self, cookie: &str, ip: IpAddr) -> Option<String> {
+        let device = self.device_mut(cookie, ip)?;
+        if !device.renewable {
+            return None;
+        }
+        device.expires = Instant::now() + DEVICE_TTL;
+        Some(set_cookie(token(cookie)?))
     }
 }
 
@@ -159,18 +294,48 @@ mod tests {
     use super::*;
 
     #[test]
-    fn codes_expire_and_lock_after_eight_failed_attempts() {
+    fn backoff_is_bound_to_ip_and_survives_code_rotation() {
         let mut auth = Auth::default();
-        let code = auth.issue(Role::Desk).unwrap();
-        for _ in 0..CODE_ATTEMPTS {
-            assert!(matches!(
-                auth.pair("invalid", "Fixture"),
+        let ip = "127.0.0.1".parse().unwrap();
+        let other = "127.0.0.2".parse().unwrap();
+        let _ = auth.issue(Role::Desk).unwrap();
+        for _ in 0..3 {
+            assert_eq!(
+                auth.pair("invalid", "Fixture", ip, false),
                 Err(PairError::Code)
-            ));
+            );
         }
-        assert!(matches!(auth.pair(&code, "Fixture"), Err(PairError::Code)));
+        assert_eq!(auth.pair_status().state, "locked");
+        let code = auth.issue(Role::Monitor2).unwrap();
+        assert_eq!(
+            auth.pair(&code, "Fixture", ip, false),
+            Err(PairError::Backoff)
+        );
+        let cookie = auth.pair(&code, "Fixture", other, true).unwrap();
+        assert_eq!(auth.pair_status().locked_clients, 1);
+        assert!(auth.renew(&cookie, other).is_some());
+        for _ in 0..8 {
+            assert_eq!(auth.write_role(&cookie, other), Ok(Role::Monitor2));
+        }
+        assert_eq!(
+            auth.write_role(&cookie, other),
+            Err(super::super::Status::TOO_MANY_REQUESTS)
+        );
+        let id = auth.devices()[0].id;
+        auth.revoke(id);
+        assert!(auth.renew(&cookie, other).is_none());
+    }
+
+    #[test]
+    fn an_expired_code_is_reported_and_renewal_is_opt_in() {
+        let mut auth = Auth::default();
+        let ip = "127.0.0.1".parse().unwrap();
         let code = auth.issue(Role::Desk).unwrap();
         auth.pair.as_mut().unwrap().expires = Instant::now();
-        assert!(matches!(auth.pair(&code, "Fixture"), Err(PairError::Code)));
+        assert_eq!(auth.pair_status().state, "expired");
+        assert_eq!(auth.pair(&code, "Fixture", ip, false), Err(PairError::Code));
+        let code = auth.issue(Role::Desk).unwrap();
+        let cookie = auth.pair(&code, "Fixture", ip, false).unwrap();
+        assert!(auth.renew(&cookie, ip).is_none());
     }
 }

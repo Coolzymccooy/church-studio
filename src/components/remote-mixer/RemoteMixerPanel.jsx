@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Glass, InfoTip, Key, Lamp, TwoPressKey } from '../faceplate/index.js';
+import { pairUrl } from '../../../src-tauri/src/remote_mixer/web/protocol.js';
 
 const ROLES = { monitor1: 'Mon 1', monitor2: 'Mon 2', monitor3: 'Mon 3', desk: 'Desk' };
 const initial = { ip: '', host: '', port: 4475, certificate: '', privateKey: '' };
@@ -13,16 +14,30 @@ export default function RemoteMixerPanel() {
   const [code, setCode] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [tailnet, setTailnet] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    invoke('tailnet_address').then((address) => { if (active) setTailnet(address); }).catch(() => {});
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     let finished = false;
     let pending = false;
+    let hydrated = false;
     const refresh = async () => {
       if (pending) return;
       pending = true;
       try {
         const next = await invoke('status');
-        if (!finished) setStatus(next);
+        if (!finished) {
+          setStatus(next);
+          if (!hydrated) {
+            hydrated = true;
+            if (next.settings) setSettings(next.settings);
+          }
+        }
       } catch (err) {
         if (!finished) setError(err?.message ?? String(err));
       } finally {
@@ -36,12 +51,6 @@ export default function RemoteMixerPanel() {
       window.clearInterval(timer);
     };
   }, []);
-
-  useEffect(() => {
-    if (code === null) return undefined;
-    const timer = window.setTimeout(() => setCode(null), 120_000);
-    return () => window.clearTimeout(timer);
-  }, [code]);
 
   const action = async (fn) => {
     if (busy) return;
@@ -64,13 +73,16 @@ export default function RemoteMixerPanel() {
   });
 
   const running = Boolean(status?.url);
+  const pairing = status?.pairing?.state;
+  const activeCode = code && (pairing === 'ready' || pairing === 'locked');
+  const pairingLabel = { ready: 'Ready', locked: 'IP locked', expired: 'Expired' }[pairing];
   const complete = settings.ip && settings.host && settings.certificate && settings.privateKey && settings.port > 0 && settings.port <= 65535;
 
   return (
     <>
       <div className="fp-row">
         <Lamp tone={running ? 'g' : 'off'}>{running ? 'Listening' : 'Off'}</Lamp>
-        <InfoTip label="Remote mixer">Choose the desktop's LAN or Tailscale IPv4 address. Use the certificate's hostname and a certificate your clients trust. Each paired device gets only the role you choose.</InfoTip>
+        <InfoTip label="Remote mixer">On a LAN, use a certificate trusted by each device and enter its hostname. Compare the SHA-256 fingerprint with the pairing page before entering a code. Each device receives the chosen role.</InfoTip>
       </div>
       {error && (
         <div className="fp-row" role="alert">
@@ -80,7 +92,12 @@ export default function RemoteMixerPanel() {
       )}
       {running ? (
         <>
-          <input readOnly className="fp-field" aria-label="Remote mixer address" value={status.url} />
+          <div className="fp-row">
+            <input readOnly className="fp-field" aria-label="Remote mixer address" value={status.url} />
+            <InfoTip label="Certificate fingerprint">
+              <span className="break-all">SHA-256 {status.fingerprint}</span>
+            </InfoTip>
+          </div>
           <div className="fp-keys">
             <TwoPressKey label="Stop remote mixer" disabled={busy}
               tip="Press twice to disconnect all paired devices."
@@ -95,12 +112,19 @@ export default function RemoteMixerPanel() {
             </select>
             <Key disabled={busy} onClick={() => action(async () => setCode(await invoke('pair_code', { role })))}>Pair code</Key>
           </div>
-          {code && (
+          {activeCode && (
             <div className="fp-row">
               <Glass className="fp-timer" aria-label="Pairing code">{code}</Glass>
               <Key disabled={busy} onClick={() => action(async () => { await invoke('cancel_code'); setCode(null); })}>Cancel</Key>
             </div>
           )}
+          {pairingLabel && (
+            <div className="fp-row">
+              <Lamp tone={pairing === 'ready' ? 'g' : 'a'}>{pairingLabel}</Lamp>
+              <InfoTip label="Pairing status">Pairing attempts are limited per IP address. Other addresses may still use this code until it expires.</InfoTip>
+            </div>
+          )}
+          {activeCode && <PairQr url={pairUrl(status.url, code)} />}
           {status.devices.map((device) => (
             <div className="fp-row" key={device.id}>
               <span className="fp-ellipsis" title={device.name}>{device.name} · {ROLES[device.role]}</span>
@@ -111,6 +135,14 @@ export default function RemoteMixerPanel() {
         </>
       ) : (
         <>
+          {tailnet && (
+            <div className="fp-row">
+              <Key disabled={busy} onClick={() => action(async () => {
+                setSettings(await invoke('tailnet_certificate', { port: settings.port || initial.port }));
+              })}>Tailscale certificate</Key>
+              <InfoTip label="Tailscale certificate">Request a trusted certificate for {tailnet.host}. Tailscale HTTPS must be enabled. The hostname is published in certificate transparency logs.</InfoTip>
+            </div>
+          )}
           <SettingsField name="IP address" value={settings.ip} onChange={(ip) => setSettings((prev) => ({ ...prev, ip }))} />
           <SettingsField name="Hostname" value={settings.host} onChange={(host) => setSettings((prev) => ({ ...prev, host }))} />
           <SettingsField name="Port" value={settings.port} onChange={(port) => setSettings((prev) => ({ ...prev, port: Number(port) }))} numeric />
@@ -123,6 +155,20 @@ export default function RemoteMixerPanel() {
       )}
     </>
   );
+}
+
+function PairQr({ url }) {
+  const canvas = useRef(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let active = true;
+    import('qrcode').then(({ default: qr }) => {
+      if (active) return qr.toCanvas(canvas.current, url, { width: 156 });
+    }).catch(() => { if (active) setFailed(true); });
+    return () => { active = false; };
+  }, [url]);
+  if (failed) return null;
+  return <canvas ref={canvas} role="img" aria-label="Pair device by QR code" />;
 }
 
 function SettingsField({ name, value, onChange, numeric = false }) {

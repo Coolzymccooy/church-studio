@@ -1,20 +1,39 @@
-use super::auth::{Auth, Device};
-use super::extensions;
+use super::auth::{Auth, Device, PairStatus};
 use super::tls::{self, ListenerSettings};
-use super::{router, Board, Change, Control, MixerView, Role, Status, Target, ViewControl};
+use super::{extensions, settings};
+use super::{
+    router_with_identity, Board, Change, Control, MixerView, Role, Status, Target, ViewControl,
+};
 use crate::audio::{EngineState, RunningEngine};
 use crate::mixer_control::{bus_index, MixerControl};
 use crate::mixer_layout::StripLayout;
 use parking_lot::Mutex;
 use serde::Serialize;
+use std::collections::HashSet;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 #[derive(Default)]
-pub struct RemoteMixer(Mutex<Option<Listening>>);
+pub struct RemoteMixer {
+    listener: Mutex<Option<Listening>>,
+    last_settings: Mutex<Option<ListenerSettings>>,
+    start: tokio::sync::Mutex<()>,
+    held_faders: Mutex<HashSet<String>>,
+}
+
+impl RemoteMixer {
+    pub fn load(app: &AppHandle) -> Self {
+        Self {
+            last_settings: Mutex::new(settings::load(app)),
+            ..Self::default()
+        }
+    }
+}
 
 struct Listening {
     url: String,
+    fingerprint: String,
     auth: Arc<Mutex<Auth>>,
     task: tauri::async_runtime::JoinHandle<()>,
 }
@@ -26,18 +45,54 @@ impl Drop for Listening {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SettingsView {
     url: Option<String>,
     devices: Vec<Device>,
+    pairing: Option<PairStatus>,
+    fingerprint: Option<String>,
+    settings: Option<ListenerSettings>,
 }
 
 fn layout(engine: Option<&RunningEngine>) -> (StripLayout, String) {
-    match engine {
-        Some(running) => (
-            running.strip_layout(),
-            format!("{:016x}", running.remote_layout_generation),
-        ),
-        None => (StripLayout::new(1, false, 0), "stopped".into()),
+    let Some(running) = engine else {
+        return (StripLayout::new(1, false, 0), "stopped".into());
+    };
+    let layout = running.strip_layout();
+    let signature = layout_signature(
+        layout,
+        &running.input_device_identity,
+        running
+            .ndi_inputs
+            .iter()
+            .map(|source| (source.strip, source.source.as_str())),
+    );
+    (layout, signature)
+}
+
+fn layout_signature<'a>(
+    layout: StripLayout,
+    device: &str,
+    ndi: impl IntoIterator<Item = (usize, &'a str)>,
+) -> String {
+    let mut digest = DefaultHasher::new();
+    ("input", layout.hardware, device).hash(&mut digest);
+    ("network slots", layout.net).hash(&mut digest);
+    ("computer", layout.computer).hash(&mut digest);
+    for (strip, source) in ndi {
+        ("ndi", strip, source).hash(&mut digest);
+    }
+    format!("{:016x}", digest.finish())
+}
+
+fn bus_name(id: &str) -> &str {
+    match id {
+        "main" => "Main",
+        "stream" => "Stream",
+        "monitor" => "Mon 1",
+        "monitor2" => "Mon 2",
+        "monitor3" => "Mon 3",
+        _ => id,
     }
 }
 
@@ -46,7 +101,7 @@ struct DesktopBoard(AppHandle);
 impl Board for DesktopBoard {
     fn view(&self, role: Role) -> Result<MixerView, Status> {
         let engine = self.0.state::<EngineState>();
-        let running = engine.lock().map_err(|_| Status::SERVICE_UNAVAILABLE)?;
+        let running = engine.try_lock().map_err(|_| Status::SERVICE_UNAVAILABLE)?;
         let (layout, signature) = layout(running.as_ref());
         let is_running = running.is_some();
         let state = self
@@ -79,21 +134,24 @@ impl Board for DesktopBoard {
             })
             .collect();
         if role == Role::Desk {
-            controls.extend(state.buses.into_iter().map(|bus| {
-                let name = match bus.id.as_str() {
-                    "main" => "Main",
-                    "stream" => "Stream",
-                    "monitor" => "Mon 1",
-                    "monitor2" => "Mon 2",
-                    _ => "Mon 3",
-                };
-                ViewControl {
-                    target: Target::Bus { id: bus.id },
-                    name: name.into(),
-                    db: bus.fader_db,
-                    muted: Some(bus.mute),
-                }
+            controls.extend(state.buses.iter().map(|bus| ViewControl {
+                name: bus_name(&bus.id).into(),
+                target: Target::Bus { id: bus.id.clone() },
+                db: bus.fader_db,
+                muted: Some(bus.mute),
             }));
+        }
+        if let Some(bus) = state
+            .buses
+            .iter()
+            .find(|bus| role.monitor_bus() == Some(bus.id.as_str()))
+        {
+            controls.push(ViewControl {
+                target: Target::Personal,
+                name: bus_name(&bus.id).into(),
+                db: 0.0,
+                muted: Some(bus.mute),
+            });
         }
         controls.extend(extras);
         Ok(MixerView {
@@ -107,7 +165,7 @@ impl Board for DesktopBoard {
     fn apply(&self, role: Role, control: Control) -> Result<(), Status> {
         let mixer = self.0.state::<MixerControl>();
         let engine = self.0.state::<EngineState>();
-        let guard = engine.lock().map_err(|_| Status::SERVICE_UNAVAILABLE)?;
+        let guard = engine.try_lock().map_err(|_| Status::SERVICE_UNAVAILABLE)?;
         if guard.is_none() {
             return Err(Status::SERVICE_UNAVAILABLE);
         }
@@ -115,15 +173,40 @@ impl Board for DesktopBoard {
         if control.layout != signature {
             return Err(Status::CONFLICT);
         }
-        write_control(&mixer, layout, role, control)?;
-        drop(guard);
-        let _ = self.0.emit(
-            "mixer-state-changed",
-            mixer.snapshot_layout(layout, true, Vec::new()),
-        );
-        Ok(())
+        if role == Role::Desk && matches!(control.change, Change::Level { .. }) {
+            let fader = match &control.target {
+                Target::Strip { index } => format!("strip:{index}"),
+                Target::Bus { id } => format!("bus:{id}"),
+                Target::Return { id } => format!("bus:{id}"),
+                Target::Dca { index } => format!("dca:{index}"),
+                Target::Personal => return Err(Status::FORBIDDEN),
+            };
+            let remote = self.0.state::<RemoteMixer>();
+            let held = remote.held_faders.lock();
+            if held.contains(&fader) {
+                return Err(Status::LOCKED);
+            }
+            return write_control(&mixer, layout, role, control);
+        }
+        write_control(&mixer, layout, role, control)
+    }
+
+    fn notify(&self) {
+        let _ = self.0.emit("mixer-state-changed", ());
     }
 }
+
+// Inherent DCA methods take precedence when the optional group bank is present.
+#[allow(dead_code)]
+trait OptionalDca {
+    fn set_dca_fader(&self, _: usize, _: f32) -> Result<(), String> {
+        Err("DCA unavailable".into())
+    }
+    fn set_dca_mute(&self, _: usize, _: bool) -> Result<(), String> {
+        Err("DCA unavailable".into())
+    }
+}
+impl OptionalDca for MixerControl {}
 
 fn write_control(
     mixer: &MixerControl,
@@ -153,12 +236,38 @@ fn write_control(
             }
         }
         (Target::Dca { index }, change) if index < 8 => match change {
-            Change::Level { db } => mixer.set_strip_param(index, "dca_fader_db", db),
-            Change::Mute { muted } => mixer.set_strip_bool(index, "dca_mute", muted),
+            Change::Level { db } => mixer.set_dca_fader(index as usize, db),
+            Change::Mute { muted } => mixer.set_dca_mute(index as usize, muted),
         },
+        (Target::Personal, Change::Mute { muted }) => {
+            mixer.set_bus_bool(role.monitor_bus().ok_or(Status::FORBIDDEN)?, "mute", muted)
+        }
         _ => return Err(Status::BAD_REQUEST),
     };
     result.map_err(|_| Status::BAD_REQUEST)
+}
+
+#[tauri::command]
+pub fn remote_mixer_fader_touch(remote: State<'_, RemoteMixer>, id: String, down: bool) {
+    let Some((kind, key)) = id.split_once(':') else {
+        return;
+    };
+    let valid = match kind {
+        "strip" => key
+            .parse::<usize>()
+            .is_ok_and(|index| index < crate::mixer_control::MAX_STRIPS),
+        "bus" => bus_index(key).is_ok() || ["fx_a", "fx_b"].contains(&key),
+        "dca" => key.parse::<usize>().is_ok_and(|index| index < 8),
+        _ => false,
+    };
+    if valid {
+        let mut held = remote.held_faders.lock();
+        if down {
+            held.insert(id);
+        } else {
+            held.remove(&id);
+        }
+    }
 }
 
 #[tauri::command]
@@ -167,24 +276,38 @@ pub async fn remote_mixer_start(
     remote: State<'_, RemoteMixer>,
     settings: ListenerSettings,
 ) -> Result<String, String> {
-    if remote.0.lock().is_some() {
+    let _start = remote
+        .start
+        .try_lock()
+        .map_err(|_| "Remote mixer is starting")?;
+    if remote.listener.lock().is_some() {
         return Err("Remote mixer already on".into());
     }
-    let prepared = tauri::async_runtime::spawn_blocking(move || settings.prepare())
-        .await
-        .map_err(|_| "Cannot start remote mixer")??;
+    let dir = settings::data_dir(&app)?;
+    let saved = settings.clone();
+    let prepared = tauri::async_runtime::spawn_blocking(move || {
+        let prepared = saved.clone().prepare()?;
+        settings::save(&dir, &saved)?;
+        Ok::<_, String>(prepared)
+    })
+    .await
+    .map_err(|_| "Cannot start remote mixer")??;
     let listener = tokio::net::TcpListener::from_std(prepared.listener)
         .map_err(|_| "Cannot start remote mixer listener")?;
-    let mut state = remote.0.lock();
-    if state.is_some() {
-        return Err("Remote mixer already on".into());
-    }
     let url = format!("https://{}", prepared.host);
     let auth = Arc::new(Mutex::new(Auth::default()));
-    let router = router(Arc::new(DesktopBoard(app)), auth.clone(), &prepared.host);
-    let task = tauri::async_runtime::spawn(tls::serve(listener, prepared.tls, router));
-    *state = Some(Listening {
+    let router = router_with_identity(
+        Arc::new(DesktopBoard(app)),
+        auth.clone(),
+        &prepared.host,
+        prepared.fingerprint.clone(),
+    );
+    let task =
+        tauri::async_runtime::spawn(tls::serve(listener, prepared.tls, router, auth.clone()));
+    *remote.last_settings.lock() = Some(settings);
+    *remote.listener.lock() = Some(Listening {
         url: url.clone(),
+        fingerprint: prepared.fingerprint,
         auth,
         task,
     });
@@ -193,33 +316,51 @@ pub async fn remote_mixer_start(
 
 #[tauri::command]
 pub fn remote_mixer_stop(remote: State<'_, RemoteMixer>) {
-    let listener = remote.0.lock().take();
+    let listener = remote.listener.lock().take();
     drop(listener);
 }
 
 #[tauri::command]
 pub fn remote_mixer_status(remote: State<'_, RemoteMixer>) -> SettingsView {
-    let mut state = remote.0.lock();
+    let mut state = remote.listener.lock();
     if state
         .as_ref()
         .is_some_and(|server| server.task.inner().is_finished())
     {
         *state = None;
     }
-    match state.as_ref() {
-        Some(server) => SettingsView {
-            url: Some(server.url.clone()),
-            devices: server.auth.lock().devices(),
-        },
-        None => SettingsView {
-            url: None,
-            devices: Vec::new(),
-        },
+    let mut view = SettingsView {
+        url: None,
+        fingerprint: None,
+        pairing: None,
+        devices: Vec::new(),
+        settings: remote.last_settings.lock().clone(),
+    };
+    if let Some(server) = state.as_ref() {
+        let mut auth = server.auth.lock();
+        view.url = Some(server.url.clone());
+        view.fingerprint = Some(server.fingerprint.clone());
+        view.devices = auth.devices();
+        view.pairing = Some(auth.pair_status());
     }
+    view
+}
+
+#[tauri::command]
+pub async fn remote_mixer_tailnet_address() -> Option<settings::TailnetAddress> {
+    settings::detect().await
+}
+
+#[tauri::command]
+pub async fn remote_mixer_tailnet_certificate(
+    app: AppHandle,
+    port: u16,
+) -> Result<ListenerSettings, String> {
+    settings::certificate(&app, port).await
 }
 
 fn with_auth<T>(remote: &RemoteMixer, change: impl FnOnce(&mut Auth) -> T) -> Result<T, String> {
-    let state = remote.0.lock();
+    let state = remote.listener.lock();
     let server = state.as_ref().ok_or("Start the remote mixer")?;
     let result = change(&mut server.auth.lock());
     Ok(result)
@@ -278,5 +419,79 @@ mod tests {
         );
         write_control(&mixer, layout, Role::Desk, mute()).unwrap();
         assert!(mixer.snapshot_layout(layout, true, vec![]).buses[0].mute);
+    }
+
+    #[test]
+    fn monitor_can_only_mute_its_own_mix() {
+        let mixer = MixerControl::new();
+        let layout = StripLayout::new(1, false, 0);
+        let mute = || Control {
+            layout: String::new(),
+            target: Target::Personal,
+            change: Change::Mute { muted: true },
+        };
+        write_control(&mixer, layout, Role::Monitor2, mute()).unwrap();
+        assert_eq!(
+            write_control(&mixer, layout, Role::Desk, mute()),
+            Err(Status::FORBIDDEN)
+        );
+        let muted: Vec<_> = mixer
+            .snapshot_layout(layout, true, vec![])
+            .buses
+            .into_iter()
+            .filter(|bus| bus.mute)
+            .map(|bus| bus.id)
+            .collect();
+        assert_eq!(muted, ["monitor2"]);
+    }
+
+    #[test]
+    fn layout_signature_depends_on_sources_and_unknown_bus_names_are_kept() {
+        let layout = StripLayout::with_net(2, true, 1, 1);
+        let sig = |device, source| layout_signature(layout, device, [(5, source)]);
+        assert_eq!(
+            sig("Interface A", "Source A"),
+            sig("Interface A", "Source A")
+        );
+        assert_ne!(
+            sig("Interface A", "Source A"),
+            sig("Interface B", "Source A")
+        );
+        assert_ne!(
+            sig("Interface A", "Source A"),
+            sig("Interface A", "Source B")
+        );
+        assert_eq!(bus_name("future"), "future");
+    }
+
+    #[test]
+    fn optional_controls_are_writable_only_when_their_banks_exist() {
+        let mixer = MixerControl::new();
+        let layout = StripLayout::new(1, false, 0);
+        let visible = extensions::read(&mixer.snapshot_layout(layout, true, vec![])).unwrap();
+        let change = |target| Control {
+            layout: String::new(),
+            target,
+            change: Change::Level { db: -10.0 },
+        };
+        let fx = write_control(
+            &mixer,
+            layout,
+            Role::Desk,
+            change(Target::Return { id: "fx_a".into() }),
+        );
+        let dca = write_control(&mixer, layout, Role::Desk, change(Target::Dca { index: 0 }));
+        assert_eq!(
+            fx.is_ok(),
+            visible
+                .iter()
+                .any(|view| matches!(&view.target, Target::Return { id } if id == "fx_a"))
+        );
+        assert_eq!(
+            dca.is_ok(),
+            visible
+                .iter()
+                .any(|view| matches!(&view.target, Target::Dca { index: 0 }))
+        );
     }
 }

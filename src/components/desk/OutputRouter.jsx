@@ -110,7 +110,7 @@ export default function OutputRouter({ r }) {
     { id: 'ndi-in', icon: Download, label: 'ndi in', title: 'Receive NDI®', led: ndiLed, render: () => <NdiInputPanel isLive={r.isLive} /> },
     { id: 'net', icon: Globe, label: 'network', title: 'Network audio', led: r.isLive ? 'g' : 'off', render: () => <NetworkAudioPanel isLive={r.isLive} /> },
     ...(isTauri ? [{
-      id: 'remote-mixer', icon: TabletSmartphone, label: 'Remote', title: 'Remote mixer',
+      id: 'remote-mixer', icon: TabletSmartphone, label: 'remote', title: 'Remote mixer',
       render: () => <RemoteMixerPanel />,
     }] : []),
     {
