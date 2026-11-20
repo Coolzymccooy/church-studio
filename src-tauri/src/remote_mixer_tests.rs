@@ -215,3 +215,42 @@ async fn protected_state_enforces_host_origin_and_pairing() {
         StatusCode::UNAUTHORIZED
     );
 }
+
+#[tokio::test]
+async fn slow_board_writes_leave_authentication_and_requests_responsive() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    struct SlowBoard(AtomicBool);
+    impl Board for SlowBoard {
+        fn view(&self, role: Role) -> Result<MixerView, Status> {
+            TestBoard::default().view(role)
+        }
+        fn apply(&self, _: Role, _: Control) -> Result<(), Status> {
+            self.0.store(true, Ordering::Release);
+            std::thread::sleep(Duration::from_millis(180));
+            Ok(())
+        }
+    }
+    let board = Arc::new(SlowBoard(AtomicBool::new(false)));
+    let auth = Arc::new(Mutex::new(Auth::default()));
+    let app = router(board.clone(), auth.clone(), HOST);
+    let code = auth.lock().issue(Role::Desk).unwrap();
+    let body = serde_json::json!({ "name": "Rehearsal desk", "code": code }).to_string();
+    let paired = send(&app, "POST", "/api/pair", HOST, Some(ORIGIN), None, body).await;
+    let cookie = paired.headers()[header::SET_COOKIE].to_str().unwrap().split(';').next().unwrap().to_owned();
+    let pending = {
+        let app = app.clone();
+        tokio::spawn(async move {
+            send(&app, "POST", "/api/control", HOST, Some(ORIGIN), Some(&cookie),
+                r#"{"layout":"v1","target":{"type":"strip","index":0},"kind":"level","db":-12}"#.into()).await.status()
+        })
+    };
+    let started = Instant::now();
+    while !board.0.load(Ordering::Acquire) {
+        tokio::task::yield_now().await;
+    }
+    assert!(auth.try_lock().is_some());
+    let response = send(&app, "GET", "/api/state", HOST, None, None, String::new()).await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert!(started.elapsed() < Duration::from_millis(100), "slow board starved unrelated requests");
+    assert_eq!(pending.await.unwrap(), StatusCode::NO_CONTENT);
+}
