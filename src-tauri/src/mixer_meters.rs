@@ -40,6 +40,8 @@ pub struct BusMeterPayload {
     pub peak_r_db: f32,
     pub rms_l_db: f32,
     pub rms_r_db: f32,
+    /// Gain the loudness leveler applies now, dB (0 when off).
+    pub leveler_db: f32,
 }
 
 /// `mixer-meters` event payload.
@@ -64,6 +66,7 @@ struct BusSlot {
     peak_r_db: AtomicF32,
     rms_l_db: AtomicF32,
     rms_r_db: AtomicF32,
+    leveler_db: AtomicF32,
 }
 
 impl BusSlot {
@@ -73,6 +76,7 @@ impl BusSlot {
             peak_r_db: AtomicF32::new(RESET_DB),
             rms_l_db: AtomicF32::new(RESET_DB),
             rms_r_db: AtomicF32::new(RESET_DB),
+            leveler_db: AtomicF32::new(0.0),
         }
     }
 }
@@ -116,6 +120,14 @@ fn take_gr(slot: &AtomicF32) -> f32 {
     }
 }
 
+fn finite_or_zero(v: f32) -> f32 {
+    if v.is_finite() {
+        v
+    } else {
+        0.0
+    }
+}
+
 impl MixerMeterSlots {
     /// Slots for `num_strips` strips (sized once, at engine start).
     pub fn new(num_strips: usize) -> Self {
@@ -153,6 +165,7 @@ impl MixerMeterSlots {
             hold_max(&slot.peak_r_db, m.peak_r_db);
             slot.rms_l_db.store(m.rms_l_db, Relaxed);
             slot.rms_r_db.store(m.rms_r_db, Relaxed);
+            slot.leveler_db.store(m.leveler_db, Relaxed);
         }
     }
 
@@ -180,6 +193,7 @@ impl MixerMeterSlots {
                 peak_r_db: clamp_db(take(&slot.peak_r_db, RESET_DB)),
                 rms_l_db: clamp_db(slot.rms_l_db.load(Relaxed)),
                 rms_r_db: clamp_db(slot.rms_r_db.load(Relaxed)),
+                leveler_db: finite_or_zero(slot.leveler_db.load(Relaxed)),
             })
             .collect();
         MixerMetersPayload { strips, buses }

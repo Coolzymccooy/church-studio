@@ -74,7 +74,9 @@ Rules:
 Automix and ducking (design: `2026-11-19-automix-ducking-design.md`) apply post-fader: they reach Main, Stream and a post-fader Monitor send, never the pre-fader Monitor send or PFL. They add no latency. Muted strips and strips with the fader off leave the automix group.
 
 ### Bus keys
-`fader_db` f32 (−90…+10, 0), `mute` bool, `limiter_ceiling_db` f32 (−12…0, −1).
+`fader_db` f32 (−90…+10, 0), `mute` bool, `limiter_ceiling_db` f32 (−12…0, −1), `leveler_enabled` bool (false), `leveler_target_lufs` f32 (−30…−10, −14).
+
+**Loudness leveler** (`leveler_enabled`, `leveler_target_lufs`; meant for the Stream bus, works on any bus). A slow leveler between the bus fader and the bus limiter steers the bus toward the target: BS.1770 K-weighted, both channels summed, measured over the last 3 s of programme. A 100 ms block counts as programme only when the 400 ms before it and the 400 ms after it are both no more than 20 LU under the target, so silence and a quiet room freeze the gain instead of pumping it up. The gain is bounded to ±6 dB and moves at most 3 dB/s; switching the leveler off ramps it back to 0 dB at that rate, then the bus passes audio unchanged. It adds no latency, and the bus limiter still holds the ceiling. The UI's "Stream safe" switch and loudness target drive these keys on the Stream bus. They are delivery settings, not mix settings: scenes neither save nor recall them, and they keep their values until the app quits.
 
 ## MixerState (JSON)
 
@@ -90,9 +92,12 @@ Automix and ducking (design: `2026-11-19-automix-ducking-design.md`) apply post-
     "fader_db": 0, "send_main_db": 0, "send_stream_db": 0, "send_monitor_db": 0,
     "monitor_post_fader": false, "voice_chain": true,
     "automix": false, "duck": false, "duck_depth_db": 12, "automix_gr_db": 0, "duck_gr_db": 0 }],
-  "buses": [{ "id": "main", "fader_db": 0, "mute": false, "limiter_ceiling_db": -1 },
-            { "id": "stream", "fader_db": 0, "mute": false, "limiter_ceiling_db": -1 },
-            { "id": "monitor", "fader_db": 0, "mute": false, "limiter_ceiling_db": -1 }],
+  "buses": [{ "id": "main", "fader_db": 0, "mute": false, "limiter_ceiling_db": -1,
+              "leveler_enabled": false, "leveler_target_lufs": -14 },
+            { "id": "stream", "fader_db": 0, "mute": false, "limiter_ceiling_db": -1,
+              "leveler_enabled": true, "leveler_target_lufs": -14 },
+            { "id": "monitor", "fader_db": 0, "mute": false, "limiter_ceiling_db": -1,
+              "leveler_enabled": false, "leveler_target_lufs": -14 }],
   "scenes": ["Sermon", "Worship"]
 }
 ```
@@ -103,6 +108,7 @@ Automix and ducking (design: `2026-11-19-automix-ducking-design.md`) apply post-
 ```json
 { "strips": [{ "pre_db": -30.1, "post_db": -33.0, "gate_open": true, "gr_db": 2.5,
                "automix_gr_db": 9.0, "duck_gr_db": 0, "speech": false }],
-  "buses": [{ "id": "main", "peak_l_db": -12, "peak_r_db": -12, "rms_l_db": -20, "rms_r_db": -20 }] }
+  "buses": [{ "id": "main", "peak_l_db": -12, "peak_r_db": -12, "rms_l_db": -20, "rms_r_db": -20,
+              "leveler_db": 0 }] }
 ```
-dB values are clamped to ≥ −96. `gr_db` (compressor), `automix_gr_db` and `duck_gr_db` are positive amounts of attenuation, held at their maximum since the last event. `speech` is true if the strip's automix detector heard speech since the last event (automix strips only).
+dB values are clamped to ≥ −96. `leveler_db` is the gain the bus loudness leveler applies now (signed dB, −6…+6; 0 when off). `gr_db` (compressor), `automix_gr_db` and `duck_gr_db` are positive amounts of attenuation, held at their maximum since the last event. `speech` is true if the strip's automix detector heard speech since the last event (automix strips only).
