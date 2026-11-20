@@ -20,6 +20,9 @@ pub const TRIM_MIN_DB: f32 = -20.0;
 pub const TRIM_MAX_DB: f32 = 40.0;
 pub const FADER_MAX_DB: f32 = 10.0;
 pub const EQ_MAX_DB: f32 = 15.0;
+/// Auto-duck depth range and default (dB of dip while a voice speaks).
+pub const DUCK_DEPTH_MAX_DB: f32 = 40.0;
+pub const DUCK_DEPTH_DEFAULT_DB: f32 = 12.0;
 
 /// Pan-law normalisation. The pan is constant power (cos/sin), scaled by √2
 /// so a centred strip reaches each side of a bus at unity (0 dB) and a hard
@@ -73,6 +76,40 @@ pub struct StripParams {
     pub send_db: [AtomicF32; NUM_BUSES],
     /// Monitor send taken after the fader instead of before it.
     pub monitor_post_fader: AtomicBool,
+    /// Member of the automix (gain-sharing) group.
+    pub automix: AtomicBool,
+    /// Music strip: dips by `duck_depth_db` while an automix strip speaks.
+    pub duck: AtomicBool,
+    pub duck_depth_db: AtomicF32,
+    /// Live readouts written by the audio thread once per block (positive dB
+    /// of attenuation). Not settings; never saved in scenes.
+    pub live: StripLive,
+}
+
+/// Live automix/duck attenuation of one strip, for `mixer_state`.
+pub struct StripLive {
+    pub automix_gr_db: AtomicF32,
+    pub duck_gr_db: AtomicF32,
+}
+
+impl StripLive {
+    pub fn new() -> Self {
+        StripLive {
+            automix_gr_db: AtomicF32::new(0.0),
+            duck_gr_db: AtomicF32::new(0.0),
+        }
+    }
+
+    pub fn clear(&self) {
+        self.automix_gr_db.store(0.0, Ordering::Relaxed);
+        self.duck_gr_db.store(0.0, Ordering::Relaxed);
+    }
+}
+
+impl Default for StripLive {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl StripParams {
@@ -100,6 +137,10 @@ impl StripParams {
                 AtomicF32::new(MIN_DB), // Monitor: off until a monitor mix is built
             ],
             monitor_post_fader: AtomicBool::new(false),
+            automix: AtomicBool::new(false),
+            duck: AtomicBool::new(false),
+            duck_depth_db: AtomicF32::new(DUCK_DEPTH_DEFAULT_DB),
+            live: StripLive::new(),
         }
     }
 }

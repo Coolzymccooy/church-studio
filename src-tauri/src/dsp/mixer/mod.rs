@@ -17,8 +17,11 @@
 //! only while its gate is on (switched gate, zero latency when off). See
 //! `latency_samples` / `path_latency_samples`.
 //! Smoothing: all gains, pans, sends and mutes ramp linearly over 10 ms.
+//! Automix and auto-ducking (`automix.rs`) add per-sample post-fader gains
+//! and no latency.
 #![allow(dead_code, unused_imports)]
 
+pub mod automix;
 pub mod bus;
 pub mod params;
 pub mod scene;
@@ -26,8 +29,11 @@ pub mod smooth;
 pub mod strip;
 
 #[cfg(test)]
+mod automix_tests;
+#[cfg(test)]
 mod tests;
 
+pub use automix::{AutoMix, AutoReadout};
 pub use bus::{Bus, BusMeters};
 pub use params::{
     BusParams, MixerParams, StripParams, BUS_MAIN, BUS_MONITOR, BUS_STREAM, NUM_BUSES,
@@ -35,6 +41,7 @@ pub use params::{
 pub use scene::MixerScene;
 pub use strip::{Strip, StripMeters};
 
+use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 
 /// Preallocated stereo buffer for one bus.
@@ -72,6 +79,7 @@ pub struct MixerMeters {
 pub struct Mixer {
     params: Arc<MixerParams>,
     strips: Vec<Strip>,
+    automix: AutoMix,
     strip_meters: Vec<StripMeters>,
     buses: [Bus; NUM_BUSES],
     bus_meters: [BusMeters; NUM_BUSES],
@@ -96,6 +104,7 @@ impl Mixer {
             .map(|_| Strip::new(sample_rate, max_block, ramp))
             .collect();
         let strip_meters: Vec<StripMeters> = strips.iter().map(|s| s.meters()).collect();
+        let automix = AutoMix::new(sample_rate, max_block, num_strips);
         let buses = [
             Bus::new(sample_rate, ramp),
             Bus::new(sample_rate, ramp),
@@ -106,6 +115,7 @@ impl Mixer {
         Mixer {
             params,
             strips,
+            automix,
             strip_meters,
             buses,
             bus_meters,
@@ -165,10 +175,27 @@ impl Mixer {
         let any_solo = params.any_solo(self.strips.len());
         let empty: &[f32] = &[];
 
+        // Pass 1: every strip up to the pre-fader point.
         for (i, strip) in self.strips.iter_mut().enumerate() {
             let input = inputs.get(i).copied().unwrap_or(empty);
-            strip.process(input, n, &params.strips[i], any_solo, snap, &mut self.bufs);
+            strip.process_pre(input, n, &params.strips[i], any_solo, snap);
+        }
+
+        // Automix and ducking gains across the strips, sample by sample.
+        let num = self.strips.len();
+        let strips = &self.strips;
+        self.automix
+            .process(&params.strips[..num], n, |i| strips[i].detection());
+
+        // Pass 2: fader × automix × duck, pan, sends → buses.
+        for (i, strip) in self.strips.iter_mut().enumerate() {
+            strip.process_out(self.automix.gains(i, n), &mut self.bufs);
+            let auto = self.automix.readout(i);
+            strip.set_auto_meters(auto.automix_gr_db, auto.duck_gr_db, auto.speech);
             self.strip_meters[i] = strip.meters();
+            let live = &params.strips[i].live;
+            live.automix_gr_db.store(-auto.automix_gr_db, Relaxed);
+            live.duck_gr_db.store(-auto.duck_gr_db, Relaxed);
         }
 
         for b in 0..NUM_BUSES {
@@ -190,6 +217,17 @@ impl Mixer {
                 (empty, empty)
             }
         }
+    }
+
+    /// Test hook: force strip `index`'s speech probability (`None` = the
+    /// RNNoise VAD at 48 kHz, or level only at other rates).
+    pub fn set_vad_override(&mut self, index: usize, prob: Option<f32>) {
+        self.automix.set_vad_override(index, prob);
+    }
+
+    /// True once the first block has warmed the VAD FFT on this thread.
+    pub fn automix_warmed(&self) -> bool {
+        self.automix.warmed()
     }
 
     pub fn strip_meters(&self) -> &[StripMeters] {

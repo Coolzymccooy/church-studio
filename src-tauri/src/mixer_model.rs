@@ -29,6 +29,13 @@ pub struct StripState {
     pub send_monitor_db: f32,
     pub monitor_post_fader: bool,
     pub voice_chain: bool,
+    pub automix: bool,
+    pub duck: bool,
+    pub duck_depth_db: f32,
+    /// Live automix attenuation, positive dB (0 while stopped).
+    pub automix_gr_db: f32,
+    /// Live auto-duck attenuation, positive dB (0 while stopped).
+    pub duck_gr_db: f32,
 }
 
 /// One bus in `MixerState`.

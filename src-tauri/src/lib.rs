@@ -9,6 +9,8 @@ mod mixer_commands;
 mod mixer_control;
 mod mixer_layout;
 #[cfg(test)]
+mod automix_control_tests;
+#[cfg(test)]
 mod mixer_engine_tests;
 mod mixer_meters;
 mod mixer_model;
