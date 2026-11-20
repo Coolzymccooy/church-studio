@@ -9,7 +9,6 @@ import {
 import WaveformEditor from './components/WaveformEditor';
 import MenuBar from './components/MenuBar';
 import HelpCorner from './components/HelpCorner';
-import LandingPage from './components/LandingPage';
 import DeskHeader from './components/faceplate/DeskHeader.jsx';
 import Key from './components/faceplate/Key.jsx';
 import Lamp from './components/faceplate/Lamp.jsx';
@@ -74,30 +73,10 @@ import {
  * - Process & Export for File mode (AI-mastered audio)
  */
 
-const TiwatonApp = () => {
-  const [view, setView] = useState(() => {
-    if (typeof window === 'undefined') return 'landing';
-    // Skip landing page in desktop app (Tauri or Electron) — go straight to studio
-    if (isDesktopApp) return 'studio';
-    const savedView = window.localStorage.getItem('tiwaton:view');
-    return savedView || 'landing';
-  });
+// In a browser the website at the root is home (src/site/); the desktop app has no home key.
+const goToSite = () => window.location.assign('/');
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    window.localStorage.setItem('tiwaton:view', view);
-  }, [view]);
-
-  if (view === 'landing') {
-    return <LandingPage onEnter={() => setView('studio')} />;
-  }
-
-  return (
-    <>
-      <AudioProcessor goHome={isDesktopApp ? null : () => setView('landing')} />
-    </>
-  );
-};
+const TiwatonApp = () => <AudioProcessor goHome={isDesktopApp ? null : goToSite} />;
 
 // --- STUDIO COMPONENT ---
 const DEFAULT_DEVICES = {

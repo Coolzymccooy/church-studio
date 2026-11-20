@@ -13,7 +13,7 @@
     "dev": "vite",
     "dev:tauri": "vite --host 127.0.0.1 --strictPort",
     "build": "vite build",
-    "test": "node --test src/lib/*.test.js",
+    "test": "node --test src/lib/*.test.js src/site/*.test.js",
     "lint": "eslint .",
     "verify": "npm run lint && npm run test && npm run build",
     "preview": "vite preview",
