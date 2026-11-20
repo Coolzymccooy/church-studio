@@ -36,6 +36,7 @@ import {
 import {
   describeBroadcastRoute,
   devicesEqual,
+  mixerRefreshKey,
   normalizeTauriDevices,
   reconcileSelectedDevices,
   resolveBroadcastLabel,
@@ -1246,6 +1247,8 @@ const AudioProcessor = ({ goHome }) => {
       input: info.input_device_name || info.device_name || null,
       monitor: info.monitor_output_name || null,
       broadcast: info.broadcast_output_name || null,
+      monitor2: info.monitor2_output_name || null,
+      monitor3: info.monitor3_output_name || null,
     });
     setNativeNoiseProfileCaptured(false);
 
@@ -3020,6 +3023,8 @@ const AudioProcessor = ({ goHome }) => {
             input: status.input_device_name || status.device_name || null,
             monitor: status.monitor_output_name || null,
             broadcast: status.broadcast_output_name || null,
+            monitor2: status.monitor2_output_name || null,
+            monitor3: status.monitor3_output_name || null,
           });
         } catch {
           // Ignore transient polling failures while the engine is being restarted.
@@ -3396,6 +3401,7 @@ const AudioProcessor = ({ goHome }) => {
           {mainTab === 'mixer' && (
             <MixerConsole
               controller={mixerController}
+              refreshKey={mixerRefreshKey(audioStats.state, nativeRouteStatus)}
               onOpenObs={() => setShowObs(true)}
               demoBanner={isTauri ? null : 'Demo mixer — live multichannel mixing runs in the desktop app'}
             />

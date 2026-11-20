@@ -139,3 +139,15 @@ export function describeBroadcastRoute(selectedDevices, outputs) {
     hasNativeBroadcastRoute: false,
   };
 }
+
+/**
+ * A key for the mixer view that changes when the engine starts or stops or opens different
+ * outputs, so the console fetches which buses have a device again.
+ */
+export function mixerRefreshKey(engineState, route) {
+  const running = engineState === 'running';
+  if (!running) return 'stopped';
+  return ['running', route?.monitor, route?.monitor2, route?.monitor3, route?.broadcast]
+    .map((v) => v ?? '')
+    .join('|');
+}

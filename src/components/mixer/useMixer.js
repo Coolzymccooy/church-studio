@@ -16,7 +16,11 @@ const TOAST_MS = 4000;
  * controller call fires in the background, and a failure reverts the local
  * state and raises a short-lived toast message.
  */
-export function useMixer(controller) {
+/**
+ * `refreshKey` changes when the engine starts, stops or opens different outputs; the
+ * state (which buses have a device) is fetched again so a new mon 2 / mon 3 appears.
+ */
+export function useMixer(controller, refreshKey) {
   const [state, setState] = useState(null);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
@@ -98,6 +102,17 @@ export function useMixer(controller) {
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     };
   }, [controller, showToast]);
+
+  const refreshKeyRef = useRef(refreshKey);
+  useEffect(() => {
+    if (refreshKeyRef.current === refreshKey) return;
+    refreshKeyRef.current = refreshKey;
+    let cancelled = false;
+    controller.getState()
+      .then((next) => { if (!cancelled) setState(next); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [controller, refreshKey]);
 
   // withOptimism applies an optimistic change immediately and, on failure,
   // reverts only the field this specific call touched — and reverts it

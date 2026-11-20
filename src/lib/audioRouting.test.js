@@ -5,6 +5,7 @@ import {
   buildNativeEngineArgs,
   describeBroadcastRoute,
   devicesEqual,
+  mixerRefreshKey,
   normalizeTauriDevices,
   reconcileSelectedDevices,
   resolveBroadcastLabel,
@@ -190,4 +191,14 @@ test('devicesEqual compares every device choice', () => {
   const a = { inputId: 'x', outputId: 'y', broadcastBus: 'Not set', mainOutputId: 'Not set', monitor2OutputId: 'm2', monitor3OutputId: 'Not set' };
   assert.equal(devicesEqual(a, { ...a }), true);
   assert.equal(devicesEqual(a, { ...a, monitor2OutputId: 'other' }), false);
+});
+
+test('mixerRefreshKey changes on start, stop and a new mon 2 / mon 3 device', () => {
+  const route = { monitor: 'Jabra', broadcast: null, monitor2: null, monitor3: null };
+  const before = mixerRefreshKey('running', route);
+  assert.equal(mixerRefreshKey('running', { ...route }), before);
+  assert.notEqual(mixerRefreshKey('running', { ...route, monitor2: 'AirPods' }), before);
+  assert.notEqual(mixerRefreshKey('running', { ...route, monitor3: 'USB' }), before);
+  assert.equal(mixerRefreshKey('stopped', route), 'stopped');
+  assert.equal(mixerRefreshKey(undefined, null), 'stopped');
 });
