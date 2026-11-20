@@ -55,6 +55,11 @@ libloading = "0.8"
 # This machine's name, to recognise our own NDI sources (already in the lock file).
 gethostname = "1.1"
 
+# ── Network audio (docs/specs/2026-11-20-network-audio-design.md) ────────────
+# Packet signing, pure Rust (sha2 is already in the lock file).
+hmac = "0.12"
+sha2 = "0.10"
+
 [dev-dependencies]
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "sync", "time"] }
 

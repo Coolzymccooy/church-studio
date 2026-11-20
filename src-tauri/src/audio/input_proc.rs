@@ -5,10 +5,11 @@
 //!
 //! Per chunk of at most `MAX_CALLBACK_FRAMES` frames:
 //! 1. De-interleave every input channel (up to `MAX_STRIPS`) into its own
-//!    buffer; strip i reads input channel i. No mono fold. Computer audio
-//!    then fills the next two strips (left, right), and each NDI input the
-//!    strip after those, all read from their rings with drift correction
-//!    (`crate::computer_audio`, `crate::ndi::receive`).
+//!    buffer; strip i reads input channel i. No mono fold. The Remote strips
+//!    of network audio come next, then computer audio fills two strips
+//!    (left, right), and each NDI input the strip after those, all read from
+//!    their rings with drift correction (`crate::netaudio`,
+//!    `crate::computer_audio`, `crate::ndi::receive`).
 //! 2. The strip holding `voice_chain` runs the `DspChain` in place on its
 //!    buffer (history for noise-profile capture, noise-profile install,
 //!    params sync, spectrum and `audio-meters` all follow that strip).
@@ -17,7 +18,8 @@
 //! 4. Each output device gets its bus as stereo (see `routing`); the
 //!    Monitor bus is still scaled by `monitor_gain_db`.
 //! 5. Each NDI output gets its bus as interleaved stereo at unity gain, in
-//!    its own ring; the NDI sender thread does the rest (`crate::ndi`).
+//!    its own ring; the NDI sender thread does the rest (`crate::ndi`). The
+//!    network send gets its bus the same way (`crate::netaudio::sender`).
 //! 6. While a recording is active, the raw strips (copied before the voice
 //!    chain works on its strip) plus Stream and Main go to the record ring
 //!    as whole frames (`crate::recorder::tap`).
@@ -29,6 +31,7 @@ use crate::dsp::{DspChain, DspParams, MetersPayload};
 use crate::mixer_control::{MixerLink, MAX_STRIPS};
 use crate::mixer_meters::MixerMeterSlots;
 use crate::ndi::receive::NdiInputFeed;
+use crate::netaudio::{NetInputFeed, NetSendRoute};
 use crate::recorder::tap::RecordTap;
 use crate::routing::{deinterleave, push_stereo};
 use ringbuf::traits::Producer;
@@ -110,15 +113,26 @@ impl Spectrum {
     }
 }
 
+/// Network audio for the callback: the Remote strips' feeds and the send
+/// ring.
+pub(super) struct NetIo<P> {
+    pub inputs: Vec<NetInputFeed<HeapCons<f32>>>,
+    pub send: Option<NetSendRoute<P>>,
+}
+
 pub(super) struct InputProcessor<P> {
     /// Channels per interleaved input frame (the device's channel count).
     stride: usize,
     /// Strips fed by input channels: min(stride, MAX_STRIPS).
     hardware: usize,
-    /// One buffer per strip (hardware, computer, then NDI),
+    /// One buffer per strip (hardware, Remote, computer, then NDI),
     /// MAX_CALLBACK_FRAMES long.
     chan_bufs: Vec<Vec<f32>>,
-    /// Computer audio, feeding strips `hardware` (left) and `hardware + 1`.
+    /// Network audio peers, feeding the strips right after the hardware ones.
+    net_inputs: Vec<NetInputFeed<HeapCons<f32>>>,
+    /// The network send ring (interleaved stereo of one bus).
+    net_send: Option<NetSendRoute<P>>,
+    /// Computer audio, feeding the two strips after the Remote ones.
     computer: Option<ComputerAudioFeed<HeapCons<f32>>>,
     /// NDI inputs, feeding the strips after the hardware and computer ones.
     ndi_inputs: Vec<NdiInputFeed<HeapCons<f32>>>,
@@ -154,6 +168,7 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
         ndi_outputs: Vec<OutputRoute<P>>,
         computer: Option<ComputerAudioFeed<HeapCons<f32>>>,
         mut ndi_inputs: Vec<NdiInputFeed<HeapCons<f32>>>,
+        net: NetIo<P>,
         recorder: RecordTap<P>,
         meters_tx: mpsc::SyncSender<MetersPayload>,
     ) -> Self {
@@ -161,8 +176,10 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
         let hardware = stride.min(MAX_STRIPS);
         let computer = computer.filter(|_| MAX_STRIPS - hardware >= COMPUTER_STRIPS);
         let computer_strips = if computer.is_some() { COMPUTER_STRIPS } else { 0 };
-        ndi_inputs.truncate(MAX_STRIPS - hardware - computer_strips);
-        let strips = hardware + computer_strips + ndi_inputs.len();
+        let mut net_inputs = net.inputs;
+        net_inputs.truncate(MAX_STRIPS - hardware - computer_strips);
+        ndi_inputs.truncate(MAX_STRIPS - hardware - computer_strips - net_inputs.len());
+        let strips = hardware + net_inputs.len() + computer_strips + ndi_inputs.len();
         let chan_bufs = (0..strips)
             .map(|_| vec![0.0f32; MAX_CALLBACK_FRAMES])
             .collect();
@@ -176,6 +193,8 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
             stride,
             hardware,
             chan_bufs,
+            net_inputs,
+            net_send: net.send,
             computer,
             ndi_inputs,
             dsp,
@@ -215,6 +234,7 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
 
     fn process_frames(&mut self, n: usize) {
         let monitor_gain = db_to_lin(self.params.monitor_gain_db.load(Ordering::Relaxed));
+        self.pull_net_inputs(n);
         self.pull_computer(n);
         self.pull_ndi_inputs(n);
         // Raw strips are recorded before the voice chain works in place.
@@ -249,6 +269,7 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
                 .fetch_add(dropped, Ordering::Relaxed);
         }
         self.push_ndi();
+        self.push_net();
         self.push_record(n);
 
         self.send_voice_meters(n);
@@ -260,13 +281,25 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
         let Some(feed) = self.computer.as_mut() else {
             return;
         };
-        let (left, right) = self.chan_bufs[self.hardware..].split_at_mut(1);
+        let first = self.hardware + self.net_inputs.len();
+        let (left, right) = self.chan_bufs[first..].split_at_mut(1);
         feed.pull(&mut left[0][..n], &mut right[0][..n]);
     }
 
-    /// First strip after the hardware and computer ones.
+    /// Fill each Remote strip's buffer from its peer ring (silence while it
+    /// buffers or no peer holds it). Lock- and allocation-free.
+    fn pull_net_inputs(&mut self, n: usize) {
+        let net_bufs = &mut self.chan_bufs[self.hardware..];
+        for (feed, buf) in self.net_inputs.iter_mut().zip(net_bufs.iter_mut()) {
+            feed.pull(&mut buf[..n]);
+        }
+    }
+
+    /// First strip after the hardware, Remote and computer ones.
     fn first_ndi_strip(&self) -> usize {
-        self.hardware + if self.computer.is_some() { COMPUTER_STRIPS } else { 0 }
+        self.hardware
+            + self.net_inputs.len()
+            + if self.computer.is_some() { COMPUTER_STRIPS } else { 0 }
     }
 
     /// Fill each NDI strip's buffer from its input ring (silence while it
@@ -291,6 +324,19 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
             self.shared
                 .ndi_dropped_samples
                 .fetch_add(dropped, Ordering::Relaxed);
+        }
+    }
+
+    /// Copy the network send bus into its ring at unity gain, counting (not
+    /// logging) what does not fit.
+    fn push_net(&mut self) {
+        let Some(route) = self.net_send.as_mut() else {
+            return;
+        };
+        let (left, right) = self.mixer.output(route.bus);
+        let dropped = push_stereo(&mut route.producer, left, right, 2, 1.0);
+        if dropped > 0 {
+            route.stats.dropped_samples.fetch_add(dropped, Ordering::Relaxed);
         }
     }
 

@@ -1,0 +1,206 @@
+//! Loopback integration: real sender and receiver threads on 127.0.0.1,
+//! and block-size invariance of a Remote strip's output.
+use super::protocol::{RoomKey, PACKET_FRAMES};
+use super::receiver::{NetReceiver, ReceivePlan};
+use super::sender::{NetSender, SendPlan};
+use super::stream::PeerStream;
+use super::*;
+use ringbuf::traits::{Consumer, Observer, Producer, Split};
+use ringbuf::HeapRb;
+use std::time::{Duration, Instant};
+
+const RATE: u32 = 48_000;
+
+fn wait_until(limit: Duration, mut done: impl FnMut() -> bool) -> bool {
+    let start = Instant::now();
+    while start.elapsed() < limit {
+        if done() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    done()
+}
+
+struct Loopback {
+    receiver: NetReceiver,
+    peer: Arc<PeerStats>,
+    peer_ring: HeapCons<f32>,
+    socket_stats: Arc<ReceiverStats>,
+}
+
+fn listen(passphrase: &str, own_session: u32) -> Loopback {
+    let (producer, consumer) = HeapRb::<f32>::new(ring_capacity(RATE)).split();
+    let peer = Arc::new(PeerStats::default());
+    let socket_stats = Arc::new(ReceiverStats::default());
+    let receiver = NetReceiver::start(ReceivePlan {
+        port: 0,
+        key: RoomKey::from_passphrase(passphrase),
+        sample_rate: RATE,
+        own_session,
+        producers: vec![producer],
+        stats: vec![peer.clone()],
+        socket_stats: socket_stats.clone(),
+    })
+    .unwrap();
+    Loopback {
+        receiver,
+        peer,
+        peer_ring: consumer,
+        socket_stats,
+    }
+}
+
+fn send_to(port: u16, passphrase: &str, session: u32) -> (NetSender, HeapProd<f32>, Arc<SenderStats>) {
+    let (producer, consumer) = HeapRb::<f32>::new(ring_capacity(RATE)).split();
+    let stats = Arc::new(SenderStats::default());
+    let sender = NetSender::start(SendPlan {
+        target: format!("127.0.0.1:{port}"),
+        name: "Pastor laptop".to_string(),
+        stereo: false,
+        key: RoomKey::from_passphrase(passphrase),
+        sample_rate: RATE,
+        session,
+        consumer,
+        stats: stats.clone(),
+    });
+    (sender, producer, stats)
+}
+
+fn push_tone(producer: &mut HeapProd<f32>, frames: usize, value: f32) {
+    for _ in 0..frames {
+        let _ = producer.try_push(value);
+        let _ = producer.try_push(value);
+    }
+}
+
+#[test]
+fn audio_arrives_in_the_peer_ring_with_name_and_round_trip() {
+    let mut rx = listen("loopback-room", 1);
+    let (sender, mut producer, sender_stats) = send_to(rx.receiver.port(), "loopback-room", 2);
+    push_tone(&mut producer, PACKET_FRAMES * 10, 0.5);
+    assert!(wait_until(Duration::from_secs(3), || rx.peer_ring.occupied_len()
+        >= PACKET_FRAMES * 10 * STEREO));
+    let mut got = vec![0.0f32; PACKET_FRAMES * 10 * STEREO];
+    rx.peer_ring.pop_slice(&mut got);
+    assert!(got.iter().all(|s| (s - 0.5).abs() < 1e-3));
+    assert!(rx.peer.connected.load(Ordering::Relaxed));
+    assert_eq!(rx.peer.lost_packets.load(Ordering::Relaxed), 0);
+    assert!(wait_until(Duration::from_secs(3), || rx.peer.info().name == "Pastor laptop"));
+    // Both sides measure a round trip from the pings.
+    assert!(wait_until(Duration::from_secs(3), || sender_stats.connected.load(Ordering::Relaxed)));
+    assert!(wait_until(Duration::from_secs(3), || rx.peer.rtt_us.load(Ordering::Relaxed) > 0));
+    assert!(sender_stats.packets_sent.load(Ordering::Relaxed) >= 10);
+    // Stopping the sender says bye and frees the slot.
+    drop(sender);
+    assert!(wait_until(Duration::from_secs(2), || !rx.peer.connected.load(Ordering::Relaxed)));
+}
+
+#[test]
+fn a_sender_with_another_passphrase_is_ignored() {
+    let rx = listen("room-one-pass", 1);
+    let (_sender, mut producer, _) = send_to(rx.receiver.port(), "room-two-pass", 2);
+    push_tone(&mut producer, PACKET_FRAMES * 4, 0.5);
+    assert!(wait_until(Duration::from_secs(2), || rx
+        .socket_stats
+        .bad_packets
+        .load(Ordering::Relaxed)
+        >= 4));
+    assert_eq!(rx.peer_ring.occupied_len(), 0);
+    assert!(!rx.peer.connected.load(Ordering::Relaxed));
+}
+
+#[test]
+fn the_engine_never_receives_its_own_sender() {
+    let rx = listen("same-engine-room", 7);
+    let (_sender, mut producer, _) = send_to(rx.receiver.port(), "same-engine-room", 7);
+    push_tone(&mut producer, PACKET_FRAMES * 4, 0.5);
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(rx.peer_ring.occupied_len(), 0);
+}
+
+/// A UDP port nothing listens on right now.
+fn free_port() -> u16 {
+    let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    socket.local_addr().unwrap().port()
+}
+
+#[test]
+fn start_reserves_strips_only_when_receiving() {
+    let mut config = NetAudioConfig::fresh();
+    let started = start(&config, RATE, 4, 4);
+    assert!(started.feeds.is_empty() && started.info.inputs.is_empty());
+    assert!(started.send_route.is_none());
+
+    config.receive.enabled = true;
+    config.receive.port = free_port();
+    config.receive.slots = 3;
+    let started = start(&config, RATE, 4, 2);
+    assert_eq!(started.feeds.len(), 2, "capped by the strips that fit");
+    assert_eq!(started.info.inputs[0].strip, 4);
+    assert_eq!(started.info.inputs[1].label, "Remote 2");
+
+    config.passphrase = "short".to_string();
+    let started = start(&config, RATE, 4, 4);
+    assert!(started.feeds.is_empty());
+    assert!(started.info.receive_error.is_some());
+}
+
+/// Run `input` through a PeerStream and a Remote strip's feed with blocks
+/// of `block` frames, keeping the ring at the buffer target before every
+/// read (so the drift nudge stays idle).
+fn strip_output(input: &[f32], block: usize, buffer_ms: u32) -> Vec<f32> {
+    // Every packet through the receiver-side stream, staged as stereo.
+    let (mut stage_prod, mut stage_cons) = HeapRb::<f32>::new(input.len() * STEREO + 16).split();
+    let mut stream = PeerStream::new(RATE);
+    for (seq, chunk) in input.chunks(PACKET_FRAMES).enumerate() {
+        let mut bytes = vec![0u8; chunk.len() * 2];
+        protocol::pcm16_encode(chunk, &mut bytes);
+        stream.push(seq as u32, 1, &bytes, 0.0, &mut stage_prod);
+    }
+    let mut staged = vec![0.0f32; stage_cons.occupied_len()];
+    stage_cons.pop_slice(&mut staged);
+
+    let (mut producer, consumer) = HeapRb::<f32>::new(staged.len() + 16).split();
+    let stats = Arc::new(PeerStats::default());
+    let mut feed = NetInputFeed::new(consumer, RATE, buffer_ms, stats);
+    let target = crate::ndi::receive::drift::frames_for_ms(RATE, buffer_ms as usize);
+    let mut next = 0usize;
+    let mut move_frames = |frames: usize, producer: &mut HeapProd<f32>| {
+        let end = (next + frames * STEREO).min(staged.len());
+        producer.push_slice(&staged[next..end]);
+        next = end;
+    };
+    // Exactly `target` frames before the first read.
+    move_frames(target, &mut producer);
+    let total = input.len() - target - 2;
+    let mut out = Vec::new();
+    let mut buf = vec![0.0f32; block];
+    let mut first = true;
+    while out.len() + block <= total {
+        feed.pull(&mut buf);
+        out.extend_from_slice(&buf);
+        // Refill what this read consumed (plus the two primed frames once).
+        move_frames(block + if first { 2 } else { 0 }, &mut producer);
+        first = false;
+    }
+    out
+}
+
+#[test]
+fn a_remote_strip_sounds_the_same_at_any_block_size() {
+    let input: Vec<f32> = (0..PACKET_FRAMES * 40)
+        .map(|i| ((i as f32) * 0.013).sin() * 0.5)
+        .collect();
+    let reference = strip_output(&input, 64, 20);
+    assert!(reference.len() > 4_000);
+    // Pass-through: the strip plays the packets' samples unchanged.
+    for (a, b) in reference.iter().zip(input.iter()) {
+        assert!((a - b).abs() < 1e-4, "{a} vs {b}");
+    }
+    for block in [32, 37, 128, 480] {
+        let other = strip_output(&input, block, 20);
+        let n = other.len().min(reference.len());
+        assert_eq!(&other[..n], &reference[..n], "block {block}");
+    }
+}
