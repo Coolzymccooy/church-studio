@@ -31,7 +31,7 @@ export function deskAlerts({
     alerts.push({ id: 'broadcast', tone: 'a', text: 'broadcast not set', tip: 'Nothing is chosen for the stream output. Choose a device in setup, or send the Stream bus over NDI.', action: 'setup' });
   }
   if (ndi && ndi.checked && !ndi.available) {
-    alerts.push({ id: 'ndi', tone: 'a', text: 'NDI not installed', tip: 'NDI send and receive need the NDI runtime on this computer.', action: 'ndi-tools' });
+    alerts.push({ id: 'ndi', tone: 'a', text: 'NDI runtime missing', tip: 'The NDI runtime that ships with the app did not load. Reinstall the app, or install NDI Tools.', action: 'ndi-tools' });
   }
   return alerts;
 }

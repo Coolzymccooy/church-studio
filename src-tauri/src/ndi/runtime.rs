@@ -1,7 +1,9 @@
 //! NDI® runtime loader.
 //!
 //! Nothing from NDI is linked at build time (design decision 2 in
-//! `docs/specs/2026-09-28-integrations-design.md`). The installed NDI Runtime
+//! `docs/specs/2026-09-28-integrations-design.md`). The app ships the official
+//! runtime library inside its own bundle (`scripts/fetch-ndi-runtime.mjs` fetches
+//! it at build time); a system-installed runtime is only a fallback. The
 //! library is opened with `libloading` once, on a background thread started
 //! at app setup (`preload`) or on first use, and each
 //! function is resolved by its exported name. The `NDIlib_v5_load` function
@@ -22,9 +24,10 @@ use std::sync::OnceLock;
 
 mod receive_api;
 
-/// Shown when no runtime could be loaded.
+/// Shown when no runtime could be loaded. The runtime ships inside the app, so
+/// this means the install is damaged (or a dev build skipped `npm run ndi:fetch`).
 pub const NOT_INSTALLED: &str =
-    "NDI runtime not found. Install NDI Tools from https://ndi.video/tools, then restart TIWATON AI Studio.";
+    "The NDI runtime bundled with TIWATON AI Studio did not load. Reinstall the app, or install NDI Tools from https://ndi.video/tools, then restart.";
 
 #[derive(Clone, Copy)]
 struct NdiApi {
@@ -90,11 +93,39 @@ fn push_unique(paths: &mut Vec<PathBuf>, path: PathBuf) {
     }
 }
 
+/// Where a packaged app keeps its own copy of the runtime, relative to the
+/// folder holding the executable (`exe_dir`):
+/// - macOS: `Contents/Frameworks` (Tauri `bundle.macOS.frameworks`), then
+///   `Contents/Resources`, then `Contents/MacOS` itself. In a dev build
+///   (`target/debug`), tauri-build copies the frameworks to `target/Frameworks`,
+///   which is the same `../Frameworks` step.
+/// - Windows: the install folder, which is both the exe folder and Tauri's
+///   resource folder.
+/// - Linux and others: the exe folder (nothing is bundled there yet).
+pub fn bundled_paths(os: TargetOs, exe_dir: &Path) -> Vec<PathBuf> {
+    let lib = library_file_name(os);
+    match os {
+        TargetOs::MacOs => {
+            let contents = exe_dir.parent();
+            let mut paths: Vec<PathBuf> = contents
+                .map(|c| vec![c.join("Frameworks").join(lib), c.join("Resources").join(lib)])
+                .unwrap_or_default();
+            paths.push(exe_dir.join(lib));
+            paths
+        }
+        TargetOs::Windows | TargetOs::Linux | TargetOs::Other => vec![exe_dir.join(lib)],
+    }
+}
+
 /// Where to look for the runtime, in order:
-/// 1. `NDI_RUNTIME_DIR_V6`, 2. `NDI_RUNTIME_DIR_V5` (set by the installers),
-/// 3. the default install locations for `os`,
-/// 4. `exe_dir`, the app's own folder,
+/// 1. the copy bundled with the app (`bundled_paths` of `exe_dir`),
+/// 2. `NDI_RUNTIME_DIR_V6`, 3. `NDI_RUNTIME_DIR_V5` (set by the NDI installers),
+/// 4. the default install locations for `os`,
 /// 5. on macOS, the copies NDI Tools installs inside its own apps (`MACOS_NDI_TOOLS_LIBS`).
+///
+/// The bundled copy comes first so every install runs the runtime it was built
+/// and tested with; anything installed on the machine is only a fallback for a
+/// damaged bundle.
 ///
 /// Pure: the environment and the executable folder are passed in, so this
 /// is unit-tested without touching the machine.
@@ -105,6 +136,12 @@ pub fn candidate_paths(
 ) -> Vec<PathBuf> {
     let lib = library_file_name(os);
     let mut paths: Vec<PathBuf> = Vec::new();
+
+    if let Some(dir) = exe_dir {
+        for path in bundled_paths(os, dir) {
+            push_unique(&mut paths, path);
+        }
+    }
 
     for (var, linux_name) in [
         ("NDI_RUNTIME_DIR_V6", "libndi.so.6"),
@@ -146,9 +183,6 @@ pub fn candidate_paths(
         TargetOs::Other => {}
     }
 
-    if let Some(dir) = exe_dir {
-        push_unique(&mut paths, dir.join(lib));
-    }
     if os == TargetOs::MacOs {
         for path in MACOS_NDI_TOOLS_LIBS {
             push_unique(&mut paths, PathBuf::from(path));
@@ -238,8 +272,8 @@ impl NdiRuntime {
 
     fn open(path: &Path) -> Result<NdiRuntime, String> {
         // SAFETY: loading a library runs its initialisers. The candidates are
-        // the NDI Runtime's own install locations (or ones the operator set
-        // in the NDI_RUNTIME_DIR_* variables).
+        // the copy bundled with the app, the NDI Runtime's own install
+        // locations, or ones the operator set in the NDI_RUNTIME_DIR_* variables.
         let lib = unsafe { Library::new(path) }.map_err(|e| e.to_string())?;
         // SAFETY: the function types match the SDK headers (see above).
         let api = unsafe { NdiApi::resolve_all(&lib) }?;

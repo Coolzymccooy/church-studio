@@ -1,0 +1,9 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "bundle": {
+    "resources": {
+      "ndi-runtime/windows-x64/Processing.NDI.Lib.x64.dll": "Processing.NDI.Lib.x64.dll",
+      "ndi-runtime/windows-x64/Processing.NDI.Lib.Licenses.txt": "Processing.NDI.Lib.Licenses.txt"
+    }
+  }
+}

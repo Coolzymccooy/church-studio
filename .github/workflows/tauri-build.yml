@@ -126,6 +126,34 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      # NDI runtime that ships inside the app: fetched from NDI's official SDK
+      # download, never committed (scripts/fetch-ndi-runtime.mjs).
+      - name: Install innoextract (unpacks the NDI SDK installer)
+        if: matrix.platform == 'windows-latest'
+        run: choco install innoextract -y --no-progress
+
+      - name: Find the current NDI SDK download
+        id: ndi-sdk
+        if: matrix.platform != 'ubuntu-22.04'
+        shell: bash
+        run: |
+          url=$(node scripts/fetch-ndi-runtime.mjs --print-url)
+          etag=$(curl -sIL --fail "$url" | tr -d '\r' | awk -F': ' 'tolower($1)=="etag"{print $2}' | tail -1 | tr -cd 'A-Za-z0-9-')
+          echo "etag=${etag:-unknown}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the NDI SDK download
+        if: matrix.platform != 'ubuntu-22.04'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/ndi-cache
+          key: ndi-sdk-${{ runner.os }}-${{ steps.ndi-sdk.outputs.etag }}
+
+      - name: Fetch the bundled NDI runtime
+        if: matrix.platform != 'ubuntu-22.04'
+        env:
+          NDI_DOWNLOAD_CACHE: ${{ runner.temp }}/ndi-cache
+        run: node scripts/fetch-ndi-runtime.mjs
+
       - name: Build Tauri app
         if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && !inputs.release)
         uses: tauri-apps/tauri-action@v0

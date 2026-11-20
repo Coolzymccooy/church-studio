@@ -1,0 +1,11 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "bundle": {
+    "resources": {
+      "ndi-runtime/macos/libndi_licenses.txt": "ndi/libndi_licenses.txt"
+    },
+    "macOS": {
+      "frameworks": ["ndi-runtime/macos/libndi.dylib"]
+    }
+  }
+}

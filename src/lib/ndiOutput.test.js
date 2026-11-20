@@ -65,7 +65,7 @@ test('describeNdiStatus covers checking, installed and missing', () => {
     available: true,
     label: 'NDI® runtime 6.1.0',
   });
-  assert.equal(describeNdiStatus({ available: false }).label, 'Not installed — get NDI Tools');
+  assert.equal(describeNdiStatus({ available: false }).label, 'NDI® runtime missing — reinstall or get NDI Tools');
 });
 
 test('sendingFromEngineStatus reads engine_status.ndi.sending', () => {
