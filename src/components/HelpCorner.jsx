@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { CHECKLIST, QUICK_FIXES, SETUP_STEPS } from '../lib/helpContent.js';
+import { AUTOMIX_FIXES, AUTOMIX_SECTIONS, CHECKLIST, QUICK_FIXES, SETUP_STEPS } from '../lib/helpContent.js';
 import Key from './faceplate/Key.jsx';
 
 const TABS = [
   { id: 'fixes', label: 'quick fixes' },
   { id: 'setup', label: 'setup guide' },
   { id: 'checklist', label: 'checklist' },
+  { id: 'automix', label: 'auto-mix' },
 ];
 
 function Checklist() {
@@ -83,6 +84,28 @@ export default function HelpCorner({ open, onClose }) {
             </section>
           ))}
           {tab === 'checklist' && <Checklist />}
+          {tab === 'automix' && (
+            <>
+              {AUTOMIX_SECTIONS.map((section) => (
+                <section key={section.title} className="fp-mod">
+                  <div className="fp-mod-hd"><span>{section.title}</span></div>
+                  <div className="fp-mod-bd fp-read-text">
+                    <ol style={{ margin: 0, paddingLeft: 20, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {section.steps.map((step) => <li key={step}>{step}</li>)}
+                    </ol>
+                  </div>
+                </section>
+              ))}
+              <div className="fp-read-text">
+                {AUTOMIX_FIXES.map((fix) => (
+                  <details key={fix.title}>
+                    <summary>{fix.title}</summary>
+                    <p>{fix.content}</p>
+                  </details>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </aside>
     </>
