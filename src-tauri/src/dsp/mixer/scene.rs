@@ -50,7 +50,7 @@ fn default_duck_depth() -> f32 {
 }
 
 /// `send_db` padded with `MIN_DB` (off) up to one level per bus.
-fn sends_padded<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<f32>, D::Error> {
+pub(super) fn sends_padded<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<f32>, D::Error> {
     let mut sends = Vec::<f32>::deserialize(deserializer)?;
     if sends.len() < NUM_BUSES {
         sends.resize(NUM_BUSES, MIN_DB);

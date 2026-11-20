@@ -50,10 +50,15 @@ fn sample_count(sr: f32, seconds: f32) -> usize {
     ((sr * seconds).round() as usize).max(1)
 }
 
+const REVERB_INPUT_GAIN: f32 = 0.06;
+const DAMPING_HZ: f32 = 3_000.0;
+
 struct Comb {
     line: Line<1>,
     delay_seconds: f32,
     gain: LinearSmoother,
+    damping: f32,
+    filtered: f32,
 }
 
 impl Comb {
@@ -63,11 +68,14 @@ impl Comb {
             line: Line::new(length),
             delay_seconds: length as f32 / sr,
             gain: LinearSmoother::new(0.0, ramp_samples(sr as f64)),
+            damping: (-std::f32::consts::TAU * DAMPING_HZ / sr).exp(),
+            filtered: 0.0,
         }
     }
 
     fn set_decay(&mut self, rt60: f32, snap: bool) {
-        // −60 dB after rt60 seconds of circulation in this line.
+        // −60 dB at DC after rt60 seconds of circulation. The damping
+        // pole has unity DC gain and gives higher bands a shorter tail.
         let gain = 10f32.powf(-3.0 * self.delay_seconds / rt60);
         if snap {
             self.gain.snap(gain);
@@ -78,7 +86,8 @@ impl Comb {
 
     fn tick(&mut self, sample: f32) -> f32 {
         let echo = self.line.oldest();
-        self.line.push([sample + self.gain.next() * echo]);
+        self.filtered = clean(echo * (1.0 - self.damping) + self.filtered * self.damping);
+        self.line.push([sample + self.gain.next() * self.filtered]);
         echo
     }
 }
@@ -148,7 +157,7 @@ impl Reverb {
 
     #[inline]
     pub(super) fn tick(&mut self, [l, r]: [f32; 2]) -> [f32; 2] {
-        let (l, r) = (clean(l), clean(r));
+        let (l, r) = (clean(l) * REVERB_INPUT_GAIN, clean(r) * REVERB_INPUT_GAIN);
         [
             self.sides[0].tick(0.8 * l + 0.2 * r),
             self.sides[1].tick(0.8 * r + 0.2 * l),

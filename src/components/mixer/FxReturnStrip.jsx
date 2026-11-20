@@ -1,4 +1,5 @@
 import { useCallback } from 'react';
+import KeyPair from './KeyPair.jsx';
 
 import { faderDbToPosition, formatDb, paramRange, positionToFaderDb } from '../../lib/mixerEngine.js';
 import { STRIP_KNOBS } from '../../lib/faceplateStrip.js';
@@ -44,33 +45,33 @@ export default function FxReturnStrip({ ret, index, extraMonitors, metersRef, on
       {a ? (
         <>
           <div className="fp-knobs fp-knobs-1">
-            <EffectKnob id="decay_s" label="Decay" value={ret.decay_s} step={0.1} initial={1.8} unit="s" onSet={onSet} />
+            <EffectKnob id="decay_s" label="decay" value={ret.decay_s} step={0.1} initial={1.8} unit="s" onSet={onSet} />
           </div>
           <div className="fp-keys h-6 items-center">
-            <InfoTip label="Reverb decay">Time for the reverb tail to fall by 60 dB.</InfoTip>
+            <InfoTip label="Reverb decay">Time for low frequencies in the reverb tail to fall by 60 dB. Higher frequencies decay faster.</InfoTip>
           </div>
         </>
       ) : (
         <>
           <div className="fp-knobs fp-knobs-2">
-            <EffectKnob id="tempo_bpm" label="Tempo" value={ret.tempo_bpm} step={1} initial={120} unit="" onSet={(_, bpm) => onTempo(bpm)} />
-            <EffectKnob id="feedback_pct" label="Feedbk" value={ret.feedback_pct} step={1} initial={25} unit="%" onSet={onSet} />
+            <EffectKnob id="tempo_bpm" label="tempo" value={ret.tempo_bpm} step={1} initial={120} unit="" onSet={(_, bpm) => onTempo(bpm)} />
+            <EffectKnob id="feedback_pct" label="feedback" value={ret.feedback_pct} step={1} initial={25} unit="%" onSet={onSet} />
           </div>
           <div className="fp-keys items-center">
-            <Key onClick={onTap}>Tap</Key>
+            <Key onClick={onTap}>tap</Key>
             <InfoTip label="Tap tempo">Tap quarter notes at the song tempo. Two taps set the tempo.</InfoTip>
           </div>
         </>
       )}
       {sends(['main', 'strm', 'mon'])}
       {extraMonitors.length > 0 && sends(extraMonitors.map((mon) => mon.knob))}
-      <div className="fp-krow">
-        {toggle('monitor_post_fader', 'Post', 'monitor send after fader', 'sel')}
-        {toggle('solo', 'PFL', 'listen on monitor', 'sel')}
-      </div>
-      <div className="fp-krow">
-        {toggle('mute', 'Mute', 'mute', 'amber')}
-      </div>
+      <KeyPair>
+        {toggle('monitor_post_fader', 'post', 'monitor send after fader', 'sel')}
+        {toggle('solo', 'pfl', 'listen on monitor', 'sel')}
+      </KeyPair>
+      <KeyPair>
+        {toggle('mute', 'mute', 'mute', 'amber')}
+      </KeyPair>
       <div className="fp-fz">
         <MeterLadder getDb={left} height={HEIGHT - 18} width={5} label={`${label} left level`} />
         <Fader position={faderDbToPosition(ret.fader_db)} onChange={(p) => onSet('fader_db', positionToFaderDb(p))}

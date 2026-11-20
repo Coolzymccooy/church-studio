@@ -1,6 +1,6 @@
 use super::params::{clamp_or, FADER_MAX_DB, MIN_DB, NUM_BUSES};
 use atomic_float::AtomicF32;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 
 pub const FX_COUNT: usize = 2;
@@ -62,11 +62,27 @@ impl ReturnParams {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ReturnScene {
+    #[serde(default)]
     pub fader: f32,
+    #[serde(default = "default_sends", deserialize_with = "return_sends_padded")]
     pub sends: [f32; NUM_BUSES],
+    #[serde(default)]
     pub mute: bool,
+    #[serde(default)]
     pub solo: bool,
+    #[serde(default)]
     pub monitor_post: bool,
+}
+
+fn default_sends() -> [f32; NUM_BUSES] {
+    RETURN_SEND_DEFAULTS
+}
+
+fn return_sends_padded<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<[f32; NUM_BUSES], D::Error> {
+    let sends = super::scene::sends_padded(deserializer)?;
+    Ok(std::array::from_fn(|i| sends[i]))
 }
 
 impl ReturnScene {
@@ -100,10 +116,28 @@ impl ReturnScene {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FxScene {
+    #[serde(default = "default_returns")]
     pub returns: [ReturnScene; FX_COUNT],
+    #[serde(default = "default_decay")]
     pub decay: f32,
+    #[serde(default = "default_tempo")]
     pub tempo: f32,
+    #[serde(default = "default_feedback")]
     pub feedback: f32,
+}
+
+fn default_returns() -> [ReturnScene; FX_COUNT] {
+    std::array::from_fn(|_| ReturnScene::capture(&ReturnParams::new()))
+}
+
+fn default_decay() -> f32 {
+    DECAY.2
+}
+fn default_tempo() -> f32 {
+    TEMPO.2
+}
+fn default_feedback() -> f32 {
+    FEEDBACK.2
 }
 
 impl Default for FxScene {

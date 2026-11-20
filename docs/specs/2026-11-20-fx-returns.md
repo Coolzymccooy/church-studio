@@ -4,7 +4,7 @@
 
 FX A is a stereo room reverb and FX B is a stereo quarter-note delay. Each input strip (hardware, network, computer and NDI) has a send to both FX buses. The sends tap the post-fader, post-automix and post-duck signal after mute and pan. Changing the source fader or mute changes new signal entering the effects. Existing tails continue. PFL never feeds an effect.
 
-The effects produce wet-only stereo signals. Two dedicated return strips route those signals to Main, Stream and the three monitor mixes, maintaining stereo separation. Main and Stream are post-fader. Mon 1 is pre-fader by default, with a post-fader switch, and Mon 2 and Mon 3 are pre-fader. Return mute affects every mix. Return PFL follows the existing Mon 1 rules. Returns cannot send to either effect, so a routing change cannot create a feedback loop. Returns remain the same two strips across input layout changes and have no input or recorder indices. They do not add latency to the dry paths.
+The effects produce wet-only stereo signals. FX A pads the input by about 24 dB and uses a 3 kHz one-pole damper in each comb feedback loop. Higher frequencies decay faster. Two dedicated return strips route those signals to Main, Stream and the three monitor mixes, maintaining stereo separation. Main and Stream are post-fader. Mon 1 is pre-fader by default, with a post-fader switch, and Mon 2 and Mon 3 are pre-fader. Return mute affects every mix. Return PFL follows the existing Mon 1 rules. Returns cannot send to either effect, so a routing change cannot create a feedback loop. Returns remain the same two strips across input layout changes and have no input or recorder indices. They do not add latency to the dry paths.
 
 ## Controls
 
@@ -15,7 +15,7 @@ The effects produce wet-only stereo signals. Two dedicated return strips route t
 | Return Main and Stream sends | −90 to +10 dB | 0 dB |
 | Return Mon 1, 2 and 3 sends | −90 to +10 dB | Off |
 | Return mute, solo, Mon 1 post-fader | On or off | Off |
-| FX A decay | 0.3 to 5 seconds (nominal RT60) | 1.8 seconds |
+| FX A decay | 0.3 to 5 seconds (low-band RT60) | 1.8 seconds |
 | FX B tempo | 40 to 240 BPM | 120 BPM |
 | FX B feedback | 0 to 80 percent | 25 percent |
 

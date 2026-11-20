@@ -153,7 +153,8 @@ mod tests {
 #[cfg(test)]
 #[test]
 fn sparse_fx_scene_pads_sends_and_defaults_missing_fields() {
-    let scene: FxScene = serde_json::from_str(r#"{"returns":[{"sends":[-4.0,-3.0,-2.0]},{}]}"#).unwrap();
+    let scene: FxScene =
+        serde_json::from_str(r#"{"returns":[{"sends":[-4.0,-3.0,-2.0]},{}]}"#).unwrap();
     assert_eq!(scene.returns[0].sends, [-4.0, -3.0, -2.0, MIN_DB, MIN_DB]);
     assert_eq!(scene.returns[1].sends, RETURN_SEND_DEFAULTS);
     assert_eq!(scene.decay, DECAY.2);

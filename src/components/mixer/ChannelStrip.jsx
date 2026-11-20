@@ -1,3 +1,4 @@
+import KeyPair from './KeyPair.jsx';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { faderDbToPosition, formatDb, positionToFaderDb } from '../../lib/mixerEngine.js';
@@ -75,10 +76,6 @@ function StripAuto({ getMeter, mode }) {
       <span ref={textRef} className="fp-auto-val">{automix ? 'mix 0.0' : 'duck 0'}</span>
     </Glass>
   );
-}
-
-function KeyPair({ children }) {
-  return <div className="fp-krow">{children}</div>;
 }
 
 /**

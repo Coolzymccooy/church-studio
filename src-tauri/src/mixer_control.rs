@@ -1,5 +1,16 @@
 //! Control side of the live mixer (`docs/specs/2026-09-27-mixer-live-contract.md`).
-use crate::dsp::mixer::fx_params::{FX_IDS, FX_SEND_KEYS};
+//!
+//! `MixerControl` is Tauri-managed state that exists whether or not the audio
+//! engine runs, so the UI can prepare a mix while stopped. It owns:
+//! - the shared `Arc<MixerParams>` (atomics only; the audio thread reads it),
+//! - the index of the strip carrying the voice chain (`AtomicUsize`, read by
+//!   the audio thread),
+//! - strip names (control side only; never touched by the audio thread).
+//!
+//! Everything here is pure (no Tauri, no files) so it can be unit-tested.
+mod bus_controls;
+
+use crate::dsp::mixer::fx_params::FX_SEND_KEYS;
 use crate::dsp::mixer::leveler::{
     LEVELER_TARGET_DEFAULT, LEVELER_TARGET_MAX, LEVELER_TARGET_MIN,
 };
@@ -47,6 +58,7 @@ const STRIP_F32_KEYS: &[F32Key] = &[
     ("send_main_db", -90.0, 10.0, 0.0),
     ("send_stream_db", -90.0, 10.0, 0.0),
     ("send_monitor_db", -90.0, 10.0, 0.0),
+    // Mon 2 / mon 3: off by default, so a new monitor mix starts silent.
     ("send_monitor2_db", -90.0, 10.0, -90.0),
     ("send_monitor3_db", -90.0, 10.0, -90.0),
     (FX_SEND_KEYS[0], -90.0, 10.0, -90.0),
@@ -598,6 +610,10 @@ impl MixerControl {
         Ok(())
     }
 
+    /// At most one strip carries the voice chain: turning it on for a strip
+    /// moves it there (clearing the others). Turning it off on the strip that
+    /// holds it leaves no strip with the voice chain (`NO_VOICE_STRIP`);
+    /// turning it off on any other strip is a no-op.
     fn set_voice_chain(&self, index: usize, on: bool) -> Result<(), String> {
         if on {
             self.voice_strip.store(index, Relaxed);
@@ -614,34 +630,6 @@ impl MixerControl {
         if let Some(slot) = names.get_mut(index as usize) {
             *slot = clean;
         }
-        Ok(())
-    }
-
-    pub fn set_bus_param(&self, bus: &str, key: &str, value: f32) -> Result<(), String> {
-        if FX_IDS.contains(&bus) && key == "fader_db" {
-            return self.set_fx_param(bus, key, value);
-        }
-        let p = &self.params.buses[bus_index(bus)?];
-        match (f32_spec(BUS_F32_KEYS, key), bus_f32(p, key)) {
-            (Some(spec), Some(field)) => {
-                field.store(clamp_key(spec, value), Relaxed);
-                Ok(())
-            }
-            _ => Err(format!("unknown bus key '{key}'")),
-        }
-    }
-
-    pub fn set_bus_bool(&self, bus: &str, key: &str, value: bool) -> Result<(), String> {
-        if FX_IDS.contains(&bus) && key == "mute" {
-            return self.set_fx_bool(bus, key, value);
-        }
-        let p = &self.params.buses[bus_index(bus)?];
-        let field = match key {
-            "mute" => &p.mute,
-            "leveler_enabled" => &p.leveler_enabled,
-            _ => return Err(format!("unknown bus key '{key}'")),
-        };
-        field.store(value, Relaxed);
         Ok(())
     }
 
@@ -685,11 +673,16 @@ impl MixerControl {
         }
     }
 
+    /// Build the `MixerState` JSON model. `input_channels` is the running
+    /// engine's channel count (1 when stopped); one strip is listed per
+    /// input channel, capped at `MAX_STRIPS`.
     #[cfg(test)] // tests only; the app uses `snapshot_layout`
     pub fn snapshot(&self, input_channels: u32, running: bool, scenes: Vec<String>) -> MixerState {
         self.snapshot_with_ndi(input_channels, 0, running, scenes)
     }
 
+    /// `snapshot`, plus one strip per running NDI input after the hardware
+    /// strips (`StripLayout`).
     #[cfg(test)] // tests only; the app uses `snapshot_layout`
     pub fn snapshot_with_ndi(
         &self,
@@ -702,6 +695,8 @@ impl MixerControl {
         self.snapshot_layout(layout, running, scenes)
     }
 
+    /// `MixerState` for the strips of `layout` (hardware, computer, NDI),
+    /// with no bus output devices (every bus `output` is null).
     pub fn snapshot_layout(
         &self,
         layout: StripLayout,
@@ -711,6 +706,8 @@ impl MixerControl {
         self.snapshot_outputs(layout, running, scenes, &BusOutputs::default())
     }
 
+    /// `snapshot_layout`, plus the device each bus plays on (`outputs`, in
+    /// `BUS_*` order; the running engine's `bus_outputs`).
     pub fn snapshot_outputs(
         &self,
         layout: StripLayout,
