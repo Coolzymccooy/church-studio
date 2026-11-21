@@ -4,7 +4,8 @@
 //! - a monitor role gets one level per strip at that mix's send (pre-fader,
 //!   or post-fader where mon 1 follows the fader; silent when the strip is
 //!   muted, because mute removes a strip from every mix), plus its own mix
-//!   bus. No other bus, and no dynamics, automix or gate state.
+//!   bus. While anything is soloed, mon 1 is PFL and reads only the soloed
+//!   strips, pre-fader. No other bus, and no dynamics, automix or gate state.
 //! - the desk gets each strip after its fader and every bus peak.
 //!
 //! Values are dBFS rounded to 0.1 dB, so a monitor payload stays a few
@@ -21,6 +22,9 @@ pub struct StripTap {
     pub muted: bool,
     /// The send follows the fader (mon 1 with `monitor_post_fader`).
     pub post_fader: bool,
+    /// Soloed on the desk. While anything is soloed, mon 1 is PFL: only the
+    /// soloed strips, pre-fader, whether or not they are muted.
+    pub soloed: bool,
 }
 
 #[derive(Debug, PartialEq, Serialize)]
@@ -47,12 +51,15 @@ pub fn scope(
     taps: &[StripTap],
     buses: &[BusMeterPayload],
 ) -> MeterView {
+    let pfl = role == Role::Monitor1 && taps.iter().any(|tap| tap.soloed);
     let level = |index: usize, tap: &StripTap| {
         let Some(meter) = strips.get(index) else {
             return METER_FLOOR_DB;
         };
         match role {
             Role::Desk => tenth(meter.post_db),
+            _ if pfl && tap.soloed => tenth(meter.pre_db),
+            _ if pfl => METER_FLOOR_DB,
             _ if tap.muted => METER_FLOOR_DB,
             _ if tap.post_fader => tenth(meter.post_db),
             _ => tenth(meter.pre_db),

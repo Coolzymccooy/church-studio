@@ -33,6 +33,14 @@ fn clear(tx: &Latest) {
     tx.send_if_modified(|last| last.take().is_some());
 }
 
+/// Send meters every tick even when unchanged: a page treats a gap in
+/// readings as silence, so a steady tone must keep arriving.
+fn refresh(tx: &Latest, value: &impl Serialize) {
+    if let Ok(json) = serde_json::to_string(value) {
+        tx.send_replace(Some(json));
+    }
+}
+
 fn offer(tx: &Latest, value: &impl Serialize) {
     let Ok(json) = serde_json::to_string(value) else {
         return;
@@ -80,7 +88,7 @@ pub(super) async fn publish(context: Weak<Context>) {
                 if let Ok((view, live)) = ctx.run_board(move |board| board.live(role)).await {
                     offer(states, &view);
                     match live {
-                        Some(live) => offer(meters, &live),
+                        Some(live) => refresh(meters, &live),
                         None => clear(meters),
                     }
                 }

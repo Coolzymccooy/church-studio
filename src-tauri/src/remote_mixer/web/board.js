@@ -183,13 +183,16 @@ export function createBoard({ onLevel, onMute, busy }) {
     const ordered = orderStrips([...strips.values()].filter((s) => s.item.target.type === 'strip')
       .map((s) => ({ name: s.item.name, strip: s })), pins);
     let lastPinned = null;
-    for (const { strip } of ordered) {
-      channels.append(strip.el);
+    ordered.forEach(({ strip }, i) => {
+      // Move only a strip that is out of place: re-inserting a node drops its pointer capture
+      // and focus, which would end a drag or a keyboard adjustment on every snapshot.
+      const slot = channels.children[i] ?? null;
+      if (slot !== strip.el) channels.insertBefore(strip.el, slot);
       const pinned = pins.has(strip.item.name);
       strip.el.classList.toggle('pinned', pinned);
       strip.el.classList.remove('pin-end');
       if (pinned) lastPinned = strip;
-    }
+    });
     if (lastPinned && ordered.length > pins.size) lastPinned.el.classList.add('pin-end');
   }
 

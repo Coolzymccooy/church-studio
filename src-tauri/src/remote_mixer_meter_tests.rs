@@ -29,6 +29,7 @@ fn role_tag(role: Role) -> f32 {
 #[derive(Default)]
 struct MeterBoard {
     reads: AtomicU32,
+    steady: bool,
 }
 
 impl Board for MeterBoard {
@@ -52,6 +53,7 @@ impl Board for MeterBoard {
 
     fn live(&self, role: Role) -> Result<(MixerView, Option<MeterView>), Status> {
         let tick = self.reads.fetch_add(1, Ordering::Relaxed) as f32;
+        let tick = if self.steady { 0.0 } else { tick };
         let tag = role_tag(role);
         let meters = MeterView {
             strips: vec![-20.0 - (tick % 10.0)],
@@ -248,4 +250,24 @@ async fn the_page_modules_and_fonts_are_served_without_pairing() {
             .unwrap()
             .contains("script-src 'self'"));
     }
+}
+
+#[tokio::test]
+async fn a_steady_reading_keeps_arriving_so_the_page_never_mistakes_it_for_silence() {
+    let auth = Arc::new(Mutex::new(Auth::default()));
+    let board = MeterBoard {
+        steady: true,
+        ..MeterBoard::default()
+    };
+    let app = router(Arc::new(board), auth.clone(), HOST);
+    let cookie = pair(&app, &auth, Role::Monitor2).await;
+    let mut events = subscribe(&app, &cookie).await;
+    next_meters(&mut events).await;
+    let started = tokio::time::Instant::now();
+    let mut count = 0;
+    while started.elapsed() < Duration::from_millis(600) {
+        next_meters(&mut events).await;
+        count += 1;
+    }
+    assert!(count >= 6, "{count} identical meter events in 600 ms");
 }

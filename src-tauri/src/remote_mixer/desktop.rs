@@ -150,6 +150,7 @@ impl DesktopBoard {
                     .map(|strip| StripTap {
                         muted: strip.mute || strip.group_muted,
                         post_fader: role == Role::Monitor1 && strip.monitor_post_fader,
+                        soloed: strip.solo,
                     })
                     .collect();
                 scope(role, &latest.strips, &taps, &latest.buses)

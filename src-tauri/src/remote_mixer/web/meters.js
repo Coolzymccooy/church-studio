@@ -118,6 +118,7 @@ export function createMeters() {
     last = now;
     const instant = reduced.matches;
     let sweeping = false;
+    let settled = true;
     for (const ladder of ladders) {
       if (!ladder.w || !ladder.h) continue;
       const sweep = instant ? null : sweepTarget(ladder, now);
@@ -133,6 +134,7 @@ export function createMeters() {
         state.dot = stepMeter(state.dot, target.dot ?? -Infinity, dt, { instant: true });
         state.ghost = stepMeter(state.ghost, target.ghost ?? -Infinity, dt, { instant });
         drawLane(ctx, ladder, lane, state, target, colours);
+        if ([state.bar.level, state.bar.peak, state.dot.peak, state.ghost.level].some((db) => db > METER_MIN_DB)) settled = false;
       });
       drawGaps(ctx, ladder, colours.bg);
     }
@@ -140,7 +142,8 @@ export function createMeters() {
       sweepFrom = 0;
       for (const ladder of ladders) ladder.lanes = ladder.lanes.map(freshLane);
     }
-    frame = now < activeUntil || sweeping ? requestAnimationFrame(draw) : 0;
+    // Keep drawing until fresh readings stop and every bar, ghost and held peak has fallen away.
+    frame = now < activeUntil || sweeping || !settled ? requestAnimationFrame(draw) : 0;
   }
 
   function wake() {

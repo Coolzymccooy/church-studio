@@ -33,6 +33,7 @@ fn buses() -> Vec<BusMeterPayload> {
 const OPEN: StripTap = StripTap {
     muted: false,
     post_fader: false,
+    soloed: false,
 };
 
 #[test]
@@ -75,11 +76,11 @@ fn a_muted_strip_reads_silent_and_a_post_fader_mon_one_send_follows_the_fader() 
     let taps = [
         StripTap {
             muted: true,
-            post_fader: false,
+            ..OPEN
         },
         StripTap {
-            muted: false,
             post_fader: true,
+            ..OPEN
         },
     ];
     let view = scope(Role::Monitor1, &strips, &taps, &buses());
@@ -115,4 +116,33 @@ fn a_full_monitor_payload_stays_small() {
     let taps = vec![OPEN; 32];
     let json = serde_json::to_string(&scope(Role::Monitor1, &strips, &taps, &buses())).unwrap();
     assert!(json.len() < 300, "{} bytes: {json}", json.len());
+}
+
+#[test]
+fn while_anything_is_soloed_mon_one_reads_only_the_soloed_strips_pre_fader() {
+    let strips = [strip(-6.0, -18.0), strip(-9.0, -20.0), strip(-12.0, -30.0)];
+    let taps = [
+        StripTap {
+            soloed: true,
+            muted: true,
+            post_fader: true,
+        },
+        OPEN,
+        StripTap {
+            soloed: true,
+            ..OPEN
+        },
+    ];
+    let mon1 = scope(Role::Monitor1, &strips, &taps, &buses());
+    assert_eq!(
+        mon1.strips,
+        vec![-6.0, -96.0, -12.0],
+        "PFL: pre-fader, ignores mute"
+    );
+    let mon2 = scope(Role::Monitor2, &strips, &taps, &buses());
+    assert_eq!(
+        mon2.strips,
+        vec![-96.0, -9.0, -12.0],
+        "solo never reaches mon 2"
+    );
 }

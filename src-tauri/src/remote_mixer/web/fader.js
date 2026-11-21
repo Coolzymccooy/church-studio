@@ -69,14 +69,12 @@ export function attachFader(track, { get, set, grab, select, enabled }) {
     if (!drag || event.pointerId !== drag.id) return;
     const { moved } = drag;
     drag = null;
-    if (moved) {
-      track.classList.remove('grab');
-      grab(false);
-      return;
-    }
-    if (event.type !== 'pointerup') return;
+    track.classList.remove('grab');
+    grab(false);
+    if (moved || event.type !== 'pointerup') return;
     const now = performance.now();
-    if (now - lastTap < DOUBLE_TAP_MS) {
+    // Double-tap returns a live fader to unity; it never opens a send that is off.
+    if (now - lastTap < DOUBLE_TAP_MS && get() > DB_OFF) {
       lastTap = 0;
       change(0);
     } else {
@@ -87,6 +85,9 @@ export function attachFader(track, { get, set, grab, select, enabled }) {
   track.addEventListener('pointerdown', (event) => {
     if (!enabled() || event.button !== 0 || drag) return;
     select();
+    // Hold from touch-down, so a snapshot arriving before the drag starts cannot move the cap
+    // under the finger and then be undone by the drag.
+    grab(true);
     drag = { id: event.pointerId, x: event.clientX, y: event.clientY, start: faderPosition(get()), moved: false };
   });
 
@@ -98,12 +99,12 @@ export function attachFader(track, { get, set, grab, select, enabled }) {
       if (Math.abs(dy) < INTENT_PX) return;
       if (Math.abs(dx) > Math.abs(dy)) {
         drag = null;
+        grab(false);
         return;
       }
       drag.moved = true;
       track.setPointerCapture?.(event.pointerId);
       track.classList.add('grab');
-      grab(true);
     }
     const cap = track.querySelector('.cap');
     const travel = Math.max(1, track.clientHeight - (cap?.offsetHeight ?? 0));
