@@ -22,6 +22,7 @@ use crate::dsp::noise::compute_noise_profile;
 use crate::dsp::{DspChain, DspParams, MetersPayload};
 use crate::history::HistoryRing;
 use crate::mixer_control::{BusOutputs, MixerLink};
+use crate::soundcheck::{playback_channel, PlaybackPort};
 use crate::mixer_layout::StripLayout;
 use crate::mixer_meters::MixerMeterSlots;
 use crate::ndi::receive::receiver::NdiReceivers;
@@ -134,6 +135,9 @@ pub struct AudioEngine {
     computer_audio_applied: bool,
     /// Control side of the record ring; handed to `RunningEngine`.
     record_port: Option<RecordPort>,
+    playback_port: Option<PlaybackPort>,
+    /// Control side of the record-preview ring; handed to `RunningEngine`.
+    preview_player: Option<crate::preview::PreviewPlayer>,
     pub sample_rate: u32,
     pub buffer_frames: u32,
     pub latency_ms: f32,
@@ -199,6 +203,9 @@ pub struct RunningEngine {
     pub links: Arc<EngineLinks>,
     /// Unique per start, for the device watcher.
     pub id: u64,
+    pub playback: PlaybackPort,
+    /// Plays the last recording into the Monitor output.
+    pub preview: crate::preview::PreviewPlayer,
 }
 
 enum EngineCommand {
@@ -261,6 +268,8 @@ struct EngineShared {
     /// of any strip whose gate is on) plus the bus limiter. Published by the
     /// callback after every block.
     path_latency_samples: AtomicU64,
+    /// The same for Stream, which hears the voice strip's full chain.
+    stream_path_latency_samples: AtomicU64,
     dropped_output_samples: AtomicU64,
     /// Samples the NDI rings could not take (callback) or skipped to stay
     /// near real time (sender threads).
@@ -280,6 +289,7 @@ impl EngineShared {
             capture_busy: AtomicBool::new(false),
             dsp_latency_samples: AtomicU64::new(0),
             path_latency_samples: AtomicU64::new(0),
+            stream_path_latency_samples: AtomicU64::new(0),
             noise_profile_ready: AtomicBool::new(false),
             dropped_output_samples: AtomicU64::new(0),
             ndi_dropped_samples: Arc::new(AtomicU64::new(0)),
@@ -546,6 +556,8 @@ impl AudioEngine {
         // Record ring: every strip + Stream + Main, preallocated here.
         let (record_tap, record_port) =
             crate::recorder::record_ring(layout.total(), sr, MAX_CALLBACK_FRAMES);
+        let (playback_tap, playback_port) = playback_channel(sr, layout.total())?;
+        let (preview_tap, preview_player) = crate::preview::preview_ring(sr);
         let processor = InputProcessor::new(
             sr,
             HardwareInput {
@@ -567,8 +579,9 @@ impl AudioEngine {
                 send: net_started.send_route,
             },
             record_tap,
+            preview_tap,
             meters_tx,
-        );
+        ).with_playback(playback_tap);
 
         let processor: SharedProcessor = Arc::new(Mutex::new(processor));
         let in_stream = streams::build_input(
@@ -645,6 +658,8 @@ impl AudioEngine {
             computer_audio: computer_handle,
             computer_audio_applied: computer_audio_on,
             record_port: Some(record_port),
+            playback_port: Some(playback_port),
+            preview_player: Some(preview_player),
             sample_rate: sr,
             buffer_frames: buf_frames,
             latency_ms,
@@ -756,7 +771,9 @@ impl RunningEngine {
         computer_audio_on: bool,
     ) -> Result<Self, String> {
         let (ready_tx, ready_rx) =
-            mpsc::sync_channel::<Result<(EngineInfo, RecordPort), String>>(1);
+            mpsc::sync_channel::<
+                Result<(EngineInfo, RecordPort, PlaybackPort, crate::preview::PreviewPlayer), String>,
+            >(1);
         let (stop_tx, stop_rx) = mpsc::channel::<EngineCommand>();
         let shared = Arc::new(EngineShared::new(48_000 * 2));
         let thread_shared = shared.clone();
@@ -773,11 +790,17 @@ impl RunningEngine {
         ) {
             Ok(mut engine) => {
                 let info = engine.info();
-                let Some(port) = engine.record_port.take() else {
+                let (Some(port), Some(preview)) =
+                    (engine.record_port.take(), engine.preview_player.take())
+                else {
                     let _ = ready_tx.send(Err("The record ring was not created".to_string()));
                     return;
                 };
-                if ready_tx.send(Ok((info, port))).is_err() {
+                let Some(playback) = engine.playback_port.take() else {
+                    let _ = ready_tx.send(Err("The soundcheck ring was not created".to_string()));
+                    return;
+                };
+                if ready_tx.send(Ok((info, port, playback, preview))).is_err() {
                     return;
                 }
 
@@ -797,7 +820,7 @@ impl RunningEngine {
             }
         });
 
-        let (info, record_port) = ready_rx
+        let (info, record_port, playback, preview) = ready_rx
             .recv()
             .map_err(|_| "Audio thread exited before initialization completed".to_string())??;
 
@@ -827,6 +850,8 @@ impl RunningEngine {
             input_first_channel: info.input_first_channel,
             links: info.links,
             id: ENGINE_IDS.fetch_add(1, Ordering::Relaxed),
+            playback,
+            preview,
         })
     }
 
@@ -930,13 +955,21 @@ impl RunningEngine {
     /// Buffer latency plus the processing latency of what is really active
     /// (voice chain, gated strips, bus limiter), in ms.
     pub fn total_latency_ms(&self) -> f32 {
-        let path = self.shared.path_latency_samples.load(Ordering::Relaxed);
-        let path_ms = if self.sample_rate > 0 {
-            path as f32 * 1000.0 / self.sample_rate as f32
+        self.latency_ms + self.samples_ms(self.shared.path_latency_samples.load(Ordering::Relaxed))
+    }
+
+    /// Like `total_latency_ms`, for Stream (the voice strip's full chain).
+    pub fn stream_latency_ms(&self) -> f32 {
+        self.latency_ms
+            + self.samples_ms(self.shared.stream_path_latency_samples.load(Ordering::Relaxed))
+    }
+
+    fn samples_ms(&self, samples: u64) -> f32 {
+        if self.sample_rate > 0 {
+            samples as f32 * 1000.0 / self.sample_rate as f32
         } else {
             0.0
-        };
-        self.latency_ms + path_ms
+        }
     }
 
     pub fn noise_profile_ready(&self) -> bool {

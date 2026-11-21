@@ -22,6 +22,7 @@ import DesktopRecordButton from './components/recorder/DesktopRecordButton.jsx';
 import InputRack from './components/desk/InputRack.jsx';
 import { useDeviceHotplug, useDeviceLinks } from './components/desk/useDeviceLinks.js';
 import { isMissing } from './lib/usbDevices.js';
+import { useSoundcheckSignal } from './components/soundcheck/useSoundcheckSignal.js';
 import MixerConsole from './components/mixer/MixerConsole';
 import { createMixerController, createMockMixerController } from './lib/mixerEngine';
 import { syncStreamLeveler } from './lib/streamLeveler';
@@ -43,6 +44,8 @@ import {
   resolveBroadcastLabel,
   resolveDeviceLabel,
 } from './lib/audioRouting';
+import { newNoiseProfileId, nextNoiseProfileNumber } from './lib/noiseProfiles.js';
+import { SNAPSHOTS_KEY, nextSnapshotId, parseSnapshots, serializeSnapshots } from './lib/voiceSnapshots.js';
 import {
   captureNativeNoiseProfile,
   describeNativeEngineError,
@@ -98,6 +101,7 @@ const MAIN_TABS = [
 
 const AudioProcessor = ({ goHome }) => {
   const [isLive, setIsLive] = useState(false);
+  const soundcheckSignal = useSoundcheckSignal(isLive);
   const [isPlayingFile, setIsPlayingFile] = useState(false);
   const [audioContext, setAudioContext] = useState(null);
   const [mode, setMode] = useState('live');
@@ -121,6 +125,8 @@ const AudioProcessor = ({ goHome }) => {
   const [voiceActive, setVoiceActive] = useState(false);
   const [isAutoCalibrating, setIsAutoCalibrating] = useState(false);
   const [audioEngineError, setAudioEngineError] = useState(null);
+  // True while the desktop engine is opening its devices, so "start" shows it is working.
+  const [engineStarting, setEngineStarting] = useState(false);
   const [chainReady, setChainReady] = useState(0); // increments when audio chain is fully built
   const [mainTab, setMainTab] = useState('live'); // 'live' | 'editor' | 'mixer'
   // Mixer console: real Tauri controller (invoke/listen loaded lazily, same
@@ -310,8 +316,10 @@ const AudioProcessor = ({ goHome }) => {
   // De-esser gain reduction for meter
   const [desserGrDb, setDesserGrDb] = useState(0);
   const [abMode, setAbMode] = useState('B');
-  const [snapshots, setSnapshots] = useState([]);
-  const snapshotCounterRef = useRef(1);
+  const [snapshots, setSnapshots] = useState(() => {
+    try { return parseSnapshots(window.localStorage.getItem(SNAPSHOTS_KEY)); } catch { return []; }
+  });
+  const snapshotCounterRef = useRef(nextSnapshotId(snapshots));
   const [noiseProfiles, setNoiseProfiles] = useState(() => {
     try {
       const saved = window.localStorage.getItem('tiwaton:noiseProfiles');
@@ -330,7 +338,7 @@ const AudioProcessor = ({ goHome }) => {
   const [roomName, setRoomName] = useState(() => {
     return window.localStorage.getItem('tiwaton:roomName') || 'Main Sanctuary';
   });
-  const noiseProfileCounterRef = useRef(1);
+  const noiseProfileCounterRef = useRef(nextNoiseProfileNumber(noiseProfiles));
   const latestSpectrumRef = useRef(null);
   const noiseFloorThresholdRef = useRef(noiseFloorThreshold);
   const featuresRef = useRef(features);
@@ -370,6 +378,11 @@ const AudioProcessor = ({ goHome }) => {
     noiseProfilesRef.current = noiseProfiles;
     try { window.localStorage.setItem('tiwaton:noiseProfiles', JSON.stringify(noiseProfiles)); } catch { /* Ignore local persistence failures. */ }
   }, [noiseProfiles]);
+
+  // Voice snapshots are the operator's saved setups: they outlive the app and "reset".
+  useEffect(() => {
+    try { window.localStorage.setItem(SNAPSHOTS_KEY, serializeSnapshots(snapshots)); } catch { /* Ignore local persistence failures. */ }
+  }, [snapshots]);
 
   useEffect(() => {
     selectedNoiseProfileIdRef.current = selectedNoiseProfileId;
@@ -666,8 +679,6 @@ const AudioProcessor = ({ goHome }) => {
     setLufsM(null); setLufsST(null); setLufsI(null);
     setLoudnessTarget(-14);
     setAbMode('B');
-    setSnapshots([]);
-    snapshotCounterRef.current = 1;
     setNoiseProfiles([]);
     setSelectedNoiseProfileId('');
     noiseProfileCounterRef.current = 1;
@@ -1277,7 +1288,10 @@ const AudioProcessor = ({ goHome }) => {
     // In the desktop app "start" always means the native engine. From file mode it first returns
     // the rack to live; the browser microphone path does not work in the desktop webview.
     if (isTauri) {
+      if (engineStarting) return;
       if (mode !== 'live') setMode('live');
+      setEngineStarting(true);
+      setAudioEngineError(null);
       try {
         const { invoke } = await import('@tauri-apps/api/core');
         // The engine may already be running while this screen thinks it is off (a reload, or an
@@ -1305,6 +1319,8 @@ const AudioProcessor = ({ goHome }) => {
       } catch (err) {
         console.error('Tauri engine start failed', err);
         setAudioEngineError(describeNativeEngineError(err));
+      } finally {
+        setEngineStarting(false);
       }
       return;
     }
@@ -3115,11 +3131,13 @@ const AudioProcessor = ({ goHome }) => {
   };
 
   const handleSnapshotApply = (snapshot) => {
-    setFeatures({ ...snapshot.features });
+    setFeatures((prev) => ({ ...prev, ...snapshot.features }));
     setSpeakerPreset(snapshot.speakerPreset);
-    setSelectedNoiseProfileId(snapshot.selectedNoiseProfileId || '');
-    setNoiseFloorThreshold(snapshot.noiseFloorThreshold);
-    setInputGainValue(snapshot.inputGainValue);
+    // A noise profile cleared by reset can't be recalled; fall back to none.
+    const profileId = snapshot.selectedNoiseProfileId || '';
+    setSelectedNoiseProfileId(noiseProfiles.some((np) => np.id === profileId) ? profileId : '');
+    if (snapshot.noiseFloorThreshold != null) setNoiseFloorThreshold(snapshot.noiseFloorThreshold);
+    if (snapshot.inputGainValue != null) setInputGainValue(snapshot.inputGainValue);
   };
 
   const handleNoiseProfileCapture = async () => {
@@ -3158,7 +3176,7 @@ const AudioProcessor = ({ goHome }) => {
       Math.max(min, Math.min(max, val));
     const lowReduction = -normalize(lowEnergy / 18, 3, 12);
     const highReduction = -normalize(highEnergy / 16, 3, 14);
-    const profileId = `profile-${noiseProfileCounterRef.current}`;
+    const profileId = newNoiseProfileId();
     const label = `Noise Profile ${noiseProfileCounterRef.current}`;
     noiseProfileCounterRef.current += 1;
 
@@ -3275,6 +3293,8 @@ const AudioProcessor = ({ goHome }) => {
       <div className="flex-1 flex overflow-hidden min-h-0">
 
         <InputRack
+          mixer={mixerController}
+          soundcheckSignal={soundcheckSignal}
           mode={mode}
           onModeSwitch={handleModeSwitch}
           core={{
@@ -3380,6 +3400,7 @@ const AudioProcessor = ({ goHome }) => {
               playbackDuration,
               formatTime,
               engineError: audioEngineError,
+              engineStarting,
               onErrorBack: () => { cleanupAudio(); setIsLive(false); },
               onGoLive: toggleLive,
               loudness: { m: lufsM, st: lufsST, i: lufsI, target: loudnessTarget, limiterOn: Boolean(features.streamingSafe) },
@@ -3410,6 +3431,7 @@ const AudioProcessor = ({ goHome }) => {
           {mainTab === 'mixer' && (
             <MixerConsole
               controller={mixerController}
+              soundcheckSignal={soundcheckSignal}
               refreshKey={mixerRefreshKey(audioStats.state, nativeRouteStatus)}
               onOpenObs={() => setShowObs(true)}
               demoBanner={isTauri ? null : 'Demo mixer — live multichannel mixing runs in the desktop app'}

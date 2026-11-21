@@ -7,6 +7,7 @@ import {
   describeNativeEngineError,
   getNativeEngineStatus,
   learnNativeMicFingerprint,
+  startNativeEngine,
   subscribeToNativeMeters,
   syncNativeParams,
 } from './nativeEngine.js';
@@ -168,5 +169,23 @@ test('describeNativeEngineError prefers useful native error text', () => {
   assert.equal(
     describeNativeEngineError({}, 'Could not start Rust audio engine.'),
     'Could not start Rust audio engine.',
+  );
+});
+
+test('startNativeEngine gives up with a clear message when the devices never answer', async () => {
+  const never = () => new Promise(() => {});
+  await assert.rejects(
+    startNativeEngine(never, { inputId: 'default', outputId: 'default' }, { timeoutMs: 20 }),
+    (err) => /devices did not answer/i.test(err.message) && /bluetooth/i.test(err.message),
+  );
+});
+
+test('startNativeEngine passes a quick answer or a refusal straight through', async () => {
+  const ok = async () => ({ sample_rate: 48000 });
+  assert.deepEqual(await startNativeEngine(ok, { inputId: 'default', outputId: 'default' }, { timeoutMs: 1000 }), { sample_rate: 48000 });
+  const refused = async () => { throw 'The monitor 2 output and the main output are both set to "X".'; };
+  await assert.rejects(
+    startNativeEngine(refused, { inputId: 'default', outputId: 'default' }, { timeoutMs: 1000 }),
+    (err) => err === 'The monitor 2 output and the main output are both set to "X".',
   );
 });

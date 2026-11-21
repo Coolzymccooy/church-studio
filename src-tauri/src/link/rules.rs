@@ -45,13 +45,27 @@ fn default_true() -> bool {
 }
 
 fn rule(id: &str, event: &str, content_kind: Option<&str>, scene: &str) -> Rule {
+    rule_when(id, event, content_kind, None, scene)
+}
+
+fn item_rule(id: &str, event: &str, item_type: &str, scene: &str) -> Rule {
+    rule_when(id, event, None, Some(item_type), scene)
+}
+
+fn rule_when(
+    id: &str,
+    event: &str,
+    content_kind: Option<&str>,
+    item_type: Option<&str>,
+    scene: &str,
+) -> Rule {
     Rule {
         id: id.to_string(),
         enabled: true,
         when: RuleWhen {
             event: event.to_string(),
             content_kind: content_kind.map(str::to_string),
-            item_type: None,
+            item_type: item_type.map(str::to_string),
         },
         then: RuleThen {
             load_scene: scene.to_string(),
@@ -66,8 +80,16 @@ pub fn default_rules() -> Vec<Rule> {
         rule("scripture-sermon", protocol::EVENT_SLIDE_CHANGED, Some("scripture"), "Sermon"),
         rule("announcement-sermon", protocol::EVENT_SLIDE_CHANGED, Some("announcement"), "Sermon"),
         rule("countdown-walkin", protocol::EVENT_COUNTDOWN_STARTED, None, "Walk-in"),
+        // Lumina sends full-screen scripture as contentKind "designed"; only the overlay
+        // strap is "scripture". The run-sheet item type identifies it either way.
+        item_rule("bible-sermon", protocol::EVENT_SLIDE_CHANGED, "BIBLE", "Sermon"),
+        item_rule("scripture-item-sermon", protocol::EVENT_SLIDE_CHANGED, "SCRIPTURE", "Sermon"),
     ]
 }
+
+/// Default rules added after the first release, by the rules version that introduced
+/// them. Saved configs on an older version gain these once (see `config::parse_config`).
+pub const RULES_ADDED_IN_V2: [&str; 2] = ["bible-sermon", "scripture-item-sermon"];
 
 fn clean_opt(value: &Option<String>) -> Option<String> {
     value

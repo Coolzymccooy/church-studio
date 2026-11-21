@@ -56,10 +56,19 @@ export default function LiveView({ v, canvasRef }) {
     <div className="flex-1 relative overflow-hidden">
       {!v.isLive && !v.isPlayingFile && v.mode === 'live' && (
         <div className="fp-overlay">
-          <div className="fp-card">
+          <div className="fp-card" aria-busy={v.engineStarting || undefined}>
             <h3>Sound check</h3>
-            <span className="fp-sub">Engine off</span>
-            <Key lit="green" className="fp-key-tall" onClick={v.onGoLive} style={{ minWidth: 120 }}>start engine</Key>
+            <span className="fp-sub">{v.engineStarting ? 'Opening devices' : 'Engine off'}</span>
+            {v.engineError && !v.engineStarting && (
+              <div role="alert" style={{ display: 'grid', gap: 4, maxWidth: 320 }}>
+                <Lamp tone="r">start failed</Lamp>
+                <p className="fp-sub" style={{ margin: 0, whiteSpace: 'pre-line' }}>{v.engineError}</p>
+              </div>
+            )}
+            <Key lit={v.engineStarting ? null : 'green'} className="fp-key-tall" onClick={v.onGoLive}
+              disabled={v.engineStarting} style={{ minWidth: 120 }}>
+              {v.engineStarting ? 'starting' : v.engineError ? 'try again' : 'start engine'}
+            </Key>
           </div>
         </div>
       )}

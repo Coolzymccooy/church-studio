@@ -1,7 +1,22 @@
 import { buildNativeEngineArgs } from './audioRouting.js';
 
-export async function startNativeEngine(invoke, selectedDevices) {
-  return invoke('start_audio_engine', buildNativeEngineArgs(selectedDevices));
+/** Opening the devices normally takes well under a second; a device that never answers
+ *  (a sleeping Bluetooth headset is the usual one) must not leave "start" looking stalled. */
+export const ENGINE_START_TIMEOUT_MS = 10000;
+
+export const ENGINE_START_TIMEOUT_MESSAGE =
+  'The audio devices did not answer. Check Setup: a Bluetooth headset (AirPods) often cannot open for live audio; choose a wired or USB device.';
+
+export async function startNativeEngine(invoke, selectedDevices, { timeoutMs = ENGINE_START_TIMEOUT_MS } = {}) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(ENGINE_START_TIMEOUT_MESSAGE)), timeoutMs);
+  });
+  try {
+    return await Promise.race([invoke('start_audio_engine', buildNativeEngineArgs(selectedDevices)), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export function describeNativeEngineError(err, fallback = 'Could not start Rust audio engine.') {

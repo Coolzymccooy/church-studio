@@ -11,11 +11,13 @@ pub mod neural;
 pub mod noise;
 pub mod stage_switch;
 pub mod stft;
+pub mod voice_fast;
 
 #[cfg(test)]
 pub(crate) mod test_util;
 
 pub use chain::DspChain;
+pub use voice_fast::FastVoiceChain;
 
 use atomic_float::AtomicF32;
 use std::sync::atomic::{AtomicBool, Ordering};

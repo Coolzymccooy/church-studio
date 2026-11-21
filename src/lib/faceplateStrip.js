@@ -46,6 +46,8 @@ export const STRIP_KNOBS = {
   mon: knob('send_monitor_db', 'mon', 'send', 0.5, 0, sendText, { taper: SEND_TAPER, detent: 0 }),
   mon2: knob('send_monitor2_db', 'mon2', 'send', 0.5, -90, sendText, { taper: SEND_TAPER, detent: 0 }),
   mon3: knob('send_monitor3_db', 'mon3', 'send', 0.5, -90, sendText, { taper: SEND_TAPER, detent: 0 }),
+  fxA: knob('send_fx_a_db', 'FX A', 'send', 0.5, -90, sendText, { taper: SEND_TAPER, detent: 0 }),
+  fxB: knob('send_fx_b_db', 'FX B', 'send', 0.5, -90, sendText, { taper: SEND_TAPER, detent: 0 }),
   pan: knob('pan', 'pan', 'pan', 0.05, 0, panText, { bipolar: true, detent: 0 }),
 };
 
@@ -54,6 +56,8 @@ export const STRIP_KNOBS = {
 export const DUCK_KNOB = knob('duck_depth_db', 'duck', 'dyn', 1, 12, (v) => String(Math.round(v)));
 
 export const STRIP_ROWS = [['trim', 'hz', 'pan'], ['gthr', 'cthr', 'ratio'], ['hi', 'mid', 'lo'], ['main', 'strm', 'mon']];
+
+export const FX_SEND_KNOBS = ['fxA', 'fxB'];
 
 export const STRIP_COLOURS = ['amber', 'clay', 'teal', 'olive', 'sky', 'rose', 'stone'];
 
