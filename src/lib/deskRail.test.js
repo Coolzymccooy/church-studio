@@ -14,6 +14,7 @@ test('alerts are ordered by severity and carry actions', () => {
   });
   assert.deepEqual(alerts.map((a) => a.id), ['engine', 'loud', 'drops', 'cpu', 'broadcast', 'ndi']);
   assert.equal(alerts.find((a) => a.id === 'ndi').action, 'ndi-tools');
+  assert.equal(alerts.find((a) => a.id === 'ndi').text, 'NDI runtime missing');
   assert.equal(alerts.find((a) => a.id === 'broadcast').action, 'setup');
   assert.equal(alertLamp(alerts), 'r');
   assert.equal(alertLamp(alerts.filter((a) => a.tone === 'a')), 'a');

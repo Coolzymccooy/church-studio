@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "npm run dev:tauri",
-    "beforeBuildCommand": "npm run build"
+    "beforeDevCommand": "node scripts/fetch-ndi-runtime.mjs && npm run dev:tauri",
+    "beforeBuildCommand": "node scripts/fetch-ndi-runtime.mjs && npm run build"
   },
   "app": {
     "windows": [

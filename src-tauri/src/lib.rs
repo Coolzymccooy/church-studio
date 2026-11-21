@@ -37,6 +37,11 @@ mod ndi_commands;
 mod ndi_input_commands;
 mod net_audio_commands;
 mod routing;
+mod remote_mixer;
+#[cfg(test)]
+mod remote_mixer_tests;
+#[cfg(test)]
+mod remote_mixer_meter_tests;
 
 use audio::{DeviceSelection, EngineState, RunningEngine};
 use mixer_control::MixerControl;
@@ -423,6 +428,7 @@ pub fn run() {
         .manage(engine_stopping::EngineStopping::default())
         .manage(SharedParams(Arc::new(DspParams::defaults())))
         .manage(MixerControl::new())
+        .manage(mixer_meters::LatestMeters::default())
         .manage(mixer_commands::CurrentScene::default())
         .manage(NdiSettings::new())
         .manage(NdiInputSettings::new())
@@ -468,6 +474,15 @@ pub fn run() {
             link::commands::link_activity,
             link::commands::link_undo,
             link::commands::link_set_automation_paused,
+            remote_mixer::desktop::remote_mixer_start,
+            remote_mixer::desktop::remote_mixer_stop,
+            remote_mixer::desktop::remote_mixer_status,
+            remote_mixer::desktop::remote_mixer_pair_code,
+            remote_mixer::desktop::remote_mixer_cancel_code,
+            remote_mixer::desktop::remote_mixer_revoke,
+            remote_mixer::desktop::remote_mixer_fader_touch,
+            remote_mixer::desktop::remote_mixer_tailnet_address,
+            remote_mixer::desktop::remote_mixer_tailnet_certificate,
             obs::commands::obs_get_config,
             obs::commands::obs_set_config,
             obs::commands::obs_status,
@@ -502,6 +517,7 @@ pub fn run() {
             export_commands::editor_export,
         ])
         .setup(|app| {
+            app.manage(remote_mixer::desktop::RemoteMixer::load(app.handle()));
             // Load the NDI runtime off the main thread; ndi_status reports
             // `loading` until it is done.
             ndi::runtime::preload();

@@ -156,6 +156,9 @@ export function createMixerController({ invoke, listen }) {
     renameStrip(index, name) {
       return invoke('mixer_rename_strip', { index, name });
     },
+    setFaderTouch(id, down) {
+      return invoke('remote_mixer_fader_touch', { id, down });
+    },
     setBusParam(bus, key, value) {
       return invoke('mixer_set_bus_param', { bus, key, value });
     },

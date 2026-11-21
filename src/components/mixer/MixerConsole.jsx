@@ -96,7 +96,7 @@ export default function MixerConsole({ controller, refreshKey, demoBanner, onOpe
     setGroup,
     state, loading, toast, dismissToast, metersRef, currentScene,
     setStripParam, setStripBool, renameStrip,
-    setBusParam, setBusBool, setFxControl,
+    setBusParam, setBusBool, setFxControl, setFaderTouch,
     saveScene, loadScene, deleteScene,
   } = useMixer(controller, refreshKey);
   const [tapTempo] = useState(createTapTempo);
@@ -155,7 +155,7 @@ export default function MixerConsole({ controller, refreshKey, demoBanner, onOpe
             <div className="flex-1 flex gap-2 p-2 overflow-x-auto">
               {fxBank && returns.map((ret, index) => (
                 <FxReturnStrip key={ret.id} ret={ret} index={index} extraMonitors={extraMonitors} metersRef={metersRef}
-                  onSet={(key, value) => setFxControl(ret.id, key, value)} onTempo={tempo} onTap={tap} />
+                  onSet={(key, value) => setFxControl(ret.id, key, value)} onFaderTouch={(down) => setFaderTouch(`bus:${ret.id}`, down)} onTempo={tempo} onTap={tap} />
               ))}
               {shown.map((strip) => (
                 <ChannelStrip
@@ -167,12 +167,14 @@ export default function MixerConsole({ controller, refreshKey, demoBanner, onOpe
                   onSetParam={(key, value) => setStripParam(strip.index, key, value)}
                   onSetBool={(key, value) => setStripBool(strip.index, key, value)}
                   playbackTone={soundcheckSignal?.selected & (1 << strip.index) ? (soundcheckSignal.playing ? 'g' : 'a') : null}
+                  onFaderTouch={(down) => setFaderTouch(`strip:${strip.index}`, down)}
                   onRename={(name) => renameStrip(strip.index, name)}
                   extraMonitors={extraMonitors}
                 />
               ))}
             </div>
-            {showGroups && state.groups && <DcaBank groups={state.groups} labels={state.groupLabels} strips={state.strips} metersRef={metersRef} onChange={setGroup} />}
+            {showGroups && state.groups && <DcaBank groups={state.groups} labels={state.groupLabels} strips={state.strips} metersRef={metersRef} onChange={setGroup}
+                onFaderTouch={(index, down) => setFaderTouch(`dca:${index}`, down)} />}
             <div className="fp-buses" role="group" aria-label="Buses">
               {state.buses.filter((bus) => !isExtraMonitor(bus.id) || extraMonitors.some((m) => m.bus === bus.id)).map((bus) => (
                 <BusStrip
@@ -181,6 +183,7 @@ export default function MixerConsole({ controller, refreshKey, demoBanner, onOpe
                   metersRef={metersRef}
                   onSetParam={(key, value) => setBusParam(bus.id, key, value)}
                   onSetBool={(key, value) => setBusBool(bus.id, key, value)}
+                  onFaderTouch={(down) => setFaderTouch(`bus:${bus.id}`, down)}
                   onCopyFromMon1={isExtraMonitor(bus.id) ? () => copyMon1Into(bus.id) : null}
                 />
               ))}

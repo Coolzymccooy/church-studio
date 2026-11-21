@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en" data-finish="graphite">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#141517">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <title>TIWATON remote mixer</title>
+  <link rel="stylesheet" href="/desk.css">
+  <script src="/desk.js" type="module"></script>
+</head>
+<body>
+  <header class="bar">
+    <span class="link fp-lamp" role="status"><span id="led" class="fp-led"></span><span id="message">Offline</span></span>
+    <h1 class="mixname"><span class="brand">TIWATON</span> <span id="role">Remote mixer</span></h1>
+    <span class="bar-keys">
+      <span class="tipwrap">
+        <button type="button" class="key icon tip" id="help" aria-label="How it works" aria-expanded="false" aria-controls="helptip">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8.25" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="9.25" y="8.5" width="1.5" height="6" fill="currentColor"/><rect x="9.25" y="5.5" width="1.5" height="1.6" fill="currentColor"/></svg>
+        </button>
+        <span id="helptip" class="tipbox" role="tooltip" hidden>Drag anywhere on a fader; it moves from where it is. Double-tap a fader for 0 dB. Tap the readout to fine-adjust or pin a channel to the front. The faint bar on a meter is signal your mix is not using.</span>
+      </span>
+      <button type="button" class="key icon" id="finish" aria-label="Finish: Graphite">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10 2.75a7.25 7.25 0 0 1 0 14.5z" fill="currentColor"/></svg>
+      </button>
+    </span>
+  </header>
+  <p id="error" class="error" role="alert" hidden></p>
+
+  <form id="pair" class="pair" hidden>
+    <div class="pair-plate">
+      <label for="code" class="pair-label">Pairing code</label>
+      <input id="code" class="field code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autocomplete="one-time-code">
+      <label for="name" class="pair-label">Device name</label>
+      <input id="name" class="field" maxlength="24" required autocomplete="off">
+      <label class="check"><input id="renew" type="checkbox"> Keep paired</label>
+      <button class="key lit" type="submit">Pair</button>
+      <details class="cert">
+        <summary>Certificate</summary>
+        <output id="fingerprint" class="fp-glass"></output>
+      </details>
+    </div>
+  </form>
+
+  <main id="mixer" class="mixer" hidden>
+    <section class="bank" id="bank" aria-label="Channels">
+      <div class="scale" aria-hidden="true"><span class="scale-cap"></span><span class="scale-track" id="scale"></span></div>
+      <div id="channels" class="strips"></div>
+      <div id="buses" class="strips buses" aria-label="Mix outputs" hidden></div>
+    </section>
+
+    <section class="console" aria-label="Selected channel and mix">
+      <div class="lcd fp-glass" id="lcd">
+        <button type="button" id="readout" class="readout" aria-expanded="false" aria-controls="fine">
+          <span class="lcd-head"><span id="lcd-no" class="lcd-no">--</span><span id="lcd-name" class="lcd-name">No channel</span><span id="lcd-mix" class="lcd-mix"></span></span>
+          <span class="lcd-value"><span class="lit" id="lcd-db"></span><span class="unit">dB</span></span>
+        </button>
+        <canvas id="lcd-meter" class="hmeter" aria-hidden="true"></canvas>
+        <span class="hscale" aria-hidden="true"><i>&minus;60</i><i>&minus;40</i><i>&minus;30</i><i>&minus;18</i><i>&minus;9</i><i>&minus;3</i><i>0</i><i>+6</i></span>
+      </div>
+      <div id="fine" class="fine" role="group" aria-label="Fine adjust" hidden>
+        <button type="button" class="key" data-step="off">Off</button>
+        <button type="button" class="key" data-step="-1">&minus;1</button>
+        <button type="button" class="key" data-step="-0.5">&minus;0.5</button>
+        <button type="button" class="key" data-step="0.5">+0.5</button>
+        <button type="button" class="key" data-step="1">+1</button>
+        <button type="button" class="key" data-step="unity">0 dB</button>
+        <button type="button" class="key" id="pin" aria-pressed="false">Pin</button>
+      </div>
+      <div class="master" id="master">
+        <div class="mix">
+          <span class="mix-head"><span id="mix-name" class="mix-name">Mix</span><span id="mix-peak" class="mix-peak fp-glass">&minus;&infin;</span><span class="fp-lamp clip" id="clip"><span class="fp-led"></span>clip</span></span>
+          <canvas id="mix-meter" class="hmeter stereo fp-glass" aria-hidden="true"></canvas>
+        </div>
+        <button type="button" class="key mute" id="mute-mix" aria-pressed="false" hidden>Mute</button>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

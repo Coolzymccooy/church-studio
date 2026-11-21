@@ -82,7 +82,8 @@ export function describeNdiStatus(status) {
       label: status.version ? `NDI® runtime ${status.version}` : 'NDI® runtime available',
     };
   }
-  return { available: false, label: 'Not installed — get NDI Tools' };
+  // The runtime ships with the app, so this means a damaged install.
+  return { available: false, label: 'NDI® runtime missing — reinstall or get NDI Tools' };
 }
 
 /** Source names the running engine is sending (from `engine_status`). */

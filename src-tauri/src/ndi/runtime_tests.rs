@@ -1,7 +1,8 @@
 //! Unit tests for the runtime search order (`runtime::candidate_paths`).
 //! They need no NDI runtime.
 use super::runtime::{
-    candidate_paths, library_file_name, status_from, TargetOs, MACOS_NDI_TOOLS_LIBS, NOT_INSTALLED,
+    bundled_paths, candidate_paths, library_file_name, status_from, TargetOs,
+    MACOS_NDI_TOOLS_LIBS, NOT_INSTALLED,
 };
 use std::path::{Path, PathBuf};
 use std::collections::HashMap;
@@ -15,7 +16,7 @@ fn env_of(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
 }
 
 #[test]
-fn env_dirs_come_first_v6_then_v5() {
+fn without_an_app_folder_env_dirs_come_first_v6_then_v5() {
     let paths = candidate_paths(
         env_of(&[("NDI_RUNTIME_DIR_V5", "/opt/v5"), ("NDI_RUNTIME_DIR_V6", "/opt/v6")]),
         TargetOs::Windows,
@@ -85,11 +86,11 @@ fn linux_order_and_versioned_env_names() {
     assert_eq!(
         paths,
         vec![
+            Path::new("/app").join("libndi.so.6"),
             Path::new("/opt/ndi").join("libndi.so.5"),
             PathBuf::from("libndi.so.6"),
             PathBuf::from("libndi.so.5"),
             PathBuf::from("/usr/lib/libndi.so"),
-            Path::new("/app").join("libndi.so.6"),
         ]
     );
 }
@@ -98,12 +99,85 @@ fn linux_order_and_versioned_env_names() {
 fn duplicates_are_removed() {
     let paths = candidate_paths(
         env_of(&[("NDI_RUNTIME_DIR_V6", "/same"), ("NDI_RUNTIME_DIR_V5", "/same")]),
-        TargetOs::MacOs,
+        TargetOs::Windows,
         Some(Path::new("/same")),
     );
-    assert_eq!(paths.first(), Some(&Path::new("/same").join("libndi.dylib")));
-    // /same once, the two install locations, then the NDI Tools copies (macOS only).
-    assert_eq!(paths.len(), 3 + MACOS_NDI_TOOLS_LIBS.len());
+    let lib = library_file_name(TargetOs::Windows);
+    assert_eq!(paths.first(), Some(&Path::new("/same").join(lib)));
+    // /same once, then the two Program Files locations.
+    assert_eq!(paths.len(), 3);
+}
+
+// ── The copy bundled with the app comes first ────────────────────────────────
+
+#[test]
+fn macos_app_bundle_is_searched_before_anything_installed() {
+    let paths = candidate_paths(
+        env_of(&[("NDI_RUNTIME_DIR_V6", "/opt/v6")]),
+        TargetOs::MacOs,
+        Some(Path::new("/Applications/TIWATON AI Studio.app/Contents/MacOS")),
+    );
+    let contents = Path::new("/Applications/TIWATON AI Studio.app/Contents");
+    assert_eq!(
+        &paths[..6],
+        &[
+            contents.join("Frameworks/libndi.dylib"),
+            contents.join("Resources/libndi.dylib"),
+            contents.join("MacOS/libndi.dylib"),
+            Path::new("/opt/v6").join("libndi.dylib"),
+            PathBuf::from("/Library/NDI SDK for Apple/lib/macOS/libndi.dylib"),
+            PathBuf::from("/usr/local/lib/libndi.dylib"),
+        ]
+    );
+    assert_eq!(&paths[6..], MACOS_NDI_TOOLS_LIBS.map(PathBuf::from).as_slice());
+}
+
+#[test]
+fn macos_dev_build_finds_the_copy_tauri_build_puts_in_target_frameworks() {
+    let paths = candidate_paths(env_of(&[]), TargetOs::MacOs, Some(Path::new("/repo/src-tauri/target/debug")));
+    assert_eq!(paths[0], PathBuf::from("/repo/src-tauri/target/Frameworks/libndi.dylib"));
+}
+
+#[test]
+fn windows_dll_next_to_the_exe_beats_the_installed_runtimes() {
+    let lib = library_file_name(TargetOs::Windows);
+    let paths = candidate_paths(
+        env_of(&[("NDI_RUNTIME_DIR_V6", r"C:\NDI")]),
+        TargetOs::Windows,
+        Some(Path::new(r"C:\Users\me\AppData\Local\TIWATON AI Studio")),
+    );
+    assert_eq!(paths[0], Path::new(r"C:\Users\me\AppData\Local\TIWATON AI Studio").join(lib));
+    assert_eq!(paths[1], Path::new(r"C:\NDI").join(lib));
+    assert_eq!(
+        paths[2],
+        PathBuf::from(format!(r"C:\Program Files\NDI\NDI 6 Runtime\v6\{lib}"))
+    );
+    assert_eq!(paths.len(), 4);
+}
+
+#[test]
+fn bundled_paths_per_platform() {
+    let exe = Path::new("/x/Contents/MacOS");
+    assert_eq!(
+        bundled_paths(TargetOs::MacOs, exe),
+        vec![
+            PathBuf::from("/x/Contents/Frameworks/libndi.dylib"),
+            PathBuf::from("/x/Contents/Resources/libndi.dylib"),
+            PathBuf::from("/x/Contents/MacOS/libndi.dylib"),
+        ]
+    );
+    // An exe at the filesystem root has no parent: only its own folder.
+    assert_eq!(bundled_paths(TargetOs::MacOs, Path::new("/")), vec![PathBuf::from("/libndi.dylib")]);
+    for os in [TargetOs::Windows, TargetOs::Linux, TargetOs::Other] {
+        assert_eq!(bundled_paths(os, Path::new("/app")), vec![Path::new("/app").join(library_file_name(os))]);
+    }
+}
+
+#[test]
+fn the_fallback_message_points_at_a_damaged_bundle() {
+    assert!(NOT_INSTALLED.contains("bundled"));
+    assert!(NOT_INSTALLED.contains("Reinstall"));
+    assert!(NOT_INSTALLED.contains("https://ndi.video/tools"));
 }
 
 #[test]

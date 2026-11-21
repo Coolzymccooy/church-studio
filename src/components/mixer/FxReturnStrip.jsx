@@ -15,7 +15,7 @@ function EffectKnob({ id, label, value, step, initial, unit, onSet }) {
     onChange={(v) => onSet(id, v)} />;
 }
 
-export default function FxReturnStrip({ ret, index, extraMonitors, metersRef, onSet, onTap, onTempo }) {
+export default function FxReturnStrip({ ret, index, extraMonitors, metersRef, onSet, onFaderTouch, onTap, onTempo }) {
   const a = index === 0;
   const label = a ? 'FX A' : 'FX B';
   const left = useCallback(() => metersRef.current.fxReturns?.[index]?.peak_l_db ?? -96, [metersRef, index]);
@@ -74,7 +74,7 @@ export default function FxReturnStrip({ ret, index, extraMonitors, metersRef, on
       </KeyPair>
       <div className="fp-fz">
         <MeterLadder getDb={left} height={HEIGHT - 18} width={5} label={`${label} left level`} />
-        <Fader position={faderDbToPosition(ret.fader_db)} onChange={(p) => onSet('fader_db', positionToFaderDb(p))}
+        <Fader onTouch={onFaderTouch} position={faderDbToPosition(ret.fader_db)} onChange={(p) => onSet('fader_db', positionToFaderDb(p))}
           label={`${label} fader`} valueText={`${formatDb(ret.fader_db)} dB`} colour="bus" height={HEIGHT} marks={MARKS} />
         <MeterLadder getDb={right} height={HEIGHT - 18} width={5} label={`${label} right level`} />
       </div>

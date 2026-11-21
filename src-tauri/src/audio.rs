@@ -144,6 +144,7 @@ pub struct AudioEngine {
     pub buffer_frames: u32,
     pub latency_ms: f32,
     pub input_device_name: String,
+    pub(crate) input_device_identity: String,
     pub monitor_output_name: String,
     pub broadcast_output_name: Option<String>,
     /// Main (PA) output, when one was selected and opened.
@@ -169,6 +170,7 @@ pub struct RunningEngine {
     pub buffer_frames: u32,
     pub latency_ms: f32,
     pub input_device_name: String,
+    pub(crate) input_device_identity: String,
     pub monitor_output_name: String,
     pub broadcast_output_name: Option<String>,
     /// Main (PA) output, when one was selected and opened.
@@ -227,6 +229,7 @@ struct EngineInfo {
     buffer_frames: u32,
     latency_ms: f32,
     input_device_name: String,
+    input_device_identity: String,
     monitor_output_name: String,
     broadcast_output_name: Option<String>,
     main_output_name: Option<String>,
@@ -341,6 +344,7 @@ impl AudioEngine {
             buffer_frames: self.buffer_frames,
             latency_ms: self.latency_ms,
             input_device_name: self.input_device_name.clone(),
+            input_device_identity: self.input_device_identity.clone(),
             monitor_output_name: self.monitor_output_name.clone(),
             broadcast_output_name: self.broadcast_output_name.clone(),
             main_output_name: self.main_output_name.clone(),
@@ -382,6 +386,9 @@ impl AudioEngine {
             config::resolve_input_range(devices.input_range, device_channels, &resolved.input_name)?;
         let in_channels = count;
         let input_device_name = resolved.input_name.clone();
+
+        let input_device_identity = device_names::device_uid(&resolved.in_dev)
+            .unwrap_or_else(|| input_device_name.clone());
 
         let buf_frames = 256u32;
         let latency_ms = (buf_frames as f32 * 2.0 / sr as f32) * 1000.0;
@@ -667,6 +674,7 @@ impl AudioEngine {
             buffer_frames: buf_frames,
             latency_ms,
             input_device_name,
+            input_device_identity,
             monitor_output_name,
             broadcast_output_name,
             main_output_name,
@@ -835,6 +843,7 @@ impl RunningEngine {
             buffer_frames: info.buffer_frames,
             latency_ms: info.latency_ms,
             input_device_name: info.input_device_name,
+            input_device_identity: info.input_device_identity,
             monitor_output_name: info.monitor_output_name,
             broadcast_output_name: info.broadcast_output_name,
             main_output_name: info.main_output_name,

@@ -62,11 +62,19 @@ impl PreviewTap {
     /// Fill `left`/`right` with the next queued frames (zeros after them).
     /// Returns how many frames came from the preview.
     pub fn pop_into(&mut self, left: &mut [f32], right: &mut [f32]) -> usize {
-        if self.state.flush.swap(false, Ordering::AcqRel) {
+        // While stopped, drop anything queued (including a last push the
+        // reader made just after `stop`) and stay silent until the next play.
+        let stopped = self.state.stop.load(Ordering::Acquire);
+        if self.state.flush.swap(false, Ordering::AcqRel) || stopped {
             let queued = self.consumer.occupied_len();
             self.consumer.skip(queued);
         }
         let n = left.len().min(right.len());
+        if stopped {
+            left[..n].fill(0.0);
+            right[..n].fill(0.0);
+            return 0;
+        }
         let frames = (self.consumer.occupied_len() / 2).min(n);
         for i in 0..frames {
             left[i] = self.consumer.try_pop().unwrap_or(0.0);
@@ -131,10 +139,12 @@ impl PreviewPlayer {
             .name("record-preview".into())
             .spawn(move || {
                 let producer = feed(readers, producer, &state);
-                state.playing.store(false, Ordering::Release);
+                // Hand the producer back before reporting "stopped", so a
+                // play pressed right after sees a ready player.
                 if let Ok(mut guard) = slot.lock() {
                     *guard = Some(producer);
                 }
+                state.playing.store(false, Ordering::Release);
             });
         if let Err(err) = spawned {
             self.state.playing.store(false, Ordering::Release);

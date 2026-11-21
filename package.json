@@ -13,12 +13,13 @@
     "dev": "vite",
     "dev:tauri": "vite --host 127.0.0.1 --strictPort",
     "build": "vite build",
-    "test": "node --test src/lib/*.test.js src/site/*.test.js",
+    "test": "node --test src/lib/*.test.js src/site/*.test.js scripts/*.test.mjs",
     "lint": "eslint .",
     "verify": "npm run lint && npm run test && npm run build",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
+    "ndi:fetch": "node scripts/fetch-ndi-runtime.mjs",
     "tauri:build": "node scripts/tauri-build.mjs",
     "tauri:release": "node scripts/tauri-build.mjs --release"
   },
@@ -32,6 +33,7 @@
     "@tauri-apps/plugin-os": "^2.3.2",
     "@tauri-apps/plugin-shell": "^2.3.5",
     "lucide-react": "^0.556.0",
+    "qrcode": "1.5.4",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },

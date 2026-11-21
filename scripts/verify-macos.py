@@ -15,6 +15,13 @@ binary = app / "Contents/MacOS" / info["CFBundleExecutable"]
 architectures = subprocess.check_output(["lipo", "-archs", str(binary)], text=True).strip()
 assert "arm64" in architectures and "x86_64" in architectures, architectures
 subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], check=True)
+# The NDI runtime ships inside the app (Tauri bundle.macOS.frameworks), so no NDI Tools install is needed.
+ndi_lib = app / "Contents/Frameworks/libndi.dylib"
+assert ndi_lib.is_file(), "Bundled NDI runtime missing from Contents/Frameworks"
+ndi_architectures = subprocess.check_output(["lipo", "-archs", str(ndi_lib)], text=True).strip()
+assert "arm64" in ndi_architectures and "x86_64" in ndi_architectures, ndi_architectures
+subprocess.run(["codesign", "--verify", "--strict", str(ndi_lib)], check=True)
+assert (app / "Contents/Resources/ndi/libndi_licenses.txt").is_file(), "NDI licence file missing"
 entitlements = plistlib.loads(subprocess.check_output(
     ["codesign", "-d", "--entitlements", "-", "--xml", str(app)], stderr=subprocess.DEVNULL
 ))
@@ -32,6 +39,7 @@ report = {
     "version": info["CFBundleShortVersionString"], "architectures": architectures,
     "microphone_description": True, "local_network_description": True,
     "audio_input_entitlement": True, "ndi_runtime_loading_entitlement": True,
+    "bundled_ndi_runtime": ndi_architectures,
     "native_launch_10_seconds": True,
     "hardware_audio_and_network_devices": "requires operator testing",
     "notarization": "not verified; this is a test package",
