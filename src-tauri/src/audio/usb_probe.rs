@@ -573,3 +573,85 @@ fn usb_midservice_probe() {
 fn usb_probe_cleanup() {
     aggregate::cleanup();
 }
+
+/// Soak: the full engine with the device watcher ticking, the input on the
+/// built-in mic and the monitor on the USB device (its own clock), for
+/// `SOAK_SECS` (default 600). Reports underruns and dropped samples every
+/// minute. Release build:
+/// `SOAK_SECS=600 cargo test --release --lib usb_soak_probe -- --ignored --nocapture`
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "needs a USB audio device; run manually"]
+fn usb_soak_probe() {
+    use super::device_watch::{tick, Watch};
+    use super::{DeviceSelection, EngineState, RunningEngine};
+    use crate::dsp::DspParams;
+    use crate::mixer_control::MixerControl;
+    use tauri::Manager;
+
+    let secs: u64 = std::env::var("SOAK_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(600);
+    let host = cpal::default_host();
+    let app = tauri::test::mock_app();
+    app.manage(std::sync::Mutex::new(None::<RunningEngine>) as EngineState);
+    let params = Arc::new(DspParams::defaults());
+    params.monitor_gain_db.store(-40.0, Ordering::Relaxed);
+    let mixer = MixerControl::new();
+    let engine = RunningEngine::spawn(
+        app.handle().clone(),
+        params,
+        mixer.link(),
+        DeviceSelection {
+            input_id: Some("MacBook Pro Microphone".to_string()),
+            monitor_output_id: Some(usb_name()),
+            broadcast_output_id: None,
+            main_output_id: None,
+            monitor2_output_id: None,
+            monitor3_output_id: None,
+            output_pairs: [0; crate::dsp::mixer::NUM_BUSES],
+            input_range: None,
+        },
+        Default::default(),
+        Default::default(),
+        false,
+    )
+    .expect("engine start");
+    let state = app.state::<EngineState>();
+    *state.lock().unwrap() = Some(engine);
+    let handle = app.handle().clone();
+    let mut watch = Watch::default();
+    let started = Instant::now();
+    let mut settled = None;
+    while started.elapsed() < Duration::from_secs(secs) {
+        std::thread::sleep(Duration::from_secs(1));
+        tick(&handle, &host, &mut watch);
+        let t = started.elapsed().as_secs();
+        let (monitor, dropped, cpu) = {
+            let guard = state.lock().unwrap();
+            let engine = guard.as_ref().unwrap();
+            let devices = engine.devices_json();
+            let monitor = devices.as_array().unwrap().iter().find(|d| d["role"] == "monitor").cloned().unwrap();
+            (monitor, engine.dropped_output_samples(), engine.cpu_load_pct())
+        };
+        let underruns = monitor["underruns"].as_u64().unwrap();
+        if t == 10 {
+            settled = Some((underruns, dropped));
+        }
+        if t % 60 == 0 {
+            println!("{t:>4}s monitor {} underruns {underruns}, drift {} ppm, dropped {dropped}, cpu {cpu:.1}%",
+                monitor["state"], monitor["drift_ppm"]);
+        }
+    }
+    let (u0, d0) = settled.unwrap();
+    let guard = state.lock().unwrap();
+    let engine = guard.as_ref().unwrap();
+    let devices = engine.devices_json();
+    let monitor = devices.as_array().unwrap().iter().find(|d| d["role"] == "monitor").cloned().unwrap();
+    let (u1, d1) = (monitor["underruns"].as_u64().unwrap(), engine.dropped_output_samples());
+    println!("after settling: underruns {u0} -> {u1}, dropped {d0} -> {d1}");
+    drop(guard);
+    if let Some(engine) = state.lock().unwrap().take() {
+        engine.stop();
+    }
+    assert_eq!(u1, u0, "the monitor ran dry during the soak");
+    assert_eq!(d1, d0, "output samples were dropped during the soak");
+}
