@@ -1,7 +1,8 @@
-import { ArrowRight, Download } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
+import DownloadKey from './DownloadKey.jsx';
 import SiteConsole from './SiteConsole.jsx';
 import { STUDIO_HREF } from './route.js';
-import { DOWNLOAD_URL, FEATURES, HERO, REPO_URL } from './siteContent.js';
+import { DOWNLOAD_HREF, FEATURES, HERO } from './siteContent.js';
 import './site.css';
 
 const YEAR = new Date().getFullYear();
@@ -21,7 +22,7 @@ function TopBar() {
       <div className="site-wrap site-bar-row">
         <Brand />
         <nav className="site-nav" aria-label="Main">
-          <a className="site-link" href={DOWNLOAD_URL}>Download</a>
+          <a className="site-link" href={DOWNLOAD_HREF}>Download</a>
           <a className="site-key" href={STUDIO_HREF}>{HERO.cta}</a>
         </nav>
       </div>
@@ -40,10 +41,7 @@ function Hero() {
             {HERO.cta}
             <ArrowRight size={18} strokeWidth={2} aria-hidden="true" />
           </a>
-          <a className="site-link" href={DOWNLOAD_URL}>
-            <Download size={16} strokeWidth={2} aria-hidden="true" />
-            {HERO.download}
-          </a>
+          <DownloadKey />
         </div>
       </div>
       <SiteConsole />
@@ -75,8 +73,7 @@ function Footer() {
         <Brand />
         <nav className="site-foot-links" aria-label="Footer">
           <a className="site-link" href={STUDIO_HREF}>{HERO.cta}</a>
-          <a className="site-link" href={DOWNLOAD_URL}>Download</a>
-          <a className="site-link" href={REPO_URL}>GitHub</a>
+          <a className="site-link" href={DOWNLOAD_HREF}>Download</a>
         </nav>
         <small>© {YEAR} Tiwaton Ltd</small>
       </div>

@@ -1,13 +1,12 @@
 // Words and links for the website. Kept short on purpose: label, one line, nothing else.
 
-export const REPO_URL = 'https://github.com/Coolzymccooy/church-studio';
-export const DOWNLOAD_URL = `${REPO_URL}/releases/latest`;
+// The desktop download lives in the hero (DownloadKey.jsx); every other Download link jumps to it.
+export const DOWNLOAD_HREF = '#download';
 
 export const HERO = {
   title: 'Church sound on one desk.',
   line: 'Capture computer audio, mix every mic, then stream and record the service from one app.',
   cta: 'Open studio',
-  download: 'Download the desktop app',
 };
 
 export const FEATURES = [

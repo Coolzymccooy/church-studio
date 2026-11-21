@@ -24,7 +24,8 @@
     "release:dry-run": "node scripts/release-local.mjs --dry-run",
     "release:local": "node scripts/release-local.mjs",
     "deploy:web": "node scripts/deploy-web.mjs",
-    "test:release": "node --test scripts/release/*.test.mjs"
+    "test:release": "node --test scripts/release/*.test.mjs",
+    "release:downloads": "node scripts/publish-downloads.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",

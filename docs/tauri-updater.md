@@ -1,10 +1,13 @@
 # Tauri Auto Updates
 
-TIWATON AI Studio now checks for signed updates from GitHub Releases when a release build starts.
+TIWATON AI Studio checks for signed updates when a release build starts, from Tiwaton's own download
+host first (see `docs/downloads-host.md`) and GitHub Releases as a fallback.
 
 ## What is configured
 
-- Updater endpoint: `https://github.com/Coolzymccooy/church-studio/releases/latest/download/latest.json`
+- Updater endpoints, in order: `https://downloads.tiwaton.co.uk/studio/latest.json`, then
+  `https://github.com/Coolzymccooy/church-studio/releases/latest/download/latest.json` (fallback, and
+  the only one 1.5.0 and older know)
 - Public key: embedded in `src-tauri/tauri.conf.json`
 - Release builds generate signed updater artifacts
 - Debug builds (`tauri dev`) skip update checks

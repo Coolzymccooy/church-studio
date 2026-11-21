@@ -38,3 +38,11 @@ export const SSH_OPTIONS = Object.freeze([
   '-o', 'ServerAliveInterval=30',
   '-o', 'ServerAliveCountMax=10',
 ]);
+
+// Tiwaton's own download host: Cloudflare R2 bucket behind a custom domain. The website, new
+// installs and the updater read from here; GitHub Releases stay as a fallback for old installs.
+export const DOWNLOADS = Object.freeze({
+  host: 'https://downloads.tiwaton.co.uk',
+  bucket: 'tiwaton-downloads',
+  prefix: 'studio',
+});

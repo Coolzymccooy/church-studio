@@ -59,6 +59,35 @@
 @media (pointer: coarse) { .site-key { min-height: var(--site-touch); } }
 @media (prefers-reduced-motion: reduce) { .site-key:active { transform: none; } }
 
+/* ---------- desktop download: an unlit key, so "Open studio" stays the one lit key ---------- */
+.site-dl { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.site-dl-key {
+  display: inline-flex; align-items: center; gap: 8px;
+  min-height: 52px; padding: 0 24px;
+  border-radius: var(--fp-radius-key); border: 1px solid var(--fp-key-edge);
+  background: var(--fp-key); color: var(--fp-key-text);
+  font: var(--fp-weight-semibold) var(--site-key-lg)/1 var(--fp-font-legend);
+  white-space: nowrap;
+  transition: border-color var(--fp-motion-fast);
+}
+.site-dl-key:hover { border-color: var(--fp-legend); }
+.site-dl-key:active { transform: translateY(1px); }
+@media (prefers-reduced-motion: reduce) { .site-dl-key:active { transform: none; } }
+.site-dl-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 16px; }
+.site-dl-meta, .site-dl-kind {
+  font: var(--fp-weight-regular) var(--fp-text-lg)/1.4 var(--fp-font-mono);
+  font-variant-numeric: tabular-nums; color: var(--fp-muted);
+}
+.site-dl-other summary {
+  display: inline-flex; align-items: center; gap: 4px; min-height: var(--site-touch);
+  color: var(--fp-legend); font-weight: var(--fp-weight-medium); cursor: pointer; list-style: none;
+}
+.site-dl-other summary::-webkit-details-marker { display: none; }
+.site-dl-other summary:focus-visible { outline: 2px solid var(--fp-focus); outline-offset: 2px; border-radius: var(--fp-radius-key); }
+.site-dl-other[open] summary svg { transform: rotate(180deg); }
+.site-dl-list { list-style: none; margin: 0; padding: 0; }
+.site-dl-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 12px; }
+
 /* ---------- brand ---------- */
 .site-brand { display: inline-flex; align-items: center; gap: 8px; min-height: var(--site-touch); }
 .site-brand b { font: var(--fp-weight-semibold) var(--site-brand)/1 var(--fp-font-legend); letter-spacing: 0.02em; }
