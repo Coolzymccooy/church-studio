@@ -59,6 +59,9 @@ test('windows build script uses the real toolchain and the exact commit', () => 
   assert.match(script, new RegExp(`checkout -q --force --detach ${SHA}`));
   assert.match(script, /tailnet-jobs\\church-studio-release/);
   assert.equal(script.includes('\r\n'), true);
+  // The app bundles the NDI runtime; the build stops without it, so fetch it before building.
+  const fetchAt = script.indexOf('npm run ndi:fetch');
+  assert.ok(fetchAt > script.indexOf('npm ci') && fetchAt < script.indexOf('tauri build'), 'fetch NDI between npm ci and tauri build');
   assert.throws(() => windowsBuildScript({ sha: 'master' }), /full commit sha/);
 });
 
