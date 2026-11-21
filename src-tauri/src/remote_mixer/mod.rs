@@ -1,6 +1,9 @@
 mod auth;
 pub mod desktop;
 mod extensions;
+mod meters;
+#[cfg(test)]
+mod meters_tests;
 mod settings;
 mod tls;
 mod updates;
@@ -8,6 +11,7 @@ mod web;
 
 pub use auth::Auth;
 pub use axum::http::StatusCode as Status;
+pub use meters::MeterView;
 
 use auth::PairError;
 use axum::extract::{DefaultBodyLimit, Request, State};
@@ -110,6 +114,11 @@ pub trait Board: Send + Sync + 'static {
     fn view(&self, role: Role) -> Result<MixerView, Status>;
     fn apply(&self, role: Role, control: Control) -> Result<(), Status>;
     fn notify(&self) {}
+    /// The role's view plus its read-only live meters, read together for the
+    /// update stream. Boards without meters send none.
+    fn live(&self, role: Role) -> Result<(MixerView, Option<MeterView>), Status> {
+        Ok((self.view(role)?, None))
+    }
 }
 
 struct Context {

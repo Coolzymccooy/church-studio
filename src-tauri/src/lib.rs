@@ -39,6 +39,8 @@ mod routing;
 mod remote_mixer;
 #[cfg(test)]
 mod remote_mixer_tests;
+#[cfg(test)]
+mod remote_mixer_meter_tests;
 
 use audio::{DeviceSelection, EngineState, RunningEngine};
 use mixer_control::MixerControl;
@@ -415,6 +417,7 @@ pub fn run() {
         .manage(engine_stopping::EngineStopping::default())
         .manage(SharedParams(Arc::new(DspParams::defaults())))
         .manage(MixerControl::new())
+        .manage(mixer_meters::LatestMeters::default())
         .manage(mixer_commands::CurrentScene::default())
         .manage(NdiSettings::new())
         .manage(NdiInputSettings::new())

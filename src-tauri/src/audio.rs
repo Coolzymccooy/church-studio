@@ -19,7 +19,7 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::computer_audio::{self, ComputerAudioCapture, ComputerAudioHandle, OwnOutputs};
 use crate::dsp::mixer::{BUS_MAIN, BUS_MONITOR, BUS_MONITOR2, BUS_MONITOR3, BUS_STREAM};
@@ -29,7 +29,7 @@ use crate::history::HistoryRing;
 use crate::mixer_control::{BusOutputs, MixerLink};
 use crate::soundcheck::{playback_channel, PlaybackPort};
 use crate::mixer_layout::StripLayout;
-use crate::mixer_meters::MixerMeterSlots;
+use crate::mixer_meters::{LatestMeters, MixerMeterSlots};
 use crate::ndi::receive::receiver::NdiReceivers;
 use crate::ndi::receive::{NdiInputHandle, NdiInputs};
 use crate::ndi::sender::NdiBusSender;
@@ -763,7 +763,11 @@ fn spawn_meters_thread(
             }
 
             if last_mixer_emit.elapsed() >= Duration::from_millis(MIXER_METERS_INTERVAL_MS) {
-                let _ = app.emit("mixer-meters", &meter_slots.take_payload());
+                let payload = meter_slots.take_payload();
+                if let Some(latest) = app.try_state::<LatestMeters>() {
+                    latest.store(payload.clone());
+                }
+                let _ = app.emit("mixer-meters", &payload);
                 last_mixer_emit = Instant::now();
             }
 
@@ -787,6 +791,9 @@ fn spawn_meters_thread(
                 pending.clear();
                 last_emit = Instant::now();
             }
+        }
+        if let Some(latest) = app.try_state::<LatestMeters>() {
+            latest.clear();
         }
     });
 }
