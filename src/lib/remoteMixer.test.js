@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { changeBody, dbLabel } from '../../src-tauri/src/remote_mixer/web/protocol.js';
+import { changeBody, dbLabel, settledLevel } from '../../src-tauri/src/remote_mixer/web/protocol.js';
 
 test('remote clients send typed changes with the latest layout signature', () => {
   const target = { type: 'strip', index: 3 };
@@ -155,4 +155,15 @@ test('an obsolete response cannot clear fader changes from a new connection', as
   });
   assert.deepEqual(writes, [-3, -26]);
   assert.deepEqual(outcomes, [204]);
+});
+
+test('after a fader is let go, the desk value it missed is shown once nothing is in flight', () => {
+  // Held: the snapshot waits.
+  assert.equal(settledLevel({ held: true, busy: false, shownDb: -10, latestDb: -3 }), null);
+  // A write is still in flight: wait for it rather than jump back.
+  assert.equal(settledLevel({ held: false, busy: true, shownDb: -10, latestDb: -3 }), null);
+  // Released, nothing pending: show the desk's latest value.
+  assert.equal(settledLevel({ held: false, busy: false, shownDb: -10, latestDb: -3 }), -3);
+  // Already in step: nothing to do.
+  assert.equal(settledLevel({ held: false, busy: false, shownDb: -3, latestDb: -3 }), null);
 });

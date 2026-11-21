@@ -50,3 +50,14 @@ export async function drainControlQueue({ queue, active, post, respond, wait, no
     }
   }
 }
+
+/**
+ * After a fader is let go: the desk value to show now, or null to wait. Snapshots that arrive
+ * while a fader is held (or its write is in flight) are kept but not shown, and the server only
+ * sends a snapshot when the state changes, so without this the fader could stay on a stale level.
+ */
+export function settledLevel({ held, busy, shownDb, latestDb }) {
+  if (held || busy) return null;
+  if (typeof latestDb !== 'number' || !Number.isFinite(latestDb)) return null;
+  return latestDb === shownDb ? null : latestDb;
+}

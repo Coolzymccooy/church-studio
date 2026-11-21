@@ -85,6 +85,7 @@ fn layout(engine: Option<&RunningEngine>) -> (StripLayout, String) {
     let signature = layout_signature(
         layout,
         &running.input_device_identity,
+        running.input_first_channel,
         running
             .ndi_inputs
             .iter()
@@ -96,10 +97,13 @@ fn layout(engine: Option<&RunningEngine>) -> (StripLayout, String) {
 fn layout_signature<'a>(
     layout: StripLayout,
     device: &str,
+    first_channel: u32,
     ndi: impl IntoIterator<Item = (usize, &'a str)>,
 ) -> String {
     let mut digest = DefaultHasher::new();
-    ("input", layout.hardware, device).hash(&mut digest);
+    // The first input channel too: the same device and channel count from a
+    // different starting channel maps every strip to a different input.
+    ("input", layout.hardware, device, first_channel).hash(&mut digest);
     ("network slots", layout.net).hash(&mut digest);
     ("computer", layout.computer).hash(&mut digest);
     for (strip, source) in ndi {
@@ -500,7 +504,7 @@ mod tests {
     #[test]
     fn layout_signature_depends_on_sources_and_unknown_bus_names_are_kept() {
         let layout = StripLayout::with_net(2, true, 1, 1);
-        let sig = |device, source| layout_signature(layout, device, [(5, source)]);
+        let sig = |device, source| layout_signature(layout, device, 0, [(5, source)]);
         assert_eq!(
             sig("Interface A", "Source A"),
             sig("Interface A", "Source A")
@@ -560,5 +564,19 @@ mod tests {
         assert!(holds.contains("strip:0", now + Duration::from_secs(2)));
         holds.set("strip:0".into(), false, now + Duration::from_secs(2));
         assert!(!holds.contains("strip:0", now + Duration::from_secs(2)));
+    }
+}
+
+#[cfg(test)]
+mod signature_tests {
+    use super::*;
+
+    #[test]
+    fn a_different_first_input_channel_changes_the_layout_signature() {
+        let layout = StripLayout { hardware: 2, net: 0, computer: 0, ndi: 0 };
+        let a = layout_signature(layout, "UMC404", 0, std::iter::empty());
+        let b = layout_signature(layout, "UMC404", 2, std::iter::empty());
+        assert_ne!(a, b);
+        assert_eq!(a, layout_signature(layout, "UMC404", 0, std::iter::empty()));
     }
 }

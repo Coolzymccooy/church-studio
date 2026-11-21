@@ -3,7 +3,7 @@
 import { attachFader, buildScale, buildTrack, showLevel } from './fader.js';
 import { createMeters } from './meters.js';
 import { clipUntil, CLIP_DB, DB_OFF, fitStrip, inMixDb, lcdReadout, nudge, orderStrips, peakLabel } from './mixmath.js';
-import { dbLabel } from './protocol.js';
+import { dbLabel, settledLevel } from './protocol.js';
 
 const MIX_NAMES = { desk: 'Desk', monitor1: 'Mon 1', monitor2: 'Mon 2', monitor3: 'Mon 3' };
 const KINDS = { bus: 'bus', return: 'fx', dca: 'dca' };
@@ -175,13 +175,32 @@ export function createBoard({ onLevel, onMute, busy }) {
     attachFader(track, {
       get: () => strip.db,
       set: (db) => setLevel(strip, db),
-      grab: (down) => (down ? held.add(`${key}:level`) : held.delete(`${key}:level`)),
+      grab: (down) => {
+        if (down) {
+          held.add(`${key}:level`);
+        } else {
+          held.delete(`${key}:level`);
+          // Give the server's next snapshot (60 ms cadence) time to carry this drag's own
+          // write first, so the fader never flicks back to the value it had before.
+          setTimeout(() => settleAfterRelease(strip), 200);
+        }
+      },
       select: () => select(key),
       enabled: live,
     });
     strip.release = meters.add(ladder, { read: () => stripTargets(strip), order: strips.size });
     (target.type === 'strip' ? channels : buses).append(node);
     return strip;
+  }
+
+  // Once a released fader has no write in flight, show the desk's latest value for it (a
+  // snapshot that arrived while it was held was kept but not shown). Polls briefly, ~2 s at most.
+  function settleAfterRelease(strip, tries = 20) {
+    const id = `${strip.key}:level`;
+    const pending = busy(id);
+    const db = settledLevel({ held: held.has(id), busy: pending, shownDb: strip.db, latestDb: strip.item.db });
+    if (db !== null) setLevel(strip, db, false);
+    else if ((pending || held.has(id)) && tries > 0) setTimeout(() => settleAfterRelease(strip, tries - 1), 100);
   }
 
   function arrange() {
