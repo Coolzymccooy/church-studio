@@ -23,7 +23,27 @@ Pairing issues a random 256-bit token as an HttpOnly, Secure, SameSite=Strict ho
 | Mon 1, Mon 2, Mon 3 | Each active input's send to the assigned monitor and the mute for that monitor output. −90 to +10 dB. −90 is off. Devices with the same role share that mix. |
 | Desk | Active input and output bus faders and mutes, plus FX returns and DCA masters when present. −90 to +10 dB. Mute is on or off. |
 
-The phone uses 44 px touch controls. The desk uses 196 px fader travel in 0.1 dB steps. Both offer the graphite and bone finishes and keyboard controls. A stopped engine shows settings and rejects remote writes. Pairing is available with the engine stopped.
+A stopped engine shows settings and rejects remote writes. Pairing is available with the engine stopped.
+
+## The phone and tablet page
+
+The page is a personal monitor mixer in the faceplate language (graphite and bone, `--fp-*` tokens, glass windows dark in both finishes). Screenshots: `docs/screenshots/2026-11-21-phone-mix/`.
+
+- **Strips.** One vertical fader per channel: 44 px cap (60 px on tablets), console taper with 0 dB three quarters up, a magnetic 0 dB detent and off at the bottom. Drags are relative, so a touch never makes the cap jump; sideways swipes scroll the bank. Double-tap gives 0 dB. Arrow keys step 0.5 dB, Page keys 3 dB, Home off, End +10. The desk role adds a mute key per strip and shows buses, FX returns and DCAs after a divider.
+- **Meters.** A segmented ladder beside each fader, the desktop ladder's zones (green to −18, amber to −3, red) and ballistics, with a one-second peak hold. On a monitor role the lit bar is what the channel puts into this mix (its send tap plus the send level) and a faint bar shows signal at the tap the mix is not using. The mix meter shows RMS as the bar and peak as a dot with a hold tick, a held peak readout and a clip lamp latched for two seconds. All meters run on one animation-frame loop that idles when readings stop. A one-shot lamp-test sweep plays when a mixer loads. Reduced motion draws readings as they arrive, without smoothing or the sweep.
+- **Readout.** A glass LCD near the thumbs shows the selected channel's number, name and level in a fixed-width readout, the mix name and its muted state, and a meter. Tapping it opens fine adjust: off, −1, −0.5, +0.5, +1, 0 dB and pin. Pinned channels (stored per role on the device) lead the bank.
+- **Layout.** The link lamp (live, engine off, offline) and the mix name stay in the top bar. Portrait puts the readout and the mix master with its mute at the bottom; landscape puts them in a right-hand column. Tablets get wider strips, and the fine-adjust keys open by default.
+
+## Live meters
+
+GET /api/events also carries a read-only `meters` event, published on the same 60 ms cadence (about 16 Hz) only while that role has subscribers. Values are dBFS rounded to 0.1 dB.
+
+| Role | `meters` payload |
+| --- | --- |
+| Mon 1, Mon 2, Mon 3 | `strips`: one level per strip at that mix's send tap (pre-fader, or post-fader where mon 1 follows the fader; −96 when the strip or its DCA is muted). `mix`: that monitor bus as peak L, peak R, RMS L, RMS R. Nothing about other buses, dynamics, automix or gates. |
+| Desk | `strips`: each strip after its fader. `buses`: every bus as peak L, peak R. |
+
+The desktop meters thread stores each `mixer-meters` reading for the listener and clears it when the engine stops; a reading older than 500 ms is not sent. A 32-strip monitor payload stays under 300 bytes. `node scripts/remote-mixer-preview.mjs` serves the page with a fake board and synthetic meters for layout work.
 
 ## Updates and failure behaviour
 

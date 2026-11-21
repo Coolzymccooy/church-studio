@@ -227,3 +227,25 @@ async fn meters_are_read_only_for_every_role() {
         );
     }
 }
+
+#[tokio::test]
+async fn the_page_modules_and_fonts_are_served_without_pairing() {
+    let auth = Arc::new(Mutex::new(Auth::default()));
+    let app = router(Arc::new(MeterBoard::default()), auth, HOST);
+    for (path, kind) in [
+        ("/board.js", "application/javascript"),
+        ("/fader.js", "application/javascript"),
+        ("/meters.js", "application/javascript"),
+        ("/mixmath.js", "application/javascript"),
+        ("/legend-600.woff2", "font/woff2"),
+        ("/mono-500.woff2", "font/woff2"),
+    ] {
+        let response = request(&app, "GET", path, None, String::new()).await;
+        assert_eq!(response.status(), Status::OK, "{path}");
+        assert_eq!(response.headers()[header::CONTENT_TYPE], kind, "{path}");
+        assert!(response.headers()["content-security-policy"]
+            .to_str()
+            .unwrap()
+            .contains("script-src 'self'"));
+    }
+}
