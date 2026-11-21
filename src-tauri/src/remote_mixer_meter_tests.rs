@@ -63,6 +63,7 @@ impl Board for MeterBoard {
             } else {
                 BTreeMap::new()
             },
+            pfl: false,
         };
         Ok((self.view(role)?, Some(meters)))
     }

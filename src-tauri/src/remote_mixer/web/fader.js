@@ -86,13 +86,19 @@ export function attachFader(track, { get, set, grab, select, enabled }) {
     if (!enabled() || event.button !== 0 || drag) return;
     select();
     // Hold from touch-down, so a snapshot arriving before the drag starts cannot move the cap
-    // under the finger and then be undone by the drag.
+    // under the finger and then be undone by the drag. Capture now, so a release anywhere ends
+    // it; a sideways touch still pans the bank (touch-action) and arrives as pointercancel.
     grab(true);
     drag = { id: event.pointerId, x: event.clientX, y: event.clientY, start: faderPosition(get()), moved: false };
+    track.setPointerCapture?.(event.pointerId);
   });
 
   track.addEventListener('pointermove', (event) => {
     if (!drag || event.pointerId !== drag.id) return;
+    if (event.pointerType === 'mouse' && event.buttons === 0) {
+      end({ type: 'pointercancel', pointerId: drag.id });
+      return;
+    }
     const dy = event.clientY - drag.y;
     if (!drag.moved) {
       const dx = event.clientX - drag.x;
@@ -103,7 +109,6 @@ export function attachFader(track, { get, set, grab, select, enabled }) {
         return;
       }
       drag.moved = true;
-      track.setPointerCapture?.(event.pointerId);
       track.classList.add('grab');
     }
     const cap = track.querySelector('.cap');
@@ -113,6 +118,7 @@ export function attachFader(track, { get, set, grab, select, enabled }) {
   });
 
   for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) track.addEventListener(type, end);
+  window.addEventListener('blur', () => { if (drag) end({ type: 'pointercancel', pointerId: drag.id }); });
 
   track.addEventListener('keydown', (event) => {
     if (!enabled()) return;

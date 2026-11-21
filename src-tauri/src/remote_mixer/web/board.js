@@ -72,7 +72,8 @@ export function createBoard({ onLevel, onMute, busy }) {
     const { target } = strip.item;
     if (target.type === 'strip') {
       const tap = reading.strips[target.index];
-      if (!isMon()) return [{ bar: tap ?? -Infinity, clip: tap >= CLIP_DB }];
+      // The desk reads post-fader; mon 1 in PFL already reads what each strip puts in the mix.
+      if (!isMon() || reading.pfl) return [{ bar: tap ?? -Infinity, clip: tap >= CLIP_DB }];
       return [{ bar: inMixDb(tap, strip.db), ghost: tap ?? -Infinity, clip: tap >= CLIP_DB }];
     }
     const pair = target.type === 'bus' ? reading.buses?.[target.id] : null;

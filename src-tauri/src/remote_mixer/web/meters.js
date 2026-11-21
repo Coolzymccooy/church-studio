@@ -8,6 +8,7 @@ const SEGMENT_PX = 3;
 const GAP_PX = 1;
 const LANE_GAP_PX = 4;
 const IDLE_AFTER_MS = 1500;
+const SETTLED_DB = METER_MIN_DB + 0.1;
 const SWEEP_MS = 760;
 const SWEEP_STAGGER_MS = 28;
 const ZONES = [
@@ -134,7 +135,7 @@ export function createMeters() {
         state.dot = stepMeter(state.dot, target.dot ?? -Infinity, dt, { instant: true });
         state.ghost = stepMeter(state.ghost, target.ghost ?? -Infinity, dt, { instant });
         drawLane(ctx, ladder, lane, state, target, colours);
-        if ([state.bar.level, state.bar.peak, state.dot.peak, state.ghost.level].some((db) => db > METER_MIN_DB)) settled = false;
+        if ([state.bar.level, state.bar.peak, state.dot.peak, state.ghost.level].some((db) => db > SETTLED_DB)) settled = false;
       });
       drawGaps(ctx, ladder, colours.bg);
     }

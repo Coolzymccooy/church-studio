@@ -57,6 +57,13 @@ test('meters rise fast, fall slowly and hold their peak for a second', () => {
   assert.equal(instant.level, -6, 'reduced motion jumps straight to the reading');
 });
 
+test('a meter that falls silent lands exactly on the floor, so the draw loop can idle', () => {
+  let meter = stepMeter(initialMeter(), 0, 0.1);
+  for (let i = 0; i < 60 * 600; i += 1) meter = stepMeter(meter, -Infinity, 1 / 60);
+  assert.equal(meter.level, -60);
+  assert.equal(meter.peak, -60);
+});
+
 test('a clip lamp latches for two seconds from the last over', () => {
   assert.equal(clipUntil(0, -3, 1000), 0);
   assert.equal(clipUntil(0, 0, 1000), 3000);

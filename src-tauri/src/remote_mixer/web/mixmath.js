@@ -18,6 +18,8 @@ const RISE_RATE = 22;
 const FALL_RATE = 7;
 const PEAK_HOLD_SECONDS = 1;
 const PEAK_DECAY_DB_PER_SEC = 20;
+// Within this of the floor a meter is at the floor, so a silent meter settles exactly.
+const FLOOR_SNAP_DB = 0.05;
 
 // A console-style taper: unity three quarters up, the useful range spread out, off at the bottom.
 const TAPER = [
@@ -95,7 +97,8 @@ export function initialMeter() {
 export function stepMeter(prev, targetDb, dt, { instant = false } = {}) {
   const target = Number.isFinite(targetDb) ? Math.max(METER_MIN_DB, targetDb) : METER_MIN_DB;
   const rate = target > prev.level ? RISE_RATE : FALL_RATE;
-  const level = instant ? target : prev.level + (target - prev.level) * Math.min(1, rate * dt);
+  const eased = instant ? target : prev.level + (target - prev.level) * Math.min(1, rate * dt);
+  const level = eased - METER_MIN_DB < FLOOR_SNAP_DB ? METER_MIN_DB : eased;
   if (level >= prev.peak) return { level, peak: level, hold: PEAK_HOLD_SECONDS };
   const hold = prev.hold - dt;
   const peak = hold > 0 ? prev.peak : Math.max(METER_MIN_DB, prev.peak - dt * PEAK_DECAY_DB_PER_SEC);

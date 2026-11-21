@@ -37,6 +37,10 @@ pub struct MeterView {
     /// Desk: every bus as [peak L, peak R], by bus id.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub buses: BTreeMap<&'static str, [f32; 2]>,
+    /// Mon 1 is PFL: `strips` already is what each strip puts in the mix
+    /// (soloed strips at unity), so send levels must not be applied.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub pfl: bool,
 }
 
 fn tenth(db: f32) -> f32 {
@@ -78,6 +82,7 @@ pub fn scope(
                 .iter()
                 .map(|bus| (bus.id, [tenth(bus.peak_l_db), tenth(bus.peak_r_db)]))
                 .collect(),
+            pfl: false,
         };
     };
     let mix = buses.iter().find(|bus| bus.id == bus_id).map(|bus| {
@@ -92,5 +97,6 @@ pub fn scope(
         strips,
         mix,
         buses: BTreeMap::new(),
+        pfl,
     }
 }

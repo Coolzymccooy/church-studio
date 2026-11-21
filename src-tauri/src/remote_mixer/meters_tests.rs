@@ -139,10 +139,15 @@ fn while_anything_is_soloed_mon_one_reads_only_the_soloed_strips_pre_fader() {
         vec![-6.0, -96.0, -12.0],
         "PFL: pre-fader, ignores mute"
     );
+    assert!(mon1.pfl, "the page must not apply send levels to PFL taps");
+    let json = serde_json::to_string(&mon1).unwrap();
+    assert!(json.contains("\"pfl\":true"), "{json}");
     let mon2 = scope(Role::Monitor2, &strips, &taps, &buses());
     assert_eq!(
         mon2.strips,
         vec![-96.0, -9.0, -12.0],
         "solo never reaches mon 2"
     );
+    assert!(!mon2.pfl);
+    assert!(!serde_json::to_string(&mon2).unwrap().contains("pfl"));
 }
