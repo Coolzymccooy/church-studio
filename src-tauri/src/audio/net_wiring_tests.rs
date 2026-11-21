@@ -1,6 +1,6 @@
 //! The real audio callback with network audio: a Remote strip's peer audio
 //! reaches Main, and the send bus reaches the send ring.
-use super::input_proc::{InputProcessor, NetIo};
+use super::input_proc::{HardwareInput, InputProcessor, NetIo};
 use super::{EngineShared, MAX_CALLBACK_FRAMES};
 use crate::dsp::mixer::BUS_MAIN;
 use crate::dsp::{DspChain, DspParams};
@@ -30,7 +30,7 @@ fn rig() -> Rig {
     let (meters_tx, _meters_rx) = mpsc::sync_channel(32);
     let processor = InputProcessor::new(
         RATE,
-        1,
+        HardwareInput::all(1),
         DspChain::new(RATE as f64),
         Arc::new(DspParams::defaults()),
         Arc::new(EngineShared::new(RATE as usize * 2)),

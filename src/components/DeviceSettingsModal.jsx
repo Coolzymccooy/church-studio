@@ -4,6 +4,10 @@ import {
   clampPanel, draftChanges, draftFrom, isDirty, readPanelPos, rowStatus,
 } from '../lib/setupDraft.js';
 import { isTauri } from '../lib/platform';
+import {
+  PAIR_KEYS, clockLamp, countOptions, deviceOptionLabel, findDevice, firstChannelOptions, isMissing, linkFor,
+  pairLabel, pairOptions, showPairPicker, withDeviceChange,
+} from '../lib/usbDevices.js';
 import ComputerAudioToggle from './ComputerAudioToggle';
 import InfoTip from './faceplate/InfoTip.jsx';
 import Key from './faceplate/Key.jsx';
@@ -15,13 +19,44 @@ import useMeterFeed, { busPeakDb, inputPeakDb } from './desk/useMeterFeed.js';
 const POS_KEY = 'tiwaton_setup_pos';
 const PANEL_W = 360;
 const VIRTUAL_KEYWORDS = ['vb-cable', 'vb cable', 'blackhole', 'black hole', 'loopback', 'virtual'];
-const STATUS_LAMP = { on: ['g', 'on'], idle: ['off', 'idle'], 'not set': ['off', 'not set'], unsaved: ['a', 'unsaved'] };
+const STATUS_LAMP = {
+  on: ['g', 'on'],
+  idle: ['off', 'idle'],
+  'not set': ['off', 'not set'],
+  unsaved: ['a', 'unsaved'],
+  waiting: ['a', 'waiting'],
+  lost: ['r', 'lost'],
+  failed: ['r', 'failed'],
+  missing: ['r', 'missing'],
+};
 
-const deviceOptions = (devices, prefix) => devices.map((device) => (
-  <option key={device.deviceId} value={device.deviceId}>
-    {device.label || `${prefix} ${device.deviceId.slice(0, 5)}`}
-  </option>
-));
+/** The listed devices, plus the chosen one kept as "· missing" while it is unplugged. */
+const deviceOptions = (devices, value) => [
+  ...(isMissing(devices, value) ? [<option key={`missing:${value}`} value={value}>{`${value} · missing`}</option>] : []),
+  ...devices.map((device) => (
+    <option key={device.deviceId} value={device.deviceId}>{deviceOptionLabel(device)}</option>
+  )),
+];
+
+/** The device a row's value plays on: the chosen one, or the system default. */
+const rowDevice = (devices, value) => (
+  value === 'default' ? devices.find((d) => d.isDefault) ?? null : findDevice(devices, value)
+);
+
+/** `options`, plus the saved `value` (labelled `label`) when the device does not offer it. */
+const withValue = (options, value, label) => (
+  options.some((o) => o.value === value) ? options : [...options, { value, label }]
+);
+
+/** A small channel picker shown beside a device that has more than two channels. */
+function ChannelSelect({ label, value, options, onChange, narrow = false }) {
+  return (
+    <select className={`fp-field fp-field-ch${narrow ? ' fp-field-narrow' : ''}`} aria-label={label} value={value ?? ''}
+      onChange={(event) => onChange(event.target.value === '' ? null : Number(event.target.value))}>
+      {options.map((o) => <option key={o.label} value={o.value ?? ''}>{o.label}</option>)}
+    </select>
+  );
+}
 
 function loadPos() {
   try {
@@ -39,9 +74,12 @@ function savePos(pos) {
   }
 }
 
-/** One device: label, ⓘ, status lamp, the select, and a live level bar while it is on. */
-function DeviceRow({ id, label, tip, status, value, onChange, getDb, children }) {
-  const [tone, word] = STATUS_LAMP[status];
+/**
+ * One device: label, ⓘ, status lamp, the select (with an optional channel picker beside it), and
+ * a live level bar while it is on.
+ */
+function DeviceRow({ id, label, tip, status, value, onChange, getDb, picker, error, children }) {
+  const [tone, word] = STATUS_LAMP[status] ?? STATUS_LAMP.idle;
   return (
     <div className="fp-setup-row">
       <div className="fp-row">
@@ -49,11 +87,17 @@ function DeviceRow({ id, label, tip, status, value, onChange, getDb, children })
           {label}
           {tip && <InfoTip label={label}>{tip}</InfoTip>}
         </label>
-        <Lamp tone={tone}>{word}</Lamp>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <Lamp tone={tone}>{word}</Lamp>
+          {error && <InfoTip label={`${label} error`}>{error}</InfoTip>}
+        </span>
       </div>
-      <select id={id} className="fp-field" value={value} onChange={(event) => onChange(event.target.value)}>
-        {children}
-      </select>
+      <div className="fp-setup-pick">
+        <select id={id} className="fp-field" value={value} onChange={(event) => onChange(event.target.value)}>
+          {children}
+        </select>
+        {picker}
+      </div>
       {isTauri && <LevelBar getDb={status === 'on' ? getDb : () => -96} label={`${label} level`} />}
     </div>
   );
@@ -108,6 +152,7 @@ function useDragPanel(panelRef) {
 
 function SetupPanel({
   onClose, onRefresh, selectedDevices, onSelectedDevicesChange, availableDevices, audioStats, mixerController, isLive,
+  deviceLinks,
 }) {
   const panelRef = useRef(null);
   const { pos, handlers, nudge } = useDragPanel(panelRef);
@@ -125,7 +170,40 @@ function SetupPanel({
   const dirty = isDirty(selectedDevices, draft);
 
   const set = (key) => (value) => setDraft((d) => ({ ...d, [key]: value }));
-  const status = (key) => rowStatus({ saved: selectedDevices, draft, key, running: isLive });
+  // A device change also resets its pair or input range (usbDevices.withDeviceChange).
+  const setDevice = (key) => (value) => setDraft((d) => withDeviceChange(d, key, value));
+  const links = deviceLinks?.links ?? [];
+  const { inputs, outputs } = availableDevices;
+  const status = (key, role, devices) => rowStatus({
+    saved: selectedDevices,
+    draft,
+    key,
+    running: isLive,
+    link: linkFor(links, role),
+    missing: isMissing(devices, selectedDevices[key]),
+  });
+  const errorOf = (role) => (isLive ? linkFor(links, role)?.error ?? null : null);
+  // The output pair picker, only for a device with more than two channels.
+  const pairPicker = (bus, value, label) => {
+    const device = rowDevice(outputs, value);
+    const key = PAIR_KEYS[bus];
+    const pair = draft[key] ?? 0;
+    if (!isTauri || !showPairPicker(device, pair)) return null;
+    // A saved pair the device does not have stays listed, so it can be seen and changed.
+    const options = withValue(pairOptions(device.channels), pair, pairLabel(pair));
+    return <ChannelSelect label={`${label} output pair`} value={pair} options={options} onChange={set(key)} />;
+  };
+  const inputDevice = rowDevice(inputs, draft.inputId ?? 'default');
+  const inputPicker = isTauri && inputDevice && (inputDevice.channels > 2 || (draft.inputFirst ?? 0) > 0 || draft.inputCount) && (
+    <>
+      <span className="fp-kl" aria-hidden="true">ch</span>
+      <ChannelSelect narrow label="First input channel" value={draft.inputFirst ?? 0}
+        options={withValue(firstChannelOptions(inputDevice.channels), draft.inputFirst ?? 0, String((draft.inputFirst ?? 0) + 1))} onChange={(v) => setDraft((d) => ({ ...d, inputFirst: v, inputCount: null }))} />
+      <ChannelSelect narrow label="Input channel count" value={draft.inputCount ?? null}
+        options={countOptions(inputDevice.channels, draft.inputFirst ?? 0)} onChange={set('inputCount')} />
+    </>
+  );
+  const clock = isLive ? clockLamp(links, deviceLinks?.slipping) : null;
   const save = () => {
     onSelectedDevicesChange(draftChanges(selectedDevices, draft));
     setSavedWhileLive(isLive);
@@ -149,7 +227,7 @@ function SetupPanel({
     }
   };
 
-  const cables = availableDevices.outputs.filter((device) =>
+  const cables = outputs.filter((device) =>
     VIRTUAL_KEYWORDS.some((keyword) => (device.label || '').toLowerCase().includes(keyword)));
   const lowRate = audioStats.sampleRate > 0 && audioStats.sampleRate < 44100;
 
@@ -183,37 +261,46 @@ function SetupPanel({
       </div>
 
       <div className="fp-setup-bd">
-        <DeviceRow id="dev-input" label="Input" tip="The mic or mixer the engine listens to."
-          status={status('inputId')} value={draft.inputId ?? 'default'} onChange={set('inputId')}
+        <DeviceRow id="dev-input" label="Input"
+          tip="The mic, mixer or USB interface the engine listens to. With more than two channels, pick the first channel and how many become strips."
+          status={status('inputId', 'input', inputs)} error={errorOf('input')}
+          value={draft.inputId ?? 'default'} onChange={setDevice('inputId')} picker={inputPicker}
           getDb={() => inputPeakDb(feed.current)}>
           <option value="default">System default</option>
-          {deviceOptions(availableDevices.inputs, 'Mic')}
+          {deviceOptions(inputs, draft.inputId)}
         </DeviceRow>
         <ComputerAudioToggle />
 
         <DeviceRow id="dev-monitor" label="Monitor" tip="What you hear: headphones or speakers for the sound engineer."
-          status={status('outputId')} value={draft.outputId ?? 'default'} onChange={set('outputId')}
+          status={status('outputId', 'monitor', outputs)} error={errorOf('monitor')}
+          value={draft.outputId ?? 'default'} onChange={setDevice('outputId')}
+          picker={pairPicker('monitor', draft.outputId ?? 'default', 'Monitor')}
           getDb={() => busPeakDb(feed.current, 'monitor')}>
           <option value="default">System default</option>
-          {deviceOptions(availableDevices.outputs, 'Speaker')}
+          {deviceOptions(outputs, draft.outputId)}
         </DeviceRow>
 
         <DeviceRow id="dev-broadcast" label="Broadcast"
           tip="What the stream hears. For OBS or another app on this computer, NDI in the output router needs no extra device."
-          status={status('broadcastBus')} value={draft.broadcastBus ?? 'Not set'} onChange={set('broadcastBus')}
+          status={status('broadcastBus', 'stream', outputs)} error={errorOf('stream')}
+          value={draft.broadcastBus ?? 'Not set'} onChange={setDevice('broadcastBus')}
+          picker={pairPicker('stream', draft.broadcastBus, 'Broadcast')}
           getDb={() => busPeakDb(feed.current, 'stream')}>
           <option value="Not set">Not set</option>
           <option value="Same as monitor">Same as monitor</option>
-          {deviceOptions(availableDevices.outputs, 'Bus')}
+          {deviceOptions(outputs, draft.broadcastBus)}
         </DeviceRow>
         {cables.length > 0 && <Lamp tone="g">virtual device: {cables.map((device) => device.label).join(', ')}</Lamp>}
 
         {isTauri && (
-          <DeviceRow id="dev-main" label="Main" tip="The PA or room. Use a different device from monitor and broadcast."
-            status={status('mainOutputId')} value={draft.mainOutputId || 'Not set'} onChange={set('mainOutputId')}
+          <DeviceRow id="dev-main" label="Main"
+            tip="The PA or room. It can share a multi-output interface with another output on a different pair (main 1-2, stream 3-4)."
+            status={status('mainOutputId', 'main', outputs)} error={errorOf('main')}
+            value={draft.mainOutputId || 'Not set'} onChange={setDevice('mainOutputId')}
+            picker={pairPicker('main', draft.mainOutputId, 'Main')}
             getDb={() => busPeakDb(feed.current, 'main')}>
             <option value="Not set">Not set</option>
-            {deviceOptions(availableDevices.outputs, 'Output')}
+            {deviceOptions(outputs, draft.mainOutputId)}
           </DeviceRow>
         )}
 
@@ -222,16 +309,27 @@ function SetupPanel({
           { key: 'monitor3OutputId', bus: 'monitor3', id: 'dev-mon3', label: 'Monitor 3' },
         ].map((m) => (
           <DeviceRow key={m.key} id={m.id} label={m.label}
-            tip={`A second person's own monitor mix (${m.label.toLowerCase().replace('monitor', 'mon')} on the mixer). Use a device no other output uses.`}
-            status={status(m.key)} value={draft[m.key] || 'Not set'} onChange={set(m.key)}
+            tip={`A second person's own monitor mix (${m.label.toLowerCase().replace('monitor', 'mon')} on the mixer). Use a device, or a pair on an interface, no other output uses.`}
+            status={status(m.key, m.bus, outputs)} error={errorOf(m.bus)}
+            value={draft[m.key] || 'Not set'} onChange={setDevice(m.key)}
+            picker={pairPicker(m.bus, draft[m.key], m.label)}
             getDb={() => busPeakDb(feed.current, m.bus)}>
             <option value="Not set">Not set</option>
-            {deviceOptions(availableDevices.outputs, 'Output')}
+            {deviceOptions(outputs, draft[m.key])}
           </DeviceRow>
         ))}
 
         <div className="fp-glass fp-setup-fmt">
           <Lamp tone={isLive ? 'g' : 'off'}>{isLive ? 'engine on' : 'engine off'}</Lamp>
+          {clock && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <Lamp tone={clock.tone}>{clock.word}</Lamp>
+              <InfoTip label="Clock">
+                Shared: every output runs on the input device's clock. Synced: an output on its own
+                clock is kept in step. Slips: one ran dry in the last 10 s; check its USB cable or hub.
+              </InfoTip>
+            </span>
+          )}
           <span className={`fp-num ${lowRate ? 'fp-caution' : ''}`}>
             {audioStats.sampleRate > 0 ? `${(audioStats.sampleRate / 1000).toFixed(1)} kHz` : '-- kHz'}
           </span>

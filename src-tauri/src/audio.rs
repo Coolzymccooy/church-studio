@@ -6,25 +6,20 @@
 /// The streams stay on dedicated audio callbacks; Tauri only stores a Send-safe
 /// controller that can stop the engine, report status, and request noise
 /// profile capture from recent input audio.
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{
-    BufferSize, Device, SampleFormat, StreamConfig, SupportedStreamConfig,
-    SupportedStreamConfigRange,
-};
+use cpal::traits::StreamTrait;
 use parking_lot::Mutex;
-use ringbuf::traits::{Consumer, Split};
-use std::cmp::{max, min};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use ringbuf::traits::Split;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Runtime};
 
 use crate::computer_audio::{self, ComputerAudioCapture, ComputerAudioHandle, OwnOutputs};
-use crate::dsp::mixer::{BUS_MAIN, BUS_MONITOR, BUS_MONITOR2, BUS_MONITOR3, BUS_STREAM};
+use crate::dsp::mixer::{BUS_MAIN, BUS_MONITOR, BUS_MONITOR2, BUS_MONITOR3, BUS_STREAM, NUM_BUSES};
 use crate::dsp::noise::compute_noise_profile;
-use crate::dsp::{AudioDeviceInfo, DspChain, DspParams, MetersPayload};
+use crate::dsp::{DspChain, DspParams, MetersPayload};
 use crate::history::HistoryRing;
 use crate::mixer_control::{BusOutputs, MixerLink};
 use crate::mixer_layout::StripLayout;
@@ -37,12 +32,37 @@ use crate::netaudio::{NetAudioConfig, NetAudioInfo, NetAudioThreads};
 use crate::recorder::engine::EngineRecorder;
 use crate::recorder::RecordPort;
 
+mod config;
+mod device_names;
+pub mod device_watch;
+mod health;
 mod input_proc;
-mod output_claims;
+mod links;
+mod meters_thread;
+mod open;
+mod output_feed;
+mod output_plan;
+mod streams;
 #[cfg(test)]
 mod net_wiring_tests;
-use input_proc::{InputProcessor, OutputRoute};
-use output_claims::{check_name_free, check_selection_free, OutputClaims};
+#[cfg(test)]
+mod device_names_tests;
+#[cfg(test)]
+mod output_plan_tests;
+#[cfg(test)]
+mod output_feed_tests;
+#[cfg(test)]
+mod health_tests;
+#[cfg(test)]
+mod usb_tests;
+#[cfg(test)]
+mod usb_probe;
+pub use device_names::list_devices;
+use health::LinkState;
+use input_proc::{DeviceRoute, HardwareInput, InputProcessor, OutputRoute};
+use links::{EngineLinks, InputLink, OutputLink};
+use output_feed::{ClockMode, OutputFeed};
+use streams::{SharedFeed, SharedProcessor};
 
 /// Largest number of frames the input callback processes in one pass. Longer
 /// device buffers are split into chunks of this size so the preallocated
@@ -65,7 +85,19 @@ pub struct DeviceSelection {
     /// already uses is refused with an error, not skipped.
     pub monitor2_output_id: Option<String>,
     pub monitor3_output_id: Option<String>,
+    /// Output pair per bus (`BUS_*` order): 0 = 1-2, 1 = 3-4, …
+    pub output_pairs: [usize; NUM_BUSES],
+    /// Input channels that become strips: (first, count), 0-based; `None`
+    /// = every channel.
+    pub input_range: Option<(usize, Option<usize>)>,
 }
+
+/// How long the control side waits for the engine thread to reopen a
+/// stream.
+const REOPEN_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Every engine gets a new id, so the device watcher notices a restart.
+static ENGINE_IDS: AtomicU64 = AtomicU64::new(1);
 
 /// Minimum history needed to compute a noise profile (one FFT frame).
 const MIN_PROFILE_SAMPLES: usize = 1024;
@@ -74,8 +106,15 @@ const MIN_PROFILE_SAMPLES: usize = 1024;
 const CAPTURE_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub struct AudioEngine {
-    _in_stream: cpal::Stream,
-    _out_streams: Vec<cpal::Stream>,
+    /// `None` while the device is lost (or failed to reopen).
+    in_stream: Option<cpal::Stream>,
+    /// One per planned output device; `None` while it is waiting or lost.
+    out_streams: Vec<Option<cpal::Stream>>,
+    /// What the streams play, kept so a stream can be rebuilt after a
+    /// re-plug (`streams`).
+    processor: SharedProcessor,
+    feeds: Vec<SharedFeed>,
+    links: Arc<EngineLinks>,
     /// NDI senders. Declared after the streams so they stop after the input
     /// callback (the ring producers' owner) is gone.
     ndi_senders: Vec<NdiBusSender>,
@@ -110,6 +149,8 @@ pub struct AudioEngine {
     pub neural_available: bool,
     /// Input channels of the open input device (one mixer strip each).
     pub input_channels: u32,
+    /// First device channel read by strip 0 (0-based).
+    pub input_first_channel: u32,
 }
 
 pub type EngineState = std::sync::Mutex<Option<RunningEngine>>;
@@ -152,10 +193,23 @@ pub struct RunningEngine {
     pub computer_audio_applied: bool,
     /// Multitrack recording; stopped (and finalized) before the engine.
     pub recorder: EngineRecorder,
+    /// First device channel read by strip 0 (0-based).
+    pub input_first_channel: u32,
+    /// Every stream's device and state.
+    pub links: Arc<EngineLinks>,
+    /// Unique per start, for the device watcher.
+    pub id: u64,
 }
 
 enum EngineCommand {
     Stop,
+    /// Reopen stream `index` (0 = input, i + 1 = output device i) on the
+    /// device the watcher matched.
+    Reopen {
+        index: usize,
+        target: device_names::ListedDevice,
+        reply: mpsc::Sender<Result<(), String>>,
+    },
 }
 
 #[derive(Clone)]
@@ -178,6 +232,8 @@ struct EngineInfo {
     net_audio: NetAudioInfo,
     computer_audio: Option<ComputerAudioHandle>,
     computer_audio_applied: bool,
+    input_first_channel: u32,
+    links: Arc<EngineLinks>,
 }
 
 /// State shared between the audio callback and the control (Tauri) thread.
@@ -291,12 +347,14 @@ impl AudioEngine {
             net_audio: self.net_audio.clone(),
             computer_audio: self.computer_audio.clone(),
             computer_audio_applied: self.computer_audio_applied,
+            input_first_channel: self.input_first_channel,
+            links: self.links.clone(),
         }
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn start(
-        app: AppHandle,
+    fn start<R: Runtime>(
+        app: AppHandle<R>,
         params: Arc<DspParams>,
         shared: Arc<EngineShared>,
         mixer: MixerLink,
@@ -305,146 +363,78 @@ impl AudioEngine {
         net: NetAudioConfig,
         computer_audio_on: bool,
     ) -> Result<Self, String> {
-        let host = cpal::default_host();
-
-        let input_devices: Vec<Device> = host
-            .input_devices()
-            .map_err(|e| e.to_string())?
-            .collect();
-        let output_devices: Vec<Device> = host
-            .output_devices()
-            .map_err(|e| e.to_string())?
-            .collect();
-
-        let in_dev = pick_device(
-            input_devices,
-            &devices.input_id,
-            || host.default_input_device(),
-            "input",
-        )?;
-        let monitor_out_dev = pick_device(
-            output_devices,
-            &devices.monitor_output_id,
-            || host.default_output_device(),
-            "monitor output",
-        )?;
-        let monitor_output_name = device_name(&monitor_out_dev)
-            .unwrap_or_else(|_| "Unknown output".to_string());
-
-        // Each device is opened once, for the first bus that claims it, in
-        // the order Monitor → Stream (broadcast) → Main. A broadcast device
-        // equal to the monitor is skipped (as before); a main device equal to
-        // the monitor or the broadcast device is skipped too.
-        let broadcast = pick_extra_output(
-            &host,
-            &devices.broadcast_output_id,
-            "broadcast output",
-            &[devices.monitor_output_id.as_ref()],
-            &[monitor_output_name.clone()],
-        )?;
-        let broadcast_output_name = broadcast.as_ref().map(|(_, name)| name.clone());
-        let mut taken_names = vec![monitor_output_name.clone()];
-        if let Some(name) = broadcast_output_name.as_ref() {
-            taken_names.push(name.clone());
-        }
-        let main = pick_extra_output(
-            &host,
-            &devices.main_output_id,
-            "main output",
-            &[
-                devices.monitor_output_id.as_ref(),
-                devices.broadcast_output_id.as_ref(),
-            ],
-            &taken_names,
-        )?;
-        let main_output_name = main.as_ref().map(|(_, name)| name.clone());
-
-        // Mon 2 and mon 3 never share a device with another output: a
-        // duplicate is refused (naming both outputs) rather than skipped.
-        let mut claims = OutputClaims::new();
-        claims.claim(
-            "monitor output",
-            devices.monitor_output_id.as_ref(),
-            &monitor_output_name,
-        );
-        if let Some(name) = broadcast_output_name.as_ref() {
-            claims.claim("broadcast output", devices.broadcast_output_id.as_ref(), name);
-        }
-        if let Some(name) = main_output_name.as_ref() {
-            claims.claim("main output", devices.main_output_id.as_ref(), name);
-        }
-        let monitor2 = pick_exclusive_output(
-            &host,
-            &devices.monitor2_output_id,
-            "monitor 2 output",
-            &claims,
-        )?;
-        let monitor2_output_name = monitor2.as_ref().map(|(_, name)| name.clone());
-        if let Some(name) = monitor2_output_name.as_ref() {
-            claims.claim("monitor 2 output", devices.monitor2_output_id.as_ref(), name);
-        }
-        let monitor3 = pick_exclusive_output(
-            &host,
-            &devices.monitor3_output_id,
-            "monitor 3 output",
-            &claims,
-        )?;
-        let monitor3_output_name = monitor3.as_ref().map(|(_, name)| name.clone());
-        if let Some(name) = monitor3_output_name.as_ref() {
-            claims.claim("monitor 3 output", devices.monitor3_output_id.as_ref(), name);
-        }
-
-        let mut output_devices = vec![monitor_out_dev];
-        let mut output_buses = vec![BUS_MONITOR];
-        if let Some((device, _)) = broadcast {
-            output_devices.push(device);
-            output_buses.push(BUS_STREAM);
-        }
-        if let Some((device, _)) = main {
-            output_devices.push(device);
-            output_buses.push(BUS_MAIN);
-        }
-        if let Some((device, _)) = monitor2 {
-            output_devices.push(device);
-            output_buses.push(BUS_MONITOR2);
-        }
-        if let Some((device, _)) = monitor3 {
-            output_devices.push(device);
-            output_buses.push(BUS_MONITOR3);
-        }
-
-        let (in_cfg, out_cfgs) = negotiate_stream_configs(&in_dev, &output_devices)?;
-        let in_cfg = match in_dev.supported_input_configs() {
-            Ok(ranges) => widest_input_config(&ranges.collect::<Vec<_>>(), in_cfg),
-            Err(_) => in_cfg,
-        };
-
-        let sr = in_cfg.sample_rate();
-        let out_sr = out_cfgs[0].sample_rate();
-        let in_channels = (in_cfg.channels() as usize).max(1);
-        let input_device_name = device_name(&in_dev)
-            .unwrap_or_else(|_| "Unknown input".to_string());
+        let resolved = open::resolve(&devices)?;
+        let sr = resolved.in_cfg.sample_rate();
+        let device_channels = (resolved.in_cfg.channels() as usize).max(1);
+        let (first, count) =
+            config::resolve_input_range(devices.input_range, device_channels, &resolved.input_name)?;
+        let in_channels = count;
+        let input_device_name = resolved.input_name.clone();
 
         let buf_frames = 256u32;
-        let latency_ms = (buf_frames as f32 * 2.0 / out_sr as f32) * 1000.0;
+        let latency_ms = (buf_frames as f32 * 2.0 / sr as f32) * 1000.0;
 
-        let max_out_channels = out_cfgs
-            .iter()
-            .map(|cfg| cfg.channels() as usize)
-            .max()
-            .unwrap_or(2);
-        let ring_cap = (sr as usize / 10).max(buf_frames as usize * max_out_channels * 4);
-        let mut routes = Vec::with_capacity(output_devices.len());
-        let mut ring_consumers = Vec::with_capacity(output_devices.len());
-        for (cfg, &bus) in out_cfgs.iter().zip(output_buses.iter()) {
-            let (producer, consumer) = ringbuf::HeapRb::<f32>::new(ring_cap).split();
-            routes.push(OutputRoute {
+        // One ring per planned output device, (L, R) per bus on it. Devices
+        // missing now get their ring too, so they can join when plugged in.
+        let ring_frames = (sr as usize / 5).max(buf_frames as usize * 8);
+        let clock_for = |name: &str| {
+            if name == resolved.input_name {
+                ClockMode::Shared
+            } else {
+                ClockMode::Corrected
+            }
+        };
+        let mut routes = Vec::with_capacity(resolved.plan.groups.len());
+        let mut feeds: Vec<SharedFeed> = Vec::with_capacity(resolved.plan.groups.len());
+        let mut output_links = Vec::with_capacity(resolved.plan.groups.len());
+        for (group, opened) in resolved.plan.groups.iter().zip(resolved.outputs.iter()) {
+            let (producer, consumer) =
+                ringbuf::HeapRb::<f32>::new(ring_frames * group.width()).split();
+            let state = if opened.is_some() { LinkState::Ok } else { LinkState::Waiting };
+            let link = OutputLink::new(group.name.clone(), group.members.clone(), clock_for(&group.name), state);
+            routes.push(DeviceRoute {
                 producer,
-                channels: (cfg.channels() as usize).max(1),
-                bus,
+                buses: group.members.iter().map(|m| m.bus).collect(),
+                health: link.health.clone(),
             });
-            ring_consumers.push(consumer);
+            let clock = link.clock;
+            let mut feed = OutputFeed::new(
+                consumer,
+                group.pairs(),
+                clock,
+                sr,
+                buf_frames as usize,
+                link.stats.clone(),
+            );
+            if let Some((device, cfg)) = opened {
+                let channels = cfg.channels() as usize;
+                link.opened(channels, feed.set_device_channels(channels));
+                link.health.bind(device_names::device_uid(device));
+            }
+            feeds.push(Arc::new(Mutex::new(feed)));
+            output_links.push(link);
         }
+        let bus_name = |bus: usize| resolved.plan.device_of(bus).map(str::to_string);
+        let monitor_output_name = bus_name(BUS_MONITOR).unwrap_or_default();
+        let broadcast_output_name = bus_name(BUS_STREAM);
+        let main_output_name = bus_name(BUS_MAIN);
+        let monitor2_output_name = bus_name(BUS_MONITOR2);
+        let monitor3_output_name = bus_name(BUS_MONITOR3);
+        let own_names: Vec<String> = resolved.plan.groups.iter().map(|g| g.name.clone()).collect();
+        let links = Arc::new(EngineLinks {
+            input: InputLink {
+                name: resolved.input_name.clone(),
+                health: {
+                    let health = Arc::new(health::StreamHealth::new(LinkState::Ok));
+                    health.bind(device_names::device_uid(&resolved.in_dev));
+                    health
+                },
+                first,
+                count,
+                channels: AtomicUsize::new(device_channels),
+            },
+            outputs: output_links,
+        });
 
         // NDI: one ring + sender thread per enabled bus (never called from
         // the callback). A missing runtime only skips NDI.
@@ -528,17 +518,18 @@ impl AudioEngine {
             .iter()
             .map(|input| (input.strip, input.source.clone(), input.label.clone()))
             .collect();
-        let mut feeds = crate::mixer_control::engine_strip_feeds(
+        let mut strip_feeds = crate::mixer_control::engine_strip_feeds(
             layout.hardware,
             layout.computer_strips().map(|(left, _)| left),
             &ndi_strips,
         );
-        feeds.extend(crate::mixer_control::net_strip_feeds(
+        crate::mixer_control::label_hardware_strips(&mut strip_feeds, first);
+        strip_feeds.extend(crate::mixer_control::net_strip_feeds(
             layout.first_net_strip(),
             layout.net,
         ));
-        feeds.sort_by_key(|feed| feed.index);
-        let reset = mixer.assign_strip_feeds(&feeds);
+        strip_feeds.sort_by_key(|feed| feed.index);
+        let reset = mixer.assign_strip_feeds(&strip_feeds);
         if !reset.is_empty() {
             log::info!("mixer strips {reset:?} have a new source; reset to defaults");
         }
@@ -551,19 +542,17 @@ impl AudioEngine {
             .store(dsp.total_latency_samples() as u64, Ordering::Relaxed);
         let neural_available = dsp.neural_available();
 
-        let in_stream_cfg = StreamConfig {
-            channels: in_cfg.channels(),
-            sample_rate: in_cfg.sample_rate(),
-            buffer_size: BufferSize::Fixed(buf_frames),
-        };
-
         let meter_slots = Arc::new(MixerMeterSlots::new(layout.total()));
         // Record ring: every strip + Stream + Main, preallocated here.
         let (record_tap, record_port) =
             crate::recorder::record_ring(layout.total(), sr, MAX_CALLBACK_FRAMES);
-        let mut processor = InputProcessor::new(
+        let processor = InputProcessor::new(
             sr,
-            in_channels,
+            HardwareInput {
+                stride: device_channels,
+                first,
+                count,
+            },
             dsp,
             params,
             shared.clone(),
@@ -581,82 +570,45 @@ impl AudioEngine {
             meters_tx,
         );
 
-        let in_stream = match in_cfg.sample_format() {
-            SampleFormat::F32 => in_dev
-                .build_input_stream(
-                    in_stream_cfg,
-                    move |data: &[f32], _| processor.process(data, |sample| sample),
-                    |e| log::error!("Input stream error: {e}"),
-                    None,
-                )
-                .map_err(|e| e.to_string())?,
-            SampleFormat::I16 => in_dev
-                .build_input_stream(
-                    in_stream_cfg,
-                    move |data: &[i16], _| processor.process(data, i16_to_f32),
-                    |e| log::error!("Input stream error: {e}"),
-                    None,
-                )
-                .map_err(|e| e.to_string())?,
-            SampleFormat::U16 => in_dev
-                .build_input_stream(
-                    in_stream_cfg,
-                    move |data: &[u16], _| processor.process(data, u16_to_f32),
-                    |e| log::error!("Input stream error: {e}"),
-                    None,
-                )
-                .map_err(|e| e.to_string())?,
-            fmt => return Err(format!("Unsupported input sample format: {fmt:?}")),
-        };
+        let processor: SharedProcessor = Arc::new(Mutex::new(processor));
+        let in_stream = streams::build_input(
+            &resolved.in_dev,
+            &resolved.in_cfg,
+            buf_frames,
+            processor.clone(),
+            links.input.health.clone(),
+        )?;
 
-        let mut out_streams = Vec::with_capacity(output_devices.len());
-        for ((out_dev, out_cfg), mut ring_cons) in output_devices
-            .into_iter()
-            .zip(out_cfgs.into_iter())
-            .zip(ring_consumers.into_iter())
+        // Outputs play before the input, as before. One that cannot open is
+        // marked failed (its lamp says why); the others still play.
+        let mut out_streams: Vec<Option<cpal::Stream>> = Vec::with_capacity(feeds.len());
+        for ((opened, feed), link) in resolved
+            .outputs
+            .iter()
+            .zip(feeds.iter())
+            .zip(links.outputs.iter())
         {
-            let out_stream_cfg = StreamConfig {
-                channels: out_cfg.channels(),
-                sample_rate: out_cfg.sample_rate(),
-                buffer_size: BufferSize::Fixed(buf_frames),
+            let Some((device, cfg)) = opened else {
+                out_streams.push(None);
+                continue;
             };
-
-            let out_stream = match out_cfg.sample_format() {
-                SampleFormat::F32 => out_dev
-                    .build_output_stream(
-                        out_stream_cfg,
-                        move |data: &mut [f32], _| {
-                            write_output_data(data, &mut ring_cons, |sample| sample);
-                        },
-                        |e| log::error!("Output stream error: {e}"),
-                        None,
-                    )
-                    .map_err(|e| e.to_string())?,
-                SampleFormat::I16 => out_dev
-                    .build_output_stream(
-                        out_stream_cfg,
-                        move |data: &mut [i16], _| {
-                            write_output_data(data, &mut ring_cons, f32_to_i16);
-                        },
-                        |e| log::error!("Output stream error: {e}"),
-                        None,
-                    )
-                    .map_err(|e| e.to_string())?,
-                SampleFormat::U16 => out_dev
-                    .build_output_stream(
-                        out_stream_cfg,
-                        move |data: &mut [u16], _| {
-                            write_output_data(data, &mut ring_cons, f32_to_u16);
-                        },
-                        |e| log::error!("Output stream error: {e}"),
-                        None,
-                    )
-                    .map_err(|e| e.to_string())?,
-                fmt => return Err(format!("Unsupported output sample format: {fmt:?}")),
-            };
-
-            out_stream.play().map_err(|e| e.to_string())?;
-            out_streams.push(out_stream);
+            let built = streams::build_output(
+                device,
+                cfg,
+                buf_frames,
+                feed.clone(),
+                link.health.clone(),
+                &link.name,
+            )
+            .and_then(|stream| stream.play().map(|_| stream).map_err(|e| e.to_string()));
+            match built {
+                Ok(stream) => out_streams.push(Some(stream)),
+                Err(err) => {
+                    log::error!("output '{}' did not open: {err}", link.name);
+                    link.health.fail(LinkState::Failed, err);
+                    out_streams.push(None);
+                }
+            }
         }
 
         // Start computer audio now that this engine plays its outputs (see
@@ -664,7 +616,6 @@ impl AudioEngine {
         // operator turned it on and must hear why it is silent.
         let (computer_capture, computer_handle) = match pending_computer {
             Some(pending) => {
-                let own_names = claims.names();
                 let (capture, handle) = pending.start(&OwnOutputs {
                     device_names: &own_names,
                 })?;
@@ -675,11 +626,14 @@ impl AudioEngine {
 
         in_stream.play().map_err(|e| e.to_string())?;
 
-        spawn_meters_thread(app, shared, meters_rx, meter_slots);
+        meters_thread::spawn_meters_thread(app, shared, meters_rx, meter_slots);
 
         Ok(Self {
-            _in_stream: in_stream,
-            _out_streams: out_streams,
+            in_stream: Some(in_stream),
+            out_streams,
+            processor,
+            feeds,
+            links,
             ndi_senders,
             ndi_applied: ndi.outputs,
             _ndi_receivers: NdiReceivers(ndi_in.receivers),
@@ -702,145 +656,98 @@ impl AudioEngine {
             monitor3_output_name,
             neural_available,
             input_channels: in_channels as u32,
+            input_first_channel: first as u32,
         })
     }
-}
 
-/// Meters thread: logs dropped output samples, emits `audio-meters`
-/// (~20 Hz, spectrum averaged over the pending payloads) and `mixer-meters`
-/// (~20 Hz, read from the lock-free slots). Exits when the input callback
-/// (the only sender) is dropped with the engine.
-fn spawn_meters_thread(
-    app: AppHandle,
-    meters_shared: Arc<EngineShared>,
-    meters_rx: mpsc::Receiver<MetersPayload>,
-    meter_slots: Arc<MixerMeterSlots>,
-) {
-    std::thread::spawn(move || {
-        let mut pending: Vec<MetersPayload> = Vec::with_capacity(8);
-        let mut last_emit = Instant::now();
-        let mut last_mixer_emit = Instant::now();
-        let mut last_logged_drops = 0u64;
-
-        loop {
-            let drops = meters_shared.dropped_output_samples.load(Ordering::Relaxed);
-            if drops != last_logged_drops {
-                log::warn!(
-                    "Dropping output samples because the playback ring buffer is full (total dropped: {drops})"
-                );
-                last_logged_drops = drops;
-            }
-
-            match meters_rx.recv_timeout(Duration::from_millis(20)) {
-                Ok(meters) => pending.push(meters),
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
-                Err(mpsc::RecvTimeoutError::Disconnected) => break,
-            }
-
-            if last_mixer_emit.elapsed() >= Duration::from_millis(MIXER_METERS_INTERVAL_MS) {
-                let _ = app.emit("mixer-meters", &meter_slots.take_payload());
-                last_mixer_emit = Instant::now();
-            }
-
-            if last_emit.elapsed().as_millis() >= 50 && !pending.is_empty() {
-                let last = pending.last().cloned().unwrap_or(MetersPayload {
-                    input_db: -96.0,
-                    output_db: -96.0,
-                    gate_gain: 0.0,
-                    lufs_m: -70.0,
-                    lufs_st: -70.0,
-                    lufs_i: -70.0,
-                    deess_gr_db: 0.0,
-                    auto_gain_db: 0.0,
-                    neural_vad: 0.0,
-                    spectrum: vec![],
-                });
-
-                let spectrum = average_spectrum(&pending).unwrap_or_else(|| last.spectrum.clone());
-                let payload = MetersPayload { spectrum, ..last };
-                let _ = app.emit("audio-meters", &payload);
-                pending.clear();
-                last_emit = Instant::now();
+    /// Reopen stream `index` (0 = input, i + 1 = output device i) on the
+    /// device with its name, at the engine rate. Runs on the engine thread,
+    /// which owns the streams. Sets the stream's link state either way.
+    fn reopen(&mut self, index: usize, target: &device_names::ListedDevice) -> Result<(), String> {
+        let result = if index == 0 {
+            self.reopen_input(target)
+        } else {
+            self.reopen_output(index - 1, target)
+        };
+        let health = if index == 0 {
+            Some(&self.links.input.health)
+        } else {
+            self.links.outputs.get(index - 1).map(|link| &link.health)
+        };
+        if let Some(health) = health {
+            match &result {
+                Ok(()) => health.set(LinkState::Ok),
+                Err(err) => health.fail(LinkState::Failed, err.clone()),
             }
         }
-    });
-}
-
-/// Mean of the non-empty spectra in `pending` (None if there are none).
-fn average_spectrum(pending: &[MetersPayload]) -> Option<Vec<f32>> {
-    let non_empty: Vec<&Vec<f32>> = pending
-        .iter()
-        .filter(|p| !p.spectrum.is_empty())
-        .map(|p| &p.spectrum)
-        .collect();
-    let first = non_empty.first()?;
-    let n = first.len();
-    Some(
-        (0..n)
-            .map(|k| {
-                non_empty.iter().map(|s| s.get(k).copied().unwrap_or(0.0)).sum::<f32>()
-                    / non_empty.len() as f32
-            })
-            .collect(),
-    )
-}
-
-/// Resolve an optional extra output device. Returns `None` when nothing is
-/// selected or when the selection (by id or by resolved name) is a device
-/// already opened for another bus.
-fn pick_extra_output(
-    host: &cpal::Host,
-    selection: &Option<String>,
-    kind: &str,
-    taken_ids: &[Option<&String>],
-    taken_names: &[String],
-) -> Result<Option<(Device, String)>, String> {
-    let Some(selected) = selection.as_ref() else {
-        return Ok(None);
-    };
-    if taken_ids.contains(&Some(selected)) {
-        return Ok(None);
+        result
     }
-    let devices: Vec<Device> = host
-        .output_devices()
-        .map_err(|e| e.to_string())?
-        .collect();
-    let device = pick_device(devices, selection, || host.default_output_device(), kind)?;
-    let Ok(name) = device_name(&device) else {
-        return Ok(Some((device, format!("Unknown {kind}"))));
-    };
-    if taken_names.iter().any(|taken| *taken == name) {
-        return Ok(None);
-    }
-    Ok(Some((device, name)))
-}
 
-/// Resolve the optional mon 2 / mon 3 output. Unlike `pick_extra_output`, a
-/// device another output already plays on (by selection or by resolved
-/// name) is an error naming both outputs, not a silent skip.
-fn pick_exclusive_output(
-    host: &cpal::Host,
-    selection: &Option<String>,
-    label: &'static str,
-    claims: &OutputClaims,
-) -> Result<Option<(Device, String)>, String> {
-    let Some(selected) = selection.as_ref() else {
-        return Ok(None);
-    };
-    check_selection_free(claims, label, Some(selected))?;
-    let devices: Vec<Device> = host
-        .output_devices()
-        .map_err(|e| e.to_string())?
-        .collect();
-    let device = pick_device(devices, selection, || host.default_output_device(), label)?;
-    let name = device_name(&device).unwrap_or_else(|_| format!("Unknown {label}"));
-    check_name_free(claims, label, &name)?;
-    Ok(Some((device, name)))
+    fn reopen_input(&mut self, target: &device_names::ListedDevice) -> Result<(), String> {
+        self.in_stream = None;
+        let host = cpal::default_host();
+        let name = self.links.input.name.clone();
+        let device = device_names::find_target(&host, true, target)?
+            .ok_or_else(|| format!("'{name}' is not connected"))?;
+        self.links.input.health.bind(device_names::device_uid(&device));
+        let cfg = config::input_config_at(&device, self.sample_rate)?;
+        let channels = cfg.channels() as usize;
+        self.processor
+            .lock()
+            .set_stride(channels)
+            .map_err(|needed| format!("has {channels} channels; the input needs {needed}"))?;
+        self.links.input.channels.store(channels, Ordering::Relaxed);
+        let stream = streams::build_input(
+            &device,
+            &cfg,
+            self.buffer_frames,
+            self.processor.clone(),
+            self.links.input.health.clone(),
+        )?;
+        stream.play().map_err(|e| e.to_string())?;
+        self.in_stream = Some(stream);
+        log::info!("input '{name}' reconnected");
+        Ok(())
+    }
+
+    fn reopen_output(&mut self, index: usize, target: &device_names::ListedDevice) -> Result<(), String> {
+        let (Some(link), Some(feed)) = (self.links.outputs.get(index), self.feeds.get(index)) else {
+            return Err(format!("no output {index}"));
+        };
+        if let Some(slot) = self.out_streams.get_mut(index) {
+            *slot = None;
+        }
+        let host = cpal::default_host();
+        let device = device_names::find_target(&host, false, target)?
+            .ok_or_else(|| format!("'{}' is not connected", link.name))?;
+        link.health.bind(device_names::device_uid(&device));
+        let cfg = config::output_config_at(&device, self.sample_rate)?;
+        let channels = cfg.channels() as usize;
+        {
+            let mut feed = feed.lock();
+            link.opened(channels, feed.set_device_channels(channels));
+            feed.restart();
+        }
+        let stream = streams::build_output(
+            &device,
+            &cfg,
+            self.buffer_frames,
+            feed.clone(),
+            link.health.clone(),
+            &link.name,
+        )?;
+        stream.play().map_err(|e| e.to_string())?;
+        if let Some(slot) = self.out_streams.get_mut(index) {
+            *slot = Some(stream);
+        }
+        log::info!("output '{}' reconnected", link.name);
+        Ok(())
+    }
 }
 
 impl RunningEngine {
-    pub fn spawn(
-        app: AppHandle,
+    pub fn spawn<R: Runtime>(
+        app: AppHandle<R>,
         params: Arc<DspParams>,
         mixer: MixerLink,
         devices: DeviceSelection,
@@ -874,12 +781,16 @@ impl RunningEngine {
                     return;
                 }
 
-                let _engine = engine;
+                let mut engine = engine;
                 while let Ok(command) = stop_rx.recv() {
                     match command {
                         EngineCommand::Stop => break,
+                        EngineCommand::Reopen { index, target, reply } => {
+                            let _ = reply.send(engine.reopen(index, &target));
+                        }
                     }
                 }
+                drop(engine);
             }
             Err(err) => {
                 let _ = ready_tx.send(Err(err));
@@ -913,7 +824,23 @@ impl RunningEngine {
             computer_audio: info.computer_audio,
             computer_audio_applied: info.computer_audio_applied,
             recorder: EngineRecorder::new(record_port),
+            input_first_channel: info.input_first_channel,
+            links: info.links,
+            id: ENGINE_IDS.fetch_add(1, Ordering::Relaxed),
         })
+    }
+
+    /// A handle that asks this engine's thread to reopen a stream, usable
+    /// without holding the engine lock.
+    pub fn reopener(&self) -> Reopener {
+        Reopener {
+            tx: self.stop_tx.clone(),
+        }
+    }
+
+    /// `engine_status.devices`: every stream's device, state, pair and clock.
+    pub fn devices_json(&self) -> serde_json::Value {
+        self.links.status_json()
     }
 
     pub fn stop(mut self) {
@@ -1032,7 +959,9 @@ impl RunningEngine {
     }
 
     /// The device each bus plays on, in `BUS_*` order (`mixer_state`
-    /// `buses[].output`). A bus whose device was not opened is `None`.
+    /// `buses[].output`). A bus with no device set is `None`; one whose
+    /// device is waiting or lost still names it, so its strip and sends stay
+    /// on the desk while it is unplugged.
     pub fn bus_outputs(&self) -> BusOutputs {
         let mut outputs = BusOutputs::default();
         outputs[BUS_MAIN] = self.main_output_name.clone();
@@ -1069,6 +998,25 @@ impl RunningEngine {
     }
 }
 
+/// Asks an engine thread to reopen one stream (`RunningEngine::reopener`).
+pub struct Reopener {
+    tx: mpsc::Sender<EngineCommand>,
+}
+
+impl Reopener {
+    /// Reopen stream `index` (0 = input, i + 1 = output device i) on
+    /// `target`. The link state says how it went.
+    pub fn reopen(&self, index: usize, target: device_names::ListedDevice) -> Result<(), String> {
+        let (reply, answer) = mpsc::channel();
+        self.tx
+            .send(EngineCommand::Reopen { index, target, reply })
+            .map_err(|_| "The engine has stopped".to_string())?;
+        answer
+            .recv_timeout(REOPEN_TIMEOUT)
+            .map_err(|_| "The engine did not answer in time".to_string())?
+    }
+}
+
 impl Drop for RunningEngine {
     fn drop(&mut self) {
         let _ = self.recorder.stop();
@@ -1079,254 +1027,28 @@ impl Drop for RunningEngine {
     }
 }
 
-pub fn list_devices(input: bool) -> Vec<AudioDeviceInfo> {
-    let host = cpal::default_host();
-    let default_name = if input {
-        host.default_input_device()
-    } else {
-        host.default_output_device()
-    }
-    .and_then(|d| device_name(&d).ok())
-    .unwrap_or_default();
-
-    let devices = if input {
-        host.input_devices()
-    } else {
-        host.output_devices()
-    };
-
-    devices
-        .map(|iter| {
-            iter.enumerate()
-                .filter_map(|(index, device)| {
-                    device_name(&device).ok().map(|name| AudioDeviceInfo {
-                        id: format_device_id(index, &name),
-                        is_default: name == default_name,
-                        name,
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn pick_device(
-    devices: Vec<Device>,
-    selection: &Option<String>,
-    default: impl FnOnce() -> Option<Device>,
-    kind: &str,
-) -> Result<Device, String> {
-    if let Some(selection) = selection {
-        devices
-            .into_iter()
-            .enumerate()
-            .find_map(|(index, device)| {
-                let name = device_name(&device).ok()?;
-                let id = format_device_id(index, &name);
-                if selection == &id || selection == &name {
-                    Some(device)
-                } else {
-                    None
-                }
-            })
-            .ok_or_else(|| format!("{kind} device '{selection}' not found"))
-    } else {
-        default().ok_or_else(|| format!("No default {kind} device"))
-    }
-}
-
-fn negotiate_stream_configs(
-    in_dev: &Device,
-    out_devs: &[Device],
-) -> Result<(SupportedStreamConfig, Vec<SupportedStreamConfig>), String> {
-    let in_default = in_dev.default_input_config().map_err(|e| e.to_string())?;
-    let out_defaults: Vec<SupportedStreamConfig> = out_devs
-        .iter()
-        .map(|device| device.default_output_config().map_err(|e| e.to_string()))
-        .collect::<Result<_, _>>()?;
-
-    if out_defaults
-        .iter()
-        .all(|cfg| cfg.sample_rate() == in_default.sample_rate())
-    {
-        return Ok((in_default, out_defaults));
-    }
-
-    let in_ranges: Vec<SupportedStreamConfigRange> = in_dev
-        .supported_input_configs()
-        .map_err(|e| e.to_string())?
-        .collect();
-    let out_ranges_sets: Vec<Vec<SupportedStreamConfigRange>> = out_devs
-        .iter()
-        .map(|device| {
-            device
-                .supported_output_configs()
-                .map_err(|e| e.to_string())
-                .map(|iter| iter.collect::<Vec<_>>())
-        })
-        .collect::<Result<_, _>>()?;
-
-    if in_ranges.is_empty() || out_ranges_sets.iter().any(|ranges| ranges.is_empty()) {
-        return Err("Selected input and output devices do not expose any supported audio stream configuration".to_string());
-    }
-
-    let mut preferred_rates = vec![in_default.sample_rate(), 48_000, 44_100];
-    preferred_rates.extend(out_defaults.iter().map(|cfg| cfg.sample_rate()));
-    preferred_rates.sort_unstable();
-    preferred_rates.dedup();
-
-    for rate in preferred_rates {
-        let Some(input_cfg) = find_config_for_rate(&in_ranges, rate) else {
-            continue;
-        };
-        let mut output_cfgs = Vec::with_capacity(out_ranges_sets.len());
-        let mut all_match = true;
-        for ranges in &out_ranges_sets {
-            let Some(output_cfg) = find_config_for_rate(ranges, rate) else {
-                all_match = false;
-                break;
-            };
-            output_cfgs.push(output_cfg);
-        }
-
-        if all_match {
-            return Ok((input_cfg, output_cfgs));
-        }
-    }
-
-    for input_cfg in &in_ranges {
-        let min_rate = out_ranges_sets.iter().fold(input_cfg.min_sample_rate(), |current, ranges| {
-            max(
-                current,
-                ranges
-                    .iter()
-                    .map(|cfg| cfg.min_sample_rate())
-                    .min()
-                    .unwrap_or(current),
-            )
-        });
-        let max_rate = out_ranges_sets.iter().fold(input_cfg.max_sample_rate(), |current, ranges| {
-            min(
-                current,
-                ranges
-                    .iter()
-                    .map(|cfg| cfg.max_sample_rate())
-                    .max()
-                    .unwrap_or(current),
-            )
-        });
-
-        if min_rate <= max_rate {
-            let target_rate = preferred_rate_in_range(min_rate, max_rate);
-            let mut output_cfgs = Vec::with_capacity(out_ranges_sets.len());
-            let mut all_match = true;
-            for ranges in &out_ranges_sets {
-                let Some(output_cfg) = find_config_for_rate(ranges, target_rate) else {
-                    all_match = false;
-                    break;
-                };
-                output_cfgs.push(output_cfg);
-            }
-
-            if all_match {
-                return Ok((input_cfg.with_sample_rate(target_rate), output_cfgs));
-            }
-        }
-    }
-
-    Err(
-        "No common sample rate is available between the selected input and output (monitor, broadcast, main, monitor 2, monitor 3) devices"
-            .to_string(),
-    )
-}
-
-/// `chosen`, widened to the most input channels the device offers at the same
-/// rate and sample format. Some devices (a macOS aggregate device of two USB
-/// mics) report a 1-channel default config while supporting every channel,
-/// and each channel must reach its own strip.
-fn widest_input_config(
-    ranges: &[SupportedStreamConfigRange],
-    chosen: SupportedStreamConfig,
-) -> SupportedStreamConfig {
-    let rate = chosen.sample_rate();
-    ranges
-        .iter()
-        .filter(|r| {
-            r.sample_format() == chosen.sample_format()
-                && rate >= r.min_sample_rate()
-                && rate <= r.max_sample_rate()
-                && r.channels() > chosen.channels()
-        })
-        .max_by_key(|r| r.channels())
-        .map(|r| r.with_sample_rate(rate))
-        .unwrap_or(chosen)
-}
-
-fn find_config_for_rate(
-    ranges: &[SupportedStreamConfigRange],
-    rate: u32,
-) -> Option<SupportedStreamConfig> {
-    ranges
-        .iter()
-        .find(|cfg| rate >= cfg.min_sample_rate() && rate <= cfg.max_sample_rate())
-        .map(|cfg| cfg.with_sample_rate(rate))
-}
-
-fn preferred_rate_in_range(min_rate: u32, max_rate: u32) -> u32 {
-    if (min_rate..=max_rate).contains(&48_000) {
-        48_000
-    } else if (min_rate..=max_rate).contains(&44_100) {
-        44_100
-    } else {
-        max_rate
-    }
-}
-
-/// A device's display name (cpal 0.18 moved it into `description()`).
-fn device_name(device: &Device) -> Result<String, String> {
-    device
-        .description()
-        .map(|description| description.name().to_string())
-        .map_err(|e| e.to_string())
-}
-
-fn format_device_id(index: usize, name: &str) -> String {
-    let _ = index;
-    name.to_string()
-}
-
 #[inline]
-fn db_to_lin(db: f32) -> f32 {
+pub(super) fn db_to_lin(db: f32) -> f32 {
     10f32.powf(db / 20.0)
 }
 
-fn write_output_data<T>(
-    data: &mut [T],
-    consumer: &mut impl Consumer<Item = f32>,
-    mut convert: impl FnMut(f32) -> T,
-) {
-    for sample in data.iter_mut() {
-        *sample = convert(consumer.try_pop().unwrap_or(0.0));
-    }
-}
-
 #[inline]
-fn i16_to_f32(sample: i16) -> f32 {
+pub(super) fn i16_to_f32(sample: i16) -> f32 {
     sample as f32 / 32_768.0
 }
 
 #[inline]
-fn u16_to_f32(sample: u16) -> f32 {
+pub(super) fn u16_to_f32(sample: u16) -> f32 {
     sample as f32 / 65_535.0 * 2.0 - 1.0
 }
 
 #[inline]
-fn f32_to_i16(sample: f32) -> i16 {
+pub(super) fn f32_to_i16(sample: f32) -> i16 {
     (sample.clamp(-1.0, 1.0) * i16::MAX as f32).round() as i16
 }
 
 #[inline]
-fn f32_to_u16(sample: f32) -> u16 {
+pub(super) fn f32_to_u16(sample: f32) -> u16 {
     (((sample.clamp(-1.0, 1.0) + 1.0) * 0.5) * u16::MAX as f32).round() as u16
 }
 
@@ -1354,7 +1076,7 @@ mod device_probe {
 
 #[cfg(test)]
 mod input_channel_tests {
-    use super::widest_input_config;
+    use super::config::widest_config as widest_input_config;
     use cpal::{SampleFormat, SupportedBufferSize, SupportedStreamConfig, SupportedStreamConfigRange};
 
     fn range(ch: u16, min: u32, max: u32, fmt: SampleFormat) -> SupportedStreamConfigRange {

@@ -20,6 +20,8 @@ import OutputRouter from './components/desk/OutputRouter.jsx';
 import LiveView from './components/desk/LiveView.jsx';
 import DesktopRecordButton from './components/recorder/DesktopRecordButton.jsx';
 import InputRack from './components/desk/InputRack.jsx';
+import { useDeviceHotplug, useDeviceLinks } from './components/desk/useDeviceLinks.js';
+import { isMissing } from './lib/usbDevices.js';
 import MixerConsole from './components/mixer/MixerConsole';
 import { createMixerController, createMockMixerController } from './lib/mixerEngine';
 import { syncStreamLeveler } from './lib/streamLeveler';
@@ -321,6 +323,8 @@ const AudioProcessor = ({ goHome }) => {
   });
   const [nativeNoiseProfileCaptured, setNativeNoiseProfileCaptured] = useState(false);
   const [nativeRouteStatus, setNativeRouteStatus] = useState(null);
+  const deviceLinks = useDeviceLinks(isLive);
+  const updateDeviceLinks = deviceLinks.update;
   // Whether computer-audio capture has muted the tapped apps at the speakers (macOS).
   const [computerMutesSpeakers, setComputerMutesSpeakers] = useState(false);
   const [roomName, setRoomName] = useState(() => {
@@ -402,9 +406,9 @@ const AudioProcessor = ({ goHome }) => {
     setOutputTarget(outputTargets[nextIndex].name);
   };
 
+  // Clears the lists only: saved device choices are kept, so a device is found again by name.
   const resetDeviceState = useCallback(() => {
     setAvailableDevices({ inputs: [], outputs: [] });
-    setSelectedDevices({ ...DEFAULT_DEVICES });
   }, []);
 
   const getDevices = useCallback(async () => {
@@ -437,6 +441,9 @@ const AudioProcessor = ({ goHome }) => {
       return { inputs: [], outputs: [] };
     }
   }, [resetDeviceState]);
+
+  // Hot-plug: the engine's device watcher reports added and removed devices.
+  useDeviceHotplug(setAvailableDevices);
 
   useEffect(() => {
     setSelectedDevices((prev) => {
@@ -1231,6 +1238,7 @@ const AudioProcessor = ({ goHome }) => {
       monitor3: info.monitor3_output_name || null,
     });
     setNativeNoiseProfileCaptured(false);
+    updateDeviceLinks(info.devices);
 
     // Fake Web Audio analyser shim so visualizeAndGate() works unchanged.
     // Spectrum data is injected from 'audio-meters' Tauri events into tauriSpectrumRef.
@@ -1305,8 +1313,10 @@ const AudioProcessor = ({ goHome }) => {
     try {
       const constraints = {
         audio: {
+          // A saved mic that is not connected falls back to the default here (the desktop engine
+          // refuses it by name instead); the saved choice itself is kept.
           deviceId:
-            selectedDevices.inputId !== 'default'
+            selectedDevices.inputId !== 'default' && !isMissing(availableDevices.inputs, selectedDevices.inputId)
               ? { exact: selectedDevices.inputId }
               : undefined,
           echoCancellation: false,
@@ -3014,6 +3024,7 @@ const AudioProcessor = ({ goHome }) => {
             state: 'running',
           }));
           setNativeNoiseProfileCaptured(Boolean(status.noise_profile_ready));
+          updateDeviceLinks(status.devices);
           setComputerMutesSpeakers(computerAudioFromEngineStatus(status).mutesSpeakers);
           setNativeRouteStatus({
             input: status.input_device_name || status.device_name || null,
@@ -3039,7 +3050,7 @@ const AudioProcessor = ({ goHome }) => {
         window.clearInterval(intervalId);
       }
     };
-  }, [isLive]);
+  }, [isLive, updateDeviceLinks]);
 
   // ── Tauri: the monitor key drives the native Monitor bus level ────────────────
   // The native engine scales the Monitor bus by monitor_gain_db; without this the key changed only
@@ -3226,6 +3237,7 @@ const AudioProcessor = ({ goHome }) => {
         gateClosed={visualizerGateStatus}
         onToggleEngine={toggleLive}
         onShowSettings={() => setShowSettings(true)}
+        deviceLinks={deviceLinks}
         monitor={{
           on: isMonitoring && recordingState !== 'review',
           disabled: recordingState === 'review',
@@ -3256,6 +3268,7 @@ const AudioProcessor = ({ goHome }) => {
         audioStats={audioStats}
         mixerController={mixerController}
         isLive={isLive}
+        deviceLinks={deviceLinks}
       />
 
       {/* ─── MAIN 3-PANEL WORKSPACE ─── */}

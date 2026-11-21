@@ -14,15 +14,17 @@ import {
 
 test('normalizeTauriDevices maps native payload to UI device objects', () => {
   const devices = normalizeTauriDevices([
-    { id: '0:USB Mic', name: 'USB Mic', is_default: true },
+    { id: '0:USB Mic', name: 'USB Mic', is_default: true, channels: 2, transport: 'usb' },
+    { id: 'Old', name: 'Old', is_default: false },
   ]);
 
   assert.deepEqual(devices, [
-    { deviceId: '0:USB Mic', label: 'USB Mic', isDefault: true },
+    { deviceId: '0:USB Mic', label: 'USB Mic', isDefault: true, channels: 2, transport: 'usb' },
+    { deviceId: 'Old', label: 'Old', isDefault: false, channels: 0, transport: 'other' },
   ]);
 });
 
-test('reconcileSelectedDevices resets missing devices to safe defaults', () => {
+test('reconcileSelectedDevices keeps a missing device so it is found again by name', () => {
   const next = reconcileSelectedDevices(
     {
       inputId: 'missing-input',
@@ -36,9 +38,9 @@ test('reconcileSelectedDevices resets missing devices to safe defaults', () => {
   );
 
   assert.deepEqual(next, {
-    inputId: 'default',
-    outputId: 'default',
-    broadcastBus: 'Not set',
+    inputId: 'missing-input',
+    outputId: 'missing-output',
+    broadcastBus: 'missing-broadcast',
     mainOutputId: 'Not set',
     monitor2OutputId: 'Not set',
     monitor3OutputId: 'Not set',
@@ -85,6 +87,8 @@ test('buildNativeEngineArgs preserves dedicated monitor and broadcast outputs', 
     mainOutputId: null,
     monitor2OutputId: null,
     monitor3OutputId: null,
+    outputPairs: { main: 0, stream: 0, monitor: 0, monitor2: 0, monitor3: 0 },
+    inputChannels: { first: 0, count: null },
   });
 });
 
@@ -100,11 +104,13 @@ test('buildNativeEngineArgs uses the camelCase names Tauri 2 matches', () => {
 
   assert.deepEqual(Object.keys(args).sort(), [
     'broadcastOutputDevice',
+    'inputChannels',
     'inputDevice',
     'mainOutputId',
     'monitor2OutputId',
     'monitor3OutputId',
     'monitorOutputDevice',
+    'outputPairs',
   ]);
   assert.deepEqual(args, {
     inputDevice: null,
@@ -113,6 +119,8 @@ test('buildNativeEngineArgs uses the camelCase names Tauri 2 matches', () => {
     mainOutputId: 'PA Out',
     monitor2OutputId: null,
     monitor3OutputId: null,
+    outputPairs: { main: 0, stream: 0, monitor: 0, monitor2: 0, monitor3: 0 },
+    inputChannels: { first: 0, count: null },
   });
   assert.equal(
     buildNativeEngineArgs({ inputId: 'default', outputId: 'default', mainOutputId: 'default' })
@@ -156,7 +164,7 @@ test('describeBroadcastRoute reports a dedicated native broadcast route', () => 
   });
 });
 
-test('reconcileSelectedDevices keeps a present Main output and drops a missing one', () => {
+test('reconcileSelectedDevices keeps a Main output, present or missing', () => {
   const outputs = [{ deviceId: 'pa-1', label: 'PA Interface' }];
   const kept = reconcileSelectedDevices(
     { inputId: 'default', outputId: 'default', broadcastBus: 'Not set', mainOutputId: 'PA Interface' },
@@ -169,11 +177,11 @@ test('reconcileSelectedDevices keeps a present Main output and drops a missing o
     { inputId: 'default', outputId: 'default', broadcastBus: 'Not set', mainOutputId: 'gone' },
     { inputs: [], outputs },
   );
-  assert.equal(dropped.mainOutputId, 'Not set');
-  assert.equal(buildNativeEngineArgs(dropped).mainOutputId, null);
+  assert.equal(dropped.mainOutputId, 'gone');
+  assert.equal(buildNativeEngineArgs(dropped).mainOutputId, 'gone');
 });
 
-test('mon 2 and mon 3 outputs reach the engine args and fall back to not set', () => {
+test('mon 2 and mon 3 outputs reach the engine args and stay set while missing', () => {
   const selected = {
     inputId: 'default', outputId: 'default', broadcastBus: 'Not set', mainOutputId: 'Not set',
     monitor2OutputId: 'dev-b', monitor3OutputId: 'gone',
@@ -184,7 +192,22 @@ test('mon 2 and mon 3 outputs reach the engine args and fall back to not set', (
   assert.equal(buildNativeEngineArgs({ ...selected, monitor2OutputId: 'Not set' }).monitor2OutputId, null);
   const next = reconcileSelectedDevices(selected, { inputs: [], outputs: [{ deviceId: 'dev-b', label: 'B' }] });
   assert.equal(next.monitor2OutputId, 'dev-b');
-  assert.equal(next.monitor3OutputId, 'Not set');
+  assert.equal(next.monitor3OutputId, 'gone');
+});
+
+test('engine args carry the output pairs and the input channel range', () => {
+  const args = buildNativeEngineArgs({
+    inputId: 'X-Air', outputId: 'default', broadcastBus: 'UMC', mainOutputId: 'UMC',
+    mainPair: 0, streamPair: 1, inputFirst: 2, inputCount: 8,
+  });
+  assert.deepEqual(args.outputPairs, { main: 0, stream: 1, monitor: 0, monitor2: 0, monitor3: 0 });
+  assert.deepEqual(args.inputChannels, { first: 2, count: 8 });
+});
+
+test('devicesEqual sees a changed pair or input range', () => {
+  const a = { inputId: 'x', outputId: 'y', broadcastBus: 'Not set', mainOutputId: 'Not set', monitor2OutputId: 'Not set', monitor3OutputId: 'Not set' };
+  assert.equal(devicesEqual(a, { ...a, mainPair: 1 }), false);
+  assert.equal(devicesEqual(a, { ...a, inputFirst: 2 }), false);
 });
 
 test('devicesEqual compares every device choice', () => {

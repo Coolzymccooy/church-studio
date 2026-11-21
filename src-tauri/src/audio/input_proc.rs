@@ -4,8 +4,9 @@
 //! exactly as before the mixer); all buffers are sized in `new`.
 //!
 //! Per chunk of at most `MAX_CALLBACK_FRAMES` frames:
-//! 1. De-interleave every input channel (up to `MAX_STRIPS`) into its own
-//!    buffer; strip i reads input channel i. No mono fold. The Remote strips
+//! 1. De-interleave the chosen input channels (up to `MAX_STRIPS`) into
+//!    their own buffers; strip i reads input channel `first + i`. No mono
+//!    fold. The Remote strips
 //!    of network audio come next, then computer audio fills two strips
 //!    (left, right), and each NDI input the strip after those, all read from
 //!    their rings with drift correction (`crate::netaudio`,
@@ -16,14 +17,17 @@
 //! 3. `Mixer::process` sums the strips into Main, Stream, Monitor (mon 1),
 //!    Monitor 2 and Monitor 3; the strip and bus meters are published to
 //!    lock-free slots.
-//! 4. Each output device gets its bus as stereo (see `routing`); the
-//!    Monitor (mon 1) bus alone is still scaled by `monitor_gain_db`.
+//! 4. Each output device gets one ring with (L, R) of every bus on it (see
+//!    `routing::push_bus_frames`); the output callback puts each bus on its
+//!    pair. The Monitor (mon 1) bus alone is still scaled by
+//!    `monitor_gain_db`.
 //! 5. Each NDI output gets its bus as interleaved stereo at unity gain, in
 //!    its own ring; the NDI sender thread does the rest (`crate::ndi`). The
 //!    network send gets its bus the same way (`crate::netaudio::sender`).
 //! 6. While a recording is active, the raw strips (copied before the voice
 //!    chain works on its strip) plus Stream and Main go to the record ring
 //!    as whole frames (`crate::recorder::tap`).
+use super::health::{LinkState, StreamHealth};
 use super::{db_to_lin, EngineShared, MAX_CALLBACK_FRAMES};
 use crate::computer_audio::ComputerAudioFeed;
 use crate::dsp::mixer::{Mixer, BUS_MAIN, BUS_MONITOR, BUS_STREAM};
@@ -34,7 +38,7 @@ use crate::mixer_meters::MixerMeterSlots;
 use crate::ndi::receive::NdiInputFeed;
 use crate::netaudio::{NetInputFeed, NetSendRoute};
 use crate::recorder::tap::RecordTap;
-use crate::routing::{deinterleave, push_stereo};
+use crate::routing::{deinterleave_from, push_bus_frames, push_stereo, BusBlock};
 use ringbuf::traits::Producer;
 use ringbuf::HeapCons;
 use rustfft::{num_complex::Complex32, Fft, FftPlanner};
@@ -46,12 +50,42 @@ use std::time::Instant;
 const SPECTRUM_FFT: usize = 256;
 const SPECTRUM_BINS: usize = 128;
 
-/// One opened output device: its ring producer, channel count and the bus
-/// it plays.
+/// One NDI output: its ring producer, channel count and the bus it plays.
 pub(super) struct OutputRoute<P> {
     pub producer: P,
     pub channels: usize,
     pub bus: usize,
+}
+
+/// Most buses one output device can carry (every bus on one interface).
+pub(super) const MAX_DEVICE_BUSES: usize = 5;
+
+/// One output device: its ring producer and the buses on it, in ring order.
+/// Each ring frame is (L, R) per bus; the output callback puts each bus on
+/// its pair (`super::output_feed`).
+pub(super) struct DeviceRoute<P> {
+    pub producer: P,
+    pub buses: Vec<usize>,
+    /// Only a device that is playing is fed: a waiting or lost one would
+    /// fill its ring and count every block as dropped.
+    pub health: Arc<StreamHealth>,
+}
+
+/// Which input channels become strips: strip i reads channel `first + i`
+/// of `stride`-channel frames, for `count` strips.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct HardwareInput {
+    pub stride: usize,
+    pub first: usize,
+    pub count: usize,
+}
+
+impl HardwareInput {
+    /// Every channel of a `stride`-channel device.
+    #[cfg(test)]
+    pub fn all(stride: usize) -> Self {
+        HardwareInput { stride, first: 0, count: stride }
+    }
 }
 
 /// Visualiser spectrum of the voice strip (same maths as before the mixer).
@@ -124,7 +158,9 @@ pub(super) struct NetIo<P> {
 pub(super) struct InputProcessor<P> {
     /// Channels per interleaved input frame (the device's channel count).
     stride: usize,
-    /// Strips fed by input channels: min(stride, MAX_STRIPS).
+    /// The first device channel read (strip 0).
+    first: usize,
+    /// Strips fed by input channels: min(count, MAX_STRIPS).
     hardware: usize,
     /// One buffer per strip (hardware, Remote, computer, then NDI),
     /// MAX_CALLBACK_FRAMES long.
@@ -144,7 +180,7 @@ pub(super) struct InputProcessor<P> {
     mixer: Mixer,
     /// Mixer meters for the meters thread (`mixer-meters`).
     meter_slots: Arc<MixerMeterSlots>,
-    outputs: Vec<OutputRoute<P>>,
+    outputs: Vec<DeviceRoute<P>>,
     /// NDI rings (2 channels each), read by the NDI sender threads.
     ndi_outputs: Vec<OutputRoute<P>>,
     /// Multitrack recording tap (idle unless a recording is active).
@@ -159,13 +195,13 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         sample_rate: u32,
-        stride: usize,
+        input: HardwareInput,
         dsp: DspChain,
         params: Arc<DspParams>,
         shared: Arc<EngineShared>,
         mixer: MixerLink,
         meter_slots: Arc<MixerMeterSlots>,
-        outputs: Vec<OutputRoute<P>>,
+        outputs: Vec<DeviceRoute<P>>,
         ndi_outputs: Vec<OutputRoute<P>>,
         computer: Option<ComputerAudioFeed<HeapCons<f32>>>,
         mut ndi_inputs: Vec<NdiInputFeed<HeapCons<f32>>>,
@@ -173,8 +209,9 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
         recorder: RecordTap<P>,
         meters_tx: mpsc::SyncSender<MetersPayload>,
     ) -> Self {
-        let stride = stride.max(1);
-        let hardware = stride.min(MAX_STRIPS);
+        let stride = input.stride.max(1);
+        let first = input.first.min(stride - 1);
+        let hardware = input.count.clamp(1, stride - first).min(MAX_STRIPS);
         let computer = computer.filter(|_| MAX_STRIPS - hardware >= COMPUTER_STRIPS);
         let computer_strips = if computer.is_some() { COMPUTER_STRIPS } else { 0 };
         let mut net_inputs = net.inputs;
@@ -192,6 +229,7 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
         );
         let processor = InputProcessor {
             stride,
+            first,
             hardware,
             chan_bufs,
             net_inputs,
@@ -224,13 +262,30 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
         let started = Instant::now();
         let chunk_samples = self.stride * MAX_CALLBACK_FRAMES;
         for chunk in data.chunks(chunk_samples) {
-            let frames =
-                deinterleave(chunk, self.stride, &mut self.chan_bufs[..self.hardware], &convert);
+            let frames = deinterleave_from(
+                chunk,
+                self.stride,
+                self.first,
+                &mut self.chan_bufs[..self.hardware],
+                &convert,
+            );
             if frames > 0 {
                 self.process_frames(frames);
             }
         }
         self.shared.record_callback_time(started.elapsed());
+    }
+
+    /// The reopened input device's channel count (control thread, while no
+    /// stream plays this processor). `Err` when the chosen channels are no
+    /// longer all on it.
+    pub(super) fn set_stride(&mut self, stride: usize) -> Result<(), usize> {
+        let needed = self.first + self.hardware;
+        if stride < needed {
+            return Err(needed);
+        }
+        self.stride = stride;
+        Ok(())
     }
 
     fn process_frames(&mut self, n: usize) {
@@ -255,12 +310,21 @@ impl<P: Producer<Item = f32>> InputProcessor<P> {
         self.meter_slots
             .publish(self.mixer.strip_meters(), &self.mixer.bus_meters()[..]);
 
-        // Outputs: one stereo bus per device.
+        // Outputs: one ring per device, (L, R) per bus on it.
         let mut dropped = 0u64;
+        let empty: &[f32] = &[];
         for route in self.outputs.iter_mut() {
-            let (left, right) = self.mixer.output(route.bus);
-            let gain = if route.bus == BUS_MONITOR { monitor_gain } else { 1.0 };
-            dropped += push_stereo(&mut route.producer, left, right, route.channels, gain);
+            if route.health.state() != LinkState::Ok {
+                continue;
+            }
+            let mut blocks: [BusBlock<'_>; MAX_DEVICE_BUSES] = [(empty, empty, 0.0); MAX_DEVICE_BUSES];
+            let count = route.buses.len().min(MAX_DEVICE_BUSES);
+            for (block, &bus) in blocks.iter_mut().zip(route.buses.iter()) {
+                let (left, right) = self.mixer.output(bus);
+                let gain = if bus == BUS_MONITOR { monitor_gain } else { 1.0 };
+                *block = (left, right, gain);
+            }
+            dropped += push_bus_frames(&mut route.producer, &blocks[..count], n);
         }
         // No logging on the audio thread: just count. The meters thread logs
         // the running total when it changes.

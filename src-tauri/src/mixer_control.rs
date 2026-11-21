@@ -407,6 +407,17 @@ pub fn name_is_automatic(index: usize, name: &str, previous_auto: Option<&str>) 
     name.trim().is_empty() || name == default_strip_name(index) || previous_auto == Some(name)
 }
 
+/// Name hardware strips after the device channel they read: strip i reads
+/// channel `first + i` ("Ch 3" when the range starts at channel 3). Only an
+/// automatic name changes (`assign_feeds`).
+pub fn label_hardware_strips(feeds: &mut [StripFeed], first: usize) {
+    let mut hardware = 0;
+    for feed in feeds.iter_mut().filter(|feed| feed.identity == HARDWARE_STRIP) {
+        feed.label = Some(default_strip_name(first + hardware));
+        hardware += 1;
+    }
+}
+
 /// What fed a strip at the last engine start, and the automatic name it got.
 /// Control side only; not stored in scene files, which stay unchanged.
 #[derive(Debug, Clone, PartialEq, Eq)]
