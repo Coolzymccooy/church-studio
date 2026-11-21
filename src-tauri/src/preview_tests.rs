@@ -108,3 +108,29 @@ fn to_stereo_doubles_mono_and_drops_extra_channels() {
     to_stereo(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], 3, 2, &mut out);
     assert_eq!(out, vec![1.0, 2.0, 4.0, 5.0]);
 }
+
+#[test]
+fn audio_pushed_after_stop_is_never_heard() {
+    // The reader thread can finish one last push just after `stop`; the tap
+    // must stay silent until the next play rather than play that tail.
+    let (mut tap, player) = preview_ring(SR);
+    let mut producer = player.producer.lock().unwrap().take().unwrap();
+    player.stop();
+    let (mut l, mut r) = (vec![1.0; 256], vec![1.0; 256]);
+    tap.pop_into(&mut l, &mut r); // the block that sees the stop
+    producer.push_slice(&[0.5; 512]); // the reader's late push
+    assert_eq!(tap.pop_into(&mut l, &mut r), 0);
+    assert!(l.iter().chain(r.iter()).all(|s| *s == 0.0));
+}
+
+#[test]
+fn the_player_is_ready_again_as_soon_as_it_reports_stopped() {
+    for _ in 0..20 {
+        let (_tap, player) = preview_ring(SR);
+        player.play(vec![wav(1, SR, SR as usize * 5, 0.3)]).unwrap();
+        player.stop();
+        wait_until(|| !player.status().playing);
+        assert!(player.play(vec![wav(1, SR, 256, 0.1)]).is_ok(), "already playing right after stop");
+        player.stop();
+    }
+}
