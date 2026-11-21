@@ -387,10 +387,8 @@ impl AudioEngine {
         let in_channels = count;
         let input_device_name = resolved.input_name.clone();
 
-        let input_device_identity = in_dev
-            .id()
-            .map(|id| id.to_string())
-            .unwrap_or_else(|_| input_device_name.clone());
+        let input_device_identity = device_names::device_uid(&resolved.in_dev)
+            .unwrap_or_else(|| input_device_name.clone());
 
         let buf_frames = 256u32;
         let latency_ms = (buf_frames as f32 * 2.0 / sr as f32) * 1000.0;
