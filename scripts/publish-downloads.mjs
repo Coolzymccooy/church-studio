@@ -7,9 +7,9 @@ import path from 'node:path';
 import process from 'node:process';
 import { parseArgs } from 'node:util';
 import { DOWNLOADS } from './release/config.mjs';
-import { publishDownloads, stageDownloads } from './release/downloads-publish.mjs';
+import { publishDownloads, stageDownloads, verifyManifestSignatures } from './release/downloads-publish.mjs';
 import { loadEnvFiles } from './release/env-file.mjs';
-import { repoRoots } from './release/repo-state.mjs';
+import { readVersions, repoRoots } from './release/repo-state.mjs';
 
 const { values: args, positionals } = parseArgs({
   allowPositionals: true,
@@ -23,14 +23,19 @@ async function main() {
   const requireAll = !args.partial;
   if (args['dry-run']) {
     const staged = stageDownloads({ outDir, requireAll });
+    const { repoRoot } = await repoRoots();
+    const signatureProblems = await verifyManifestSignatures({ manifest: staged.manifest, outDir, pubkey: readVersions(repoRoot).pubkey });
+    const problems = [...staged.problems, ...signatureProblems];
     console.log(`${staged.version} → ${DOWNLOADS.host} (bucket ${DOWNLOADS.bucket}), DRY RUN`);
     staged.plan.forEach((item) => console.log(`  ${item.key}  [${item.cacheControl}]`));
-    staged.problems.forEach((problem) => console.log(`  problem: ${problem}`));
-    process.exit(staged.problems.length ? 1 : 0);
+    problems.forEach((problem) => console.log(`  problem: ${problem}`));
+    if (!problems.length) console.log('  signatures verify against tauri.conf.json');
+    process.exit(problems.length ? 1 : 0);
   }
   const { repoRoot, mainRoot } = await repoRoots();
   const env = { ...process.env, ...loadEnvFiles([path.join(mainRoot, '.env.local'), path.join(repoRoot, '.env.local')]) };
-  const result = await publishDownloads({ outDir, env, requireAll, onStep: (m) => console.log(`[downloads] ${m}`) });
+  const { pubkey } = readVersions(repoRoot);
+  const result = await publishDownloads({ outDir, env, pubkey, requireAll, onStep: (m) => console.log(`[downloads] ${m}`) });
   console.log(`\n✓ ${result.version} is live: ${Object.values(result.downloads.files).map((f) => f.url).join('\n  ')}`);
 }
 

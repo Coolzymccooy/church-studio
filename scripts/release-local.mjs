@@ -110,10 +110,10 @@ async function confirmPublish(tag) {
 }
 
 /** Our own host first: the website and new installs read it. GitHub follows for old installs. */
-async function publishToDownloadsHost({ outDir, repoRoot, mainRoot }) {
+async function publishToDownloadsHost({ outDir, repoRoot, mainRoot, pubkey }) {
   const step = say('downloads');
   const env = { ...process.env, ...loadEnvFiles([path.join(mainRoot, '.env.local'), path.join(repoRoot, '.env.local')]) };
-  const result = await publishDownloads({ outDir, env, onStep: step });
+  const result = await publishDownloads({ outDir, env, pubkey, onStep: step });
   step(`${DOWNLOADS.host} now serves ${result.version} (${result.uploaded} files)`);
 }
 
@@ -198,7 +198,7 @@ async function main() {
   }
   if (buildFailed || staged.problems.length || hosted.problems.length) fail('Not publishing: a build or a manifest failed (see above)');
   if (!(await confirmPublish(tag))) fail('Not confirmed; nothing was published');
-  await publishToDownloadsHost({ outDir, repoRoot, mainRoot });
+  await publishToDownloadsHost({ outDir, repoRoot, mainRoot, pubkey: versions.pubkey });
   await publish({ tag, sha: state.sha, staged, endpoints: versions.endpoints, version });
 }
 

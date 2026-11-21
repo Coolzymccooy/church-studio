@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'no
 import path from 'node:path';
 import { DOWNLOADS } from './config.mjs';
 import { buildDownloadsJson, hostedUrl, kindOfAsset, rehostManifest, uploadPlan } from './downloads-host.mjs';
+import { verifyFileSignature } from './minisign.mjs';
 import { putObject, r2Settings, verifyPublic } from './r2.mjs';
 import { assetNames, validateManifest } from './updater-manifest.mjs';
 
@@ -36,7 +37,26 @@ export function stageDownloads({ outDir, requireAll = true }) {
   writeFileSync(hostedManifestPath, `${JSON.stringify(hosted, null, 2)}\n`);
   writeFileSync(downloadsJsonPath, `${JSON.stringify(downloads, null, 2)}\n`);
   const plan = uploadPlan({ version, files, hostedManifestPath, downloadsJsonPath });
-  return Object.freeze({ version, plan, problems, downloads });
+  return Object.freeze({ version, plan, problems, downloads, manifest: hosted });
+}
+
+/**
+ * Every updater signature must verify against the key the installed app trusts (the pubkey in
+ * tauri.conf.json); a dry run signed with a throwaway key would otherwise go live and every app
+ * would reject it. Returns a list of problems.
+ */
+export async function verifyManifestSignatures({ manifest, outDir, pubkey }) {
+  if (!pubkey) return ['no updater public key to check signatures against'];
+  const problems = [];
+  for (const [key, entry] of Object.entries(manifest.platforms ?? {})) {
+    const filePath = path.join(outDir, decodeURIComponent(String(entry.url).split('/').pop()));
+    try {
+      await verifyFileSignature({ filePath, signatureBase64: entry.signature, pubkeyBase64: pubkey });
+    } catch (error) {
+      problems.push(`${key}: signature does not verify against the app's public key (${error.message})`);
+    }
+  }
+  return problems;
 }
 
 async function uploadAndVerify({ items, settings, logFile, onStep, bust }) {
@@ -51,10 +71,13 @@ async function uploadAndVerify({ items, settings, logFile, onStep, bust }) {
   return problems;
 }
 
-/** Upload, verify and switch over. Throws (before the manifests move) if any public copy is wrong. */
-export async function publishDownloads({ outDir, env, logFile, onStep = () => {}, requireAll = true }) {
+/** Check signatures, upload, verify and switch over. Throws before anything moves on a bad signature. */
+export async function publishDownloads({ outDir, env, pubkey, logFile, onStep = () => {}, requireAll = true }) {
   const staged = stageDownloads({ outDir, requireAll });
   if (staged.problems.length) throw new Error(`download host: ${staged.problems.join('; ')}`);
+  const signatureProblems = await verifyManifestSignatures({ manifest: staged.manifest, outDir, pubkey });
+  if (signatureProblems.length) throw new Error(`download host: nothing uploaded:\n  ${signatureProblems.join('\n  ')}`);
+  onStep(`${Object.keys(staged.manifest.platforms).length} updater signatures verified against tauri.conf.json`);
   const settings = r2Settings(env);
   if (settings.problems.length) throw new Error(`download host: ${settings.problems.join('; ')}`);
   const bust = `${staged.version}-${Date.now()}`;
