@@ -227,3 +227,25 @@ fn only_slide_and_item_events_cancel() {
     assert!(!changes_live_content("lumina.bridge.ping"));
     assert!(!changes_live_content("lumina.state.sync"));
 }
+
+#[test]
+fn full_screen_scripture_from_lumina_switches_to_sermon() {
+    // Lumina sends full-screen scripture as contentKind "designed" with itemType "BIBLE";
+    // only the overlay strap is contentKind "scripture".
+    let rules = default_rules();
+    for item_type in ["BIBLE", "bible", "SCRIPTURE"] {
+        let input = RuleInput {
+            event: EVENT_SLIDE_CHANGED,
+            content_kind: Some("designed"),
+            item_type: Some(item_type),
+        };
+        let hit = match_rules(&rules, &input, &lookup).target.map(|t| t.scene);
+        assert_eq!(hit.as_deref(), Some("Sermon"), "{item_type}");
+    }
+    let song = RuleInput {
+        event: EVENT_SLIDE_CHANGED,
+        content_kind: Some("designed"),
+        item_type: Some("MEDIA"),
+    };
+    assert_eq!(match_rules(&rules, &song, &lookup).target, None);
+}

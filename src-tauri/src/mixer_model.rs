@@ -68,6 +68,9 @@ pub struct MixerState {
     /// (serialized `ndiStrips`); they are the last `ndi_strips` entries of
     /// `strips`.
     pub ndi_strips: u32,
+    /// Remote strips of network audio (serialized `netStrips`), right after
+    /// the hardware ones.
+    pub net_strips: u32,
     pub running: bool,
     pub strips: Vec<StripState>,
     pub buses: Vec<BusState>,

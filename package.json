@@ -13,7 +13,7 @@
     "dev": "vite",
     "dev:tauri": "vite --host 127.0.0.1 --strictPort",
     "build": "vite build",
-    "test": "node --test src/lib/*.test.js",
+    "test": "node --test src/lib/*.test.js src/site/*.test.js",
     "lint": "eslint .",
     "verify": "npm run lint && npm run test && npm run build",
     "preview": "vite preview",
@@ -24,7 +24,8 @@
     "release:dry-run": "node scripts/release-local.mjs --dry-run",
     "release:local": "node scripts/release-local.mjs",
     "deploy:web": "node scripts/deploy-web.mjs",
-    "test:release": "node --test scripts/release/*.test.mjs"
+    "test:release": "node --test scripts/release/*.test.mjs",
+    "release:downloads": "node scripts/publish-downloads.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",

@@ -1,9 +1,10 @@
-import { Bell, Download, Headphones, RadioTower, Send, Workflow } from 'lucide-react';
+import { Bell, Download, Globe, Headphones, RadioTower, Send, Workflow } from 'lucide-react';
 
 import { alertLamp, deskAlerts } from '../../lib/deskRail.js';
 import { NDI_TOOLS_URL } from '../../lib/ndiOutput';
 import { openExternal } from '../../lib/platform';
 import NdiInputPanel from '../NdiInputPanel.jsx';
+import NetworkAudioPanel from '../NetworkAudioPanel.jsx';
 import NdiOutputPanel from '../NdiOutputPanel.jsx';
 import InfoTip from '../faceplate/InfoTip.jsx';
 import Key from '../faceplate/Key.jsx';
@@ -106,6 +107,7 @@ export default function OutputRouter({ r }) {
     },
     { id: 'ndi-out', icon: Send, label: 'ndi out', title: 'Send to NDI®', led: ndiLed, render: () => <NdiOutputPanel isLive={r.isLive} /> },
     { id: 'ndi-in', icon: Download, label: 'ndi in', title: 'Receive NDI®', led: ndiLed, render: () => <NdiInputPanel isLive={r.isLive} /> },
+    { id: 'net', icon: Globe, label: 'network', title: 'Network audio', led: r.isLive ? 'g' : 'off', render: () => <NetworkAudioPanel isLive={r.isLive} /> },
     {
       id: 'flow', icon: Workflow, label: 'flow', title: 'Signal flow', led: r.isLive ? 'g' : 'off',
       render: () => <SignalFlow isLive={r.isLive} hasSignal={r.isLive || r.isPlayingFile} features={r.features} />,

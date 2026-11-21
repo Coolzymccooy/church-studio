@@ -35,11 +35,3 @@ canvas {
 :root[data-finish="bone"] { color-scheme: light; }
 :root[data-finish="auto"] { color-scheme: light dark; }
 
-/* Legacy accent, still read by screens not yet on the faceplate tokens (landing page, editor
-   internals). It no longer changes per theme; remove once nothing uses var(--accent). */
-:root {
-  --accent:        #F59E0B;
-  --accent-rgb:    245,158,11;
-  --accent-dark:   #D97706;
-  --accent-darker: #92400E;
-}

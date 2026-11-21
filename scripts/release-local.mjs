@@ -9,7 +9,9 @@ import path from 'node:path';
 import process from 'node:process';
 import readline from 'node:readline/promises';
 import { parseArgs } from 'node:util';
-import { GITHUB_REPO, MAC, PRODUCT_NAME } from './release/config.mjs';
+import { DOWNLOADS, GITHUB_REPO, MAC, PRODUCT_NAME } from './release/config.mjs';
+import { publishDownloads, stageDownloads } from './release/downloads-publish.mjs';
+import { loadEnvFiles } from './release/env-file.mjs';
 import { run } from './release/exec.mjs';
 import { buildMac, locateMacArtifacts, prepareMacWorktree } from './release/mac-build.mjs';
 import { checkDraft, checkLiveManifest, createDraft, publishDraft } from './release/publish.mjs';
@@ -107,7 +109,15 @@ async function confirmPublish(tag) {
   return answer.trim() === tag;
 }
 
-async function publish({ tag, sha, staged, endpoint, version }) {
+/** Our own host first: the website and new installs read it. GitHub follows for old installs. */
+async function publishToDownloadsHost({ outDir, repoRoot, mainRoot, pubkey }) {
+  const step = say('downloads');
+  const env = { ...process.env, ...loadEnvFiles([path.join(mainRoot, '.env.local'), path.join(repoRoot, '.env.local')]) };
+  const result = await publishDownloads({ outDir, env, pubkey, onStep: step });
+  step(`${DOWNLOADS.host} now serves ${result.version} (${result.uploaded} files)`);
+}
+
+async function publish({ tag, sha, staged, endpoints, version }) {
   const step = say('publish');
   step(`creating draft ${tag} with ${staged.uploads.length} files`);
   await createDraft({ repo: GITHUB_REPO, tag, sha, title: `${PRODUCT_NAME} ${tag}`, notesFile: staged.notesFile, files: staged.uploads });
@@ -115,8 +125,10 @@ async function publish({ tag, sha, staged, endpoint, version }) {
   if (problems.length) fail(`Draft ${tag} is incomplete; it was left as a draft:\n  ${problems.join('\n  ')}`);
   step('draft verified; publishing and marking latest');
   await publishDraft({ repo: GITHUB_REPO, tag });
-  const live = await checkLiveManifest({ endpoint, version });
-  step(live ? `updater endpoint now serves ${version}` : `WARNING: ${endpoint} does not show ${version} yet; check it by hand`);
+  for (const endpoint of endpoints) {
+    const live = await checkLiveManifest({ endpoint, version });
+    step(live ? `${endpoint} serves ${version}` : `WARNING: ${endpoint} does not show ${version} yet; check it by hand`);
+  }
 }
 
 async function main() {
@@ -171,6 +183,9 @@ async function main() {
   say('sign')(`verified ${Object.keys(signed).length} updater signatures against ${key.isTestKey ? 'the throwaway test key' : 'the key in tauri.conf.json'}`);
   const staged = await writeReleaseFiles({ outDir, files, signed, version, tag, sha: state.sha, repo: GITHUB_REPO, requireAll: !dryRun });
   staged.problems.forEach((problem) => console.log(`  latest.json: ${problem}`));
+  const hosted = stageDownloads({ outDir, requireAll: !dryRun });
+  hosted.problems.forEach((problem) => console.log(`  download host: ${problem}`));
+  if (dryRun) console.log(`  download host: ${hosted.plan.length} files would go to ${DOWNLOADS.host}`);
   if (args['clean-windows'] && !args['skip-windows']) await cleanWindowsJob({ logFile: logs.win });
 
   console.log('\nRelease files:');
@@ -179,11 +194,12 @@ async function main() {
   if (dryRun) {
     console.log(`\nDry run finished in ${Math.round((Date.now() - started) / 60000)} min. Nothing was published.`);
     if (key.isTestKey) console.log('Signed with a throwaway key: install the real key before releasing (docs/release-local.md).');
-    process.exit(buildFailed || staged.problems.length ? 1 : 0);
+    process.exit(buildFailed || staged.problems.length || hosted.problems.length ? 1 : 0);
   }
-  if (buildFailed || staged.problems.length) fail('Not publishing: a build or the updater manifest failed (see above)');
+  if (buildFailed || staged.problems.length || hosted.problems.length) fail('Not publishing: a build or a manifest failed (see above)');
   if (!(await confirmPublish(tag))) fail('Not confirmed; nothing was published');
-  await publish({ tag, sha: state.sha, staged, endpoint: versions.endpoints[0], version });
+  await publishToDownloadsHost({ outDir, repoRoot, mainRoot, pubkey: versions.pubkey });
+  await publish({ tag, sha: state.sha, staged, endpoints: versions.endpoints, version });
 }
 
 main().catch((error) => fail(error.stack ?? error.message));

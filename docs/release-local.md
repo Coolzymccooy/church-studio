@@ -59,7 +59,9 @@ What the script does, in order:
 5. **Files:** `latest.json` (same platform keys as v1.5.0), `SHA256SUMS.txt`,
    `release-notes.md` and `macos-verification.json` go to
    `~/tailnet-jobs/church-studio-artifacts/<tag>-<sha>/`, with logs in `logs/`.
-6. **Publish** (not in a dry run): a draft release with every file, checked file
+6. **Download host** (not in a dry run): every file goes to `downloads.tiwaton.co.uk` first and
+   is checked byte for byte before `latest.json` switches over (`docs/downloads-host.md`).
+7. **Publish** (not in a dry run): a draft release with every file, checked file
    by file against the local sizes, then published and marked latest. This is
    the same order as CI's "Publish verified release" job. The script then
    confirms that the updater URL serves the new version.

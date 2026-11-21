@@ -9,7 +9,6 @@ import {
 import WaveformEditor from './components/WaveformEditor';
 import MenuBar from './components/MenuBar';
 import HelpCorner from './components/HelpCorner';
-import LandingPage from './components/LandingPage';
 import DeskHeader from './components/faceplate/DeskHeader.jsx';
 import Key from './components/faceplate/Key.jsx';
 import Lamp from './components/faceplate/Lamp.jsx';
@@ -42,6 +41,8 @@ import {
   resolveBroadcastLabel,
   resolveDeviceLabel,
 } from './lib/audioRouting';
+import { newNoiseProfileId, nextNoiseProfileNumber } from './lib/noiseProfiles.js';
+import { SNAPSHOTS_KEY, nextSnapshotId, parseSnapshots, serializeSnapshots } from './lib/voiceSnapshots.js';
 import {
   captureNativeNoiseProfile,
   describeNativeEngineError,
@@ -74,30 +75,10 @@ import {
  * - Process & Export for File mode (AI-mastered audio)
  */
 
-const TiwatonApp = () => {
-  const [view, setView] = useState(() => {
-    if (typeof window === 'undefined') return 'landing';
-    // Skip landing page in desktop app (Tauri or Electron) — go straight to studio
-    if (isDesktopApp) return 'studio';
-    const savedView = window.localStorage.getItem('tiwaton:view');
-    return savedView || 'landing';
-  });
+// In a browser the website at the root is home (src/site/); the desktop app has no home key.
+const goToSite = () => window.location.assign('/');
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    window.localStorage.setItem('tiwaton:view', view);
-  }, [view]);
-
-  if (view === 'landing') {
-    return <LandingPage onEnter={() => setView('studio')} />;
-  }
-
-  return (
-    <>
-      <AudioProcessor goHome={isDesktopApp ? null : () => setView('landing')} />
-    </>
-  );
-};
+const TiwatonApp = () => <AudioProcessor goHome={isDesktopApp ? null : goToSite} />;
 
 // --- STUDIO COMPONENT ---
 const DEFAULT_DEVICES = {
@@ -329,8 +310,10 @@ const AudioProcessor = ({ goHome }) => {
   // De-esser gain reduction for meter
   const [desserGrDb, setDesserGrDb] = useState(0);
   const [abMode, setAbMode] = useState('B');
-  const [snapshots, setSnapshots] = useState([]);
-  const snapshotCounterRef = useRef(1);
+  const [snapshots, setSnapshots] = useState(() => {
+    try { return parseSnapshots(window.localStorage.getItem(SNAPSHOTS_KEY)); } catch { return []; }
+  });
+  const snapshotCounterRef = useRef(nextSnapshotId(snapshots));
   const [noiseProfiles, setNoiseProfiles] = useState(() => {
     try {
       const saved = window.localStorage.getItem('tiwaton:noiseProfiles');
@@ -347,7 +330,7 @@ const AudioProcessor = ({ goHome }) => {
   const [roomName, setRoomName] = useState(() => {
     return window.localStorage.getItem('tiwaton:roomName') || 'Main Sanctuary';
   });
-  const noiseProfileCounterRef = useRef(1);
+  const noiseProfileCounterRef = useRef(nextNoiseProfileNumber(noiseProfiles));
   const latestSpectrumRef = useRef(null);
   const noiseFloorThresholdRef = useRef(noiseFloorThreshold);
   const featuresRef = useRef(features);
@@ -387,6 +370,11 @@ const AudioProcessor = ({ goHome }) => {
     noiseProfilesRef.current = noiseProfiles;
     try { window.localStorage.setItem('tiwaton:noiseProfiles', JSON.stringify(noiseProfiles)); } catch { /* Ignore local persistence failures. */ }
   }, [noiseProfiles]);
+
+  // Voice snapshots are the operator's saved setups: they outlive the app and "reset".
+  useEffect(() => {
+    try { window.localStorage.setItem(SNAPSHOTS_KEY, serializeSnapshots(snapshots)); } catch { /* Ignore local persistence failures. */ }
+  }, [snapshots]);
 
   useEffect(() => {
     selectedNoiseProfileIdRef.current = selectedNoiseProfileId;
@@ -680,8 +668,6 @@ const AudioProcessor = ({ goHome }) => {
     setLufsM(null); setLufsST(null); setLufsI(null);
     setLoudnessTarget(-14);
     setAbMode('B');
-    setSnapshots([]);
-    snapshotCounterRef.current = 1;
     setNoiseProfiles([]);
     setSelectedNoiseProfileId('');
     noiseProfileCounterRef.current = 1;
@@ -3125,11 +3111,13 @@ const AudioProcessor = ({ goHome }) => {
   };
 
   const handleSnapshotApply = (snapshot) => {
-    setFeatures({ ...snapshot.features });
+    setFeatures((prev) => ({ ...prev, ...snapshot.features }));
     setSpeakerPreset(snapshot.speakerPreset);
-    setSelectedNoiseProfileId(snapshot.selectedNoiseProfileId || '');
-    setNoiseFloorThreshold(snapshot.noiseFloorThreshold);
-    setInputGainValue(snapshot.inputGainValue);
+    // A noise profile cleared by reset can't be recalled; fall back to none.
+    const profileId = snapshot.selectedNoiseProfileId || '';
+    setSelectedNoiseProfileId(noiseProfiles.some((np) => np.id === profileId) ? profileId : '');
+    if (snapshot.noiseFloorThreshold != null) setNoiseFloorThreshold(snapshot.noiseFloorThreshold);
+    if (snapshot.inputGainValue != null) setInputGainValue(snapshot.inputGainValue);
   };
 
   const handleNoiseProfileCapture = async () => {
@@ -3168,7 +3156,7 @@ const AudioProcessor = ({ goHome }) => {
       Math.max(min, Math.min(max, val));
     const lowReduction = -normalize(lowEnergy / 18, 3, 12);
     const highReduction = -normalize(highEnergy / 16, 3, 14);
-    const profileId = `profile-${noiseProfileCounterRef.current}`;
+    const profileId = newNoiseProfileId();
     const label = `Noise Profile ${noiseProfileCounterRef.current}`;
     noiseProfileCounterRef.current += 1;
 
