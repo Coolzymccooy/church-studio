@@ -1,4 +1,5 @@
 use super::auth::{Auth, Device, PairStatus};
+use super::meters::{scope, MeterView, StripTap};
 use super::tls::{self, ListenerSettings};
 use super::{extensions, settings};
 use super::{
@@ -7,6 +8,7 @@ use super::{
 use crate::audio::{EngineState, RunningEngine};
 use crate::mixer_control::{bus_index, MixerControl};
 use crate::mixer_layout::StripLayout;
+use crate::mixer_meters::LatestMeters;
 use parking_lot::Mutex;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -119,8 +121,15 @@ fn bus_name(id: &str) -> &str {
 
 struct DesktopBoard(AppHandle);
 
-impl Board for DesktopBoard {
-    fn view(&self, role: Role) -> Result<MixerView, Status> {
+/// A meter reading older than this is a stopped or stalled engine: send none.
+const METER_MAX_AGE: Duration = Duration::from_millis(500);
+
+impl DesktopBoard {
+    fn read(
+        &self,
+        role: Role,
+        with_meters: bool,
+    ) -> Result<(MixerView, Option<MeterView>), Status> {
         let engine = self.0.state::<EngineState>();
         let running = engine.try_lock().map_err(|_| Status::SERVICE_UNAVAILABLE)?;
         let (layout, signature) = layout(running.as_ref());
@@ -130,6 +139,22 @@ impl Board for DesktopBoard {
             .state::<MixerControl>()
             .snapshot_layout(layout, is_running, Vec::new());
         drop(running);
+        let meters = with_meters && is_running;
+        let meters = meters
+            .then(|| self.0.try_state::<LatestMeters>()?.fresh(METER_MAX_AGE))
+            .flatten()
+            .map(|latest| {
+                let taps: Vec<StripTap> = state
+                    .strips
+                    .iter()
+                    .map(|strip| StripTap {
+                        muted: strip.mute || strip.group_muted,
+                        post_fader: role == Role::Monitor1 && strip.monitor_post_fader,
+                        soloed: strip.solo,
+                    })
+                    .collect();
+                scope(role, &latest.strips, &taps, &latest.buses)
+            });
         let extras = if role == Role::Desk {
             extensions::read(&state)?
         } else {
@@ -175,12 +200,23 @@ impl Board for DesktopBoard {
             });
         }
         controls.extend(extras);
-        Ok(MixerView {
+        let view = MixerView {
             role,
             running: is_running,
             layout: signature,
             controls,
-        })
+        };
+        Ok((view, meters))
+    }
+}
+
+impl Board for DesktopBoard {
+    fn view(&self, role: Role) -> Result<MixerView, Status> {
+        Ok(self.read(role, false)?.0)
+    }
+
+    fn live(&self, role: Role) -> Result<(MixerView, Option<MeterView>), Status> {
+        self.read(role, true)
     }
 
     fn apply(&self, role: Role, control: Control) -> Result<(), Status> {

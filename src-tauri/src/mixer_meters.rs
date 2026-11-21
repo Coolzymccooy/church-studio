@@ -14,6 +14,8 @@ use crate::mixer_control::BUS_IDS;
 use atomic_float::AtomicF32;
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 /// dB values in the event are clamped to at least this.
 pub const METER_FLOOR_DB: f32 = -96.0;
@@ -231,5 +233,44 @@ impl MixerMeterSlots {
         });
         let dca_peaks = self.dca_peaks.each_ref().map(|slot| clamp_db(take(slot, RESET_DB)));
         MixerMetersPayload { strips, buses, fx_returns, dca_peaks }
+    }
+}
+
+/// The latest `mixer-meters` reading, kept for readers other than the desktop
+/// webview (the remote mixer). The meters thread stores each reading and
+/// clears it when the engine stops.
+#[derive(Default)]
+pub struct LatestMeters(parking_lot::Mutex<Option<(Instant, Arc<MixerMetersPayload>)>>);
+
+impl LatestMeters {
+    pub fn store(&self, payload: MixerMetersPayload) {
+        *self.0.lock() = Some((Instant::now(), Arc::new(payload)));
+    }
+
+    pub fn clear(&self) {
+        *self.0.lock() = None;
+    }
+
+    /// The reading, if it was stored within `max_age`.
+    pub fn fresh(&self, max_age: Duration) -> Option<Arc<MixerMetersPayload>> {
+        let latest = self.0.lock();
+        let (at, payload) = latest.as_ref()?;
+        (at.elapsed() <= max_age).then(|| payload.clone())
+    }
+}
+
+#[cfg(test)]
+mod latest_tests {
+    use super::*;
+
+    #[test]
+    fn the_latest_reading_is_shared_until_cleared() {
+        let latest = LatestMeters::default();
+        assert!(latest.fresh(Duration::from_secs(1)).is_none());
+        latest.store(MixerMeterSlots::new(2).take_payload());
+        let fresh = latest.fresh(Duration::from_secs(1)).unwrap();
+        assert_eq!(fresh.strips.len(), 2);
+        latest.clear();
+        assert!(latest.fresh(Duration::from_secs(1)).is_none());
     }
 }

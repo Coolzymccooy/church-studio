@@ -16,30 +16,50 @@ pub(super) async fn css() -> impl IntoResponse {
     )
 }
 
+fn script(source: &'static str) -> impl IntoResponse {
+    ([(header::CONTENT_TYPE, "application/javascript")], source)
+}
+
+fn woff2(bytes: &'static [u8]) -> impl IntoResponse {
+    ([(header::CONTENT_TYPE, "font/woff2")], bytes)
+}
+
 pub(super) async fn js() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "application/javascript")],
-        include_str!("web/desk.js"),
-    )
+    script(include_str!("web/desk.js"))
 }
 
 pub(super) async fn protocol() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "application/javascript")],
-        include_str!("web/protocol.js"),
-    )
+    script(include_str!("web/protocol.js"))
+}
+
+pub(super) async fn board() -> impl IntoResponse {
+    script(include_str!("web/board.js"))
+}
+
+pub(super) async fn fader() -> impl IntoResponse {
+    script(include_str!("web/fader.js"))
+}
+
+pub(super) async fn meters() -> impl IntoResponse {
+    script(include_str!("web/meters.js"))
+}
+
+pub(super) async fn mixmath() -> impl IntoResponse {
+    script(include_str!("web/mixmath.js"))
 }
 
 pub(super) async fn font() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "font/woff2")],
-        include_bytes!("web/legend.woff2").as_slice(),
-    )
+    woff2(include_bytes!("web/legend.woff2"))
+}
+
+pub(super) async fn font_semibold() -> impl IntoResponse {
+    woff2(include_bytes!("web/legend-600.woff2"))
 }
 
 pub(super) async fn mono() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "font/woff2")],
-        include_bytes!("web/mono.woff2").as_slice(),
-    )
+    woff2(include_bytes!("web/mono.woff2"))
+}
+
+pub(super) async fn mono_medium() -> impl IntoResponse {
+    woff2(include_bytes!("web/mono-500.woff2"))
 }

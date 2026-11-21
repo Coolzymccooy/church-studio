@@ -4,11 +4,11 @@ use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, Runtime};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use super::{EngineShared, MIXER_METERS_INTERVAL_MS};
 use crate::dsp::MetersPayload;
-use crate::mixer_meters::MixerMeterSlots;
+use crate::mixer_meters::{LatestMeters, MixerMeterSlots};
 
 /// Meters thread: logs dropped output samples, emits `audio-meters`
 /// (~20 Hz, spectrum averaged over the pending payloads) and `mixer-meters`
@@ -42,7 +42,12 @@ pub(super) fn spawn_meters_thread<R: Runtime>(
             }
 
             if last_mixer_emit.elapsed() >= Duration::from_millis(MIXER_METERS_INTERVAL_MS) {
-                let _ = app.emit("mixer-meters", &meter_slots.take_payload());
+                let payload = meter_slots.take_payload();
+                // The remote mixer's meter stream reads the latest frame.
+                if let Some(latest) = app.try_state::<LatestMeters>() {
+                    latest.store(payload.clone());
+                }
+                let _ = app.emit("mixer-meters", &payload);
                 last_mixer_emit = Instant::now();
             }
 
@@ -66,6 +71,9 @@ pub(super) fn spawn_meters_thread<R: Runtime>(
                 pending.clear();
                 last_emit = Instant::now();
             }
+        }
+        if let Some(latest) = app.try_state::<LatestMeters>() {
+            latest.clear();
         }
     });
 }

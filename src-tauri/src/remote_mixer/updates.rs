@@ -6,6 +6,8 @@ use axum::response::{
     IntoResponse, Response,
 };
 use axum::Extension;
+use futures_util::future::{select, Either};
+use serde::Serialize;
 use std::{
     convert::Infallible,
     net::IpAddr,
@@ -18,8 +20,39 @@ const UPDATE_INTERVAL: Duration = Duration::from_millis(60);
 const AUTH_INTERVAL: Duration = Duration::from_millis(500);
 const ROLES: [Role; 4] = [Role::Monitor1, Role::Monitor2, Role::Monitor3, Role::Desk];
 
+type Latest = watch::Sender<Option<String>>;
+
+/// Per role: the latest snapshot JSON and the latest live meter JSON.
 #[derive(Default)]
-pub(super) struct Channels([watch::Sender<Option<String>>; ROLES.len()]);
+pub(super) struct Channels {
+    states: [Latest; ROLES.len()],
+    meters: [Latest; ROLES.len()],
+}
+
+fn clear(tx: &Latest) {
+    tx.send_if_modified(|last| last.take().is_some());
+}
+
+/// Send meters every tick even when unchanged: a page treats a gap in
+/// readings as silence, so a steady tone must keep arriving.
+fn refresh(tx: &Latest, value: &impl Serialize) {
+    if let Ok(json) = serde_json::to_string(value) {
+        tx.send_replace(Some(json));
+    }
+}
+
+fn offer(tx: &Latest, value: &impl Serialize) {
+    let Ok(json) = serde_json::to_string(value) else {
+        return;
+    };
+    tx.send_if_modified(|last| {
+        if last.as_ref() == Some(&json) {
+            return false;
+        }
+        *last = Some(json);
+        true
+    });
+}
 
 pub(super) async fn publish(context: Weak<Context>) {
     let mut tick = tokio::time::interval(UPDATE_INTERVAL);
@@ -43,22 +76,20 @@ pub(super) async fn publish(context: Weak<Context>) {
                 ctx.dirty.store(true, Ordering::Release);
             }
         }
-        let reads = ROLES.into_iter().zip(&ctx.updates.0).map(|(role, tx)| {
+        let reads = ROLES.into_iter().enumerate().map(|(slot, role)| {
             let ctx = &ctx;
+            let (states, meters) = (&ctx.updates.states[slot], &ctx.updates.meters[slot]);
             async move {
-                if tx.receiver_count() == 0 {
-                    tx.send_if_modified(|last| last.take().is_some());
+                if states.receiver_count() == 0 {
+                    clear(states);
+                    clear(meters);
                     return;
                 }
-                if let Ok(view) = ctx.run_board(move |board| board.view(role)).await {
-                    if let Ok(json) = serde_json::to_string(&view) {
-                        tx.send_if_modified(|last| {
-                            if last.as_ref() == Some(&json) {
-                                return false;
-                            }
-                            *last = Some(json);
-                            true
-                        });
+                if let Ok((view, live)) = ctx.run_board(move |board| board.live(role)).await {
+                    offer(states, &view);
+                    match live {
+                        Some(live) => refresh(meters, &live),
+                        None => clear(meters),
                     }
                 }
             }
@@ -69,7 +100,8 @@ pub(super) async fn publish(context: Weak<Context>) {
 
 struct Subscription {
     ctx: Weak<Context>,
-    receiver: watch::Receiver<Option<String>>,
+    states: watch::Receiver<Option<String>>,
+    meters: watch::Receiver<Option<String>>,
     cookie: String,
     ip: IpAddr,
     role: Role,
@@ -88,11 +120,12 @@ pub(super) async fn events(
     let Some(role) = ctx.role(cookie, ip) else {
         return Status::UNAUTHORIZED.into_response();
     };
-    let mut receiver = ctx.updates.0[role as usize].subscribe();
-    receiver.mark_changed();
+    let mut states = ctx.updates.states[role as usize].subscribe();
+    states.mark_changed();
     let subscription = Subscription {
         ctx: Arc::downgrade(&ctx),
-        receiver,
+        states,
+        meters: ctx.updates.meters[role as usize].subscribe(),
         cookie: cookie.into(),
         ip,
         role,
@@ -109,17 +142,22 @@ pub(super) async fn events(
                 ));
             }
             drop(ctx);
-            let Ok(changed) = tokio::time::timeout(AUTH_INTERVAL, sub.receiver.changed()).await
-            else {
+            let changes = next_change(&mut sub.states, &mut sub.meters);
+            let Ok(changed) = tokio::time::timeout(AUTH_INTERVAL, changes).await else {
                 continue;
             };
-            changed.ok()?;
+            let name = changed.ok()?;
             if sub.ctx.upgrade()?.role(&sub.cookie, sub.ip) != Some(sub.role) {
                 continue;
             }
-            let current = sub.receiver.borrow_and_update().clone();
+            let latest = if name == "state" {
+                &mut sub.states
+            } else {
+                &mut sub.meters
+            };
+            let current = latest.borrow_and_update().clone();
             if let Some(json) = current {
-                return Some((Ok(Event::default().event("state").data(json)), sub));
+                return Some((Ok(Event::default().event(name).data(json)), sub));
             }
         }
         None
@@ -127,4 +165,18 @@ pub(super) async fn events(
     Sse::new(stream)
         .keep_alive(KeepAlive::new().interval(Duration::from_secs(5)))
         .into_response()
+}
+
+/// Wait for the next snapshot or meter change. A snapshot wins a tie, so a
+/// new subscriber always gets its state before any meters.
+async fn next_change(
+    states: &mut watch::Receiver<Option<String>>,
+    meters: &mut watch::Receiver<Option<String>>,
+) -> Result<&'static str, watch::error::RecvError> {
+    let state = std::pin::pin!(states.changed());
+    let meter = std::pin::pin!(meters.changed());
+    match select(state, meter).await {
+        Either::Left((changed, _)) => changed.map(|()| "state"),
+        Either::Right((changed, _)) => changed.map(|()| "meters"),
+    }
 }
