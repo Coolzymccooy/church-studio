@@ -1,8 +1,12 @@
+import { INPUT_RANGE_KEYS, PAIR_KEYS, buildInputChannels, buildOutputPairs } from './usbDevices.js';
+
 export function normalizeTauriDevices(devices = []) {
   return devices.map((device) => ({
     deviceId: device.id,
     label: device.name,
     isDefault: device.is_default,
+    channels: device.channels ?? 0,
+    transport: device.transport ?? 'other',
   }));
 }
 
@@ -18,26 +22,32 @@ function resolveCurrentDeviceId(selection, devices, fallback) {
   return matched ? matched.deviceId : fallback;
 }
 
+/**
+ * Bring saved device ids up to date with the listed devices (legacy "index:name" ids become
+ * names). A saved device that is not connected keeps its id, so it is found again by name when
+ * it is plugged back in (docs/specs/2026-11-20-usb-interfaces.md §2).
+ */
 export function reconcileSelectedDevices(selectedDevices, availableDevices) {
   const next = { ...selectedDevices };
   const { inputs = [], outputs = [] } = availableDevices;
 
-  next.inputId = next.inputId === 'default'
+  next.inputId = !next.inputId || next.inputId === 'default'
     ? 'default'
-    : resolveCurrentDeviceId(next.inputId, inputs, 'default');
-  next.outputId = next.outputId === 'default'
+    : resolveCurrentDeviceId(next.inputId, inputs, next.inputId);
+  next.outputId = !next.outputId || next.outputId === 'default'
     ? 'default'
-    : resolveCurrentDeviceId(next.outputId, outputs, 'default');
+    : resolveCurrentDeviceId(next.outputId, outputs, next.outputId);
 
-  if (next.broadcastBus !== 'Not set' && next.broadcastBus !== 'Same as monitor') {
-    next.broadcastBus = resolveCurrentDeviceId(next.broadcastBus, outputs, 'Not set');
+  if (!next.broadcastBus) {
+    next.broadcastBus = 'Not set';
+  } else if (next.broadcastBus !== 'Not set' && next.broadcastBus !== 'Same as monitor') {
+    next.broadcastBus = resolveCurrentDeviceId(next.broadcastBus, outputs, next.broadcastBus);
   }
 
-  // The Main (PA) and the mon 2 / mon 3 outputs are desktop-only and optional; a device that has
-  // gone away falls back to "Not set" rather than to the system default.
+  // The Main (PA) and the mon 2 / mon 3 outputs are desktop-only and optional.
   for (const key of OPTIONAL_OUTPUT_KEYS) {
     next[key] = resolveOptionalOutputId(next, key)
-      ? resolveCurrentDeviceId(next[key], outputs, 'Not set')
+      ? resolveCurrentDeviceId(next[key], outputs, next[key])
       : 'Not set';
   }
 
@@ -48,7 +58,9 @@ export function reconcileSelectedDevices(selectedDevices, availableDevices) {
 export const OPTIONAL_OUTPUT_KEYS = ['mainOutputId', 'monitor2OutputId', 'monitor3OutputId'];
 
 /** Every device choice the engine uses, for comparing two selections. */
-export const DEVICE_KEYS = ['inputId', 'outputId', 'broadcastBus', ...OPTIONAL_OUTPUT_KEYS];
+export const DEVICE_KEYS = [
+  'inputId', 'outputId', 'broadcastBus', ...OPTIONAL_OUTPUT_KEYS, ...Object.values(PAIR_KEYS), ...INPUT_RANGE_KEYS,
+];
 
 export function devicesEqual(a, b) {
   return DEVICE_KEYS.every((key) => (a?.[key] ?? null) === (b?.[key] ?? null));
@@ -106,6 +118,8 @@ export function buildNativeEngineArgs(selectedDevices) {
     mainOutputId: resolveMainOutputId(selectedDevices),
     monitor2OutputId: resolveOptionalOutputId(selectedDevices, 'monitor2OutputId'),
     monitor3OutputId: resolveOptionalOutputId(selectedDevices, 'monitor3OutputId'),
+    outputPairs: buildOutputPairs(selectedDevices),
+    inputChannels: buildInputChannels(selectedDevices),
   };
 }
 

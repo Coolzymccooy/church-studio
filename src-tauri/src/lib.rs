@@ -5,6 +5,7 @@ mod soundcheck_commands;
 mod soundcheck_tests;
 mod computer_audio;
 mod computer_audio_commands;
+mod device_args;
 mod dsp;
 mod engine_stopping;
 mod export;
@@ -185,6 +186,8 @@ async fn start_audio_engine(
     main_output_id: Option<String>,
     monitor2_output_id: Option<String>,
     monitor3_output_id: Option<String>,
+    output_pairs: Option<device_args::OutputPairsArg>,
+    input_channels: Option<device_args::InputChannelsArg>,
 ) -> Result<serde_json::Value, String> {
     let mut guard = state.inner().lock().unwrap();
     if guard.is_some() {
@@ -206,6 +209,8 @@ async fn start_audio_engine(
             main_output_id,
             monitor2_output_id,
             monitor3_output_id,
+            output_pairs: output_pairs.unwrap_or_default().to_buses(),
+            input_range: input_channels.and_then(|range| range.to_range()),
         },
         NdiEngineConfig {
             outputs: ndi.snapshot(),
@@ -242,6 +247,8 @@ async fn start_audio_engine(
         "monitor2_output_name": engine.monitor2_output_name,
         "monitor3_output_name": engine.monitor3_output_name,
         "inputChannels": engine.input_channels,
+        "inputFirstChannel": engine.input_first_channel,
+        "devices": engine.devices_json(),
         "computerStrips": engine.strip_layout().computer,
         "ndiStrips": engine.ndi_inputs.len(),
         "netStrips": engine.net_audio.inputs.len(),
@@ -348,6 +355,8 @@ fn serialize_engine_status(engine: &RunningEngine) -> serde_json::Value {
         "monitor2_output_name": engine.monitor2_output_name,
         "monitor3_output_name": engine.monitor3_output_name,
         "inputChannels": engine.input_channels,
+        "inputFirstChannel": engine.input_first_channel,
+        "devices": engine.devices_json(),
         "noise_profile_ready": engine.noise_profile_ready(),
         "neural_available": engine.neural_available,
         "dsp_latency_samples": engine.dsp_latency_samples(),
@@ -386,6 +395,8 @@ fn engine_status(state: State<'_, EngineState>) -> serde_json::Value {
             "monitor2_output_name": null,
             "monitor3_output_name": null,
             "inputChannels": 1,
+            "inputFirstChannel": 0,
+            "devices": [],
             "noise_profile_ready": false,
             "neural_available": false,
             "dropped_output_samples": 0,
@@ -494,6 +505,8 @@ pub fn run() {
             // Load the NDI runtime off the main thread; ndi_status reports
             // `loading` until it is done.
             ndi::runtime::preload();
+            // Hot-plug: refresh device lists and reconnect lost devices.
+            audio::device_watch::spawn(app.handle().clone());
             let saved_ndi = ndi_commands::load_saved_outputs(app.handle());
             app.state::<NdiSettings>().replace(saved_ndi);
             let saved_inputs = ndi_input_commands::load_saved_inputs(app.handle());

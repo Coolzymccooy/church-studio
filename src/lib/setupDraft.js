@@ -1,5 +1,10 @@
-/** Device keys the setup panel edits. */
-export const SETUP_KEYS = ['inputId', 'outputId', 'broadcastBus', 'mainOutputId', 'monitor2OutputId', 'monitor3OutputId'];
+import { INPUT_RANGE_KEYS, PAIR_KEYS } from './usbDevices.js';
+
+/** Device keys the setup panel edits: devices, output pairs, the input channel range. */
+export const SETUP_KEYS = [
+  'inputId', 'outputId', 'broadcastBus', 'mainOutputId', 'monitor2OutputId', 'monitor3OutputId',
+  ...Object.values(PAIR_KEYS), ...INPUT_RANGE_KEYS,
+];
 
 /** The keys whose draft value differs from the saved one, as a patch object. */
 export function draftChanges(saved, draft, keys = SETUP_KEYS) {
@@ -41,13 +46,17 @@ export function readPanelPos(raw) {
   }
 }
 
+const LINK_STATUS = { ok: 'on', waiting: 'waiting', lost: 'lost', failed: 'failed' };
+
 /**
- * Row status for one device: 'unsaved' when the draft differs, 'not set' when nothing is chosen,
- * 'on' while the engine runs, else 'idle'.
+ * Row status for one device: 'unsaved' when the draft differs, 'not set' when nothing is chosen;
+ * while the engine runs, its link state ('on', 'waiting', 'lost', 'failed'); otherwise 'missing'
+ * when the saved device is not connected, else 'idle'.
  */
-export function rowStatus({ saved, draft, key, running, notSet = ['Not set'] }) {
+export function rowStatus({ saved, draft, key, running, notSet = ['Not set'], link = null, missing = false }) {
   if ((draft?.[key] ?? null) !== (saved?.[key] ?? null)) return 'unsaved';
   const value = saved?.[key];
   if (value === null || value === undefined || value === '' || notSet.includes(value)) return 'not set';
-  return running ? 'on' : 'idle';
+  if (running) return LINK_STATUS[link?.state] ?? 'on';
+  return missing ? 'missing' : 'idle';
 }

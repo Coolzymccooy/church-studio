@@ -8,6 +8,7 @@ test('draftFrom copies only the setup keys and is a new object', () => {
   const d = draftFrom(saved);
   assert.deepEqual(d, {
     inputId: 'mic', outputId: 'jabra', broadcastBus: 'Not set', mainOutputId: null, monitor2OutputId: null, monitor3OutputId: null,
+    mainPair: null, streamPair: null, monitorPair: null, monitor2Pair: null, monitor3Pair: null, inputFirst: null, inputCount: null,
   });
   assert.notEqual(d, saved);
 });
@@ -42,4 +43,21 @@ test('rowStatus: unsaved, not set, on, idle', () => {
   assert.equal(rowStatus({ saved, draft, key: 'mainOutputId', running: true }), 'not set');
   assert.equal(rowStatus({ saved, draft, key: 'outputId', running: true }), 'on');
   assert.equal(rowStatus({ saved, draft, key: 'outputId', running: false }), 'idle');
+});
+
+test('a pair or input-range change counts as unsaved', () => {
+  const draft = { ...draftFrom(saved), mainPair: 1 };
+  assert.deepEqual(draftChanges(saved, draft), { mainPair: 1 });
+});
+
+test('rowStatus: a missing device, then the live link state', () => {
+  const base = { saved: { outputId: 'UMC' }, draft: { outputId: 'UMC' }, key: 'outputId' };
+  assert.equal(rowStatus({ ...base, running: false, missing: true }), 'missing');
+  assert.equal(rowStatus({ ...base, running: true, link: { state: 'lost' } }), 'lost');
+  assert.equal(rowStatus({ ...base, running: true, link: { state: 'waiting' } }), 'waiting');
+  assert.equal(rowStatus({ ...base, running: true, link: { state: 'failed' } }), 'failed');
+  assert.equal(rowStatus({ ...base, running: true, link: { state: 'ok' } }), 'on');
+  assert.equal(rowStatus({ ...base, running: true }), 'on');
+  // An unsaved change wins over everything.
+  assert.equal(rowStatus({ ...base, draft: { outputId: 'x' }, running: true, link: { state: 'lost' } }), 'unsaved');
 });

@@ -205,6 +205,12 @@
 .fp-grip { width: 8px; height: 14px; background-image: radial-gradient(var(--fp-muted) 1px, transparent 1.5px); background-size: 4px 4px; }
 .fp-setup-bd { display: flex; flex-direction: column; gap: 12px; padding: 10px; overflow-y: auto; }
 .fp-setup-row { display: flex; flex-direction: column; gap: 6px; }
+/* A device select with its channel picker beside it (output pair, input range). */
+.fp-setup-pick { display: flex; align-items: center; gap: 6px; }
+.fp-setup-pick > .fp-field:first-child { flex: 1 1 auto; }
+.fp-setup-pick > .fp-field-ch { flex: 0 0 auto; width: 68px; }
+.fp-setup-pick > .fp-field-ch.fp-field-narrow { width: 62px; }
+.fp-setup-pick .fp-kl { flex: none; }
 .fp-setup-fmt { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; font-size: var(--fp-text-sm); }
 .fp-setup-fmt .fp-lamp { color: var(--fp-glass-dim); }
 .fp-setup-ft { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-top: 1px solid var(--fp-seam); min-height: 41px; }

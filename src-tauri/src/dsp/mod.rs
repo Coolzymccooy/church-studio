@@ -96,9 +96,15 @@ pub struct MetersPayload {
 }
 
 /// Device info returned to React
-#[derive(serde::Serialize, Clone)]
+#[derive(serde::Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct AudioDeviceInfo {
     pub id: String,
     pub name: String,
     pub is_default: bool,
+    /// Most channels the device offers in this direction.
+    pub channels: u16,
+    /// `usb`, `builtin`, `bluetooth`, `virtual`, `aggregate`, … (`other`).
+    pub transport: String,
+    /// Always true in a device list; kept for the UI's missing-device rows.
+    pub present: bool,
 }

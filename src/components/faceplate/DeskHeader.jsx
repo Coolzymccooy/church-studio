@@ -7,8 +7,10 @@ import { useTheme } from '../../contexts/ThemeContext.jsx';
 import { useObsStatus } from '../obs/useObsStatus.js';
 import { useRecorderStatus } from '../recorder/useRecorder.js';
 import { loudFraction, lufsText, targetDelta } from '../../lib/loudness.js';
+import { deviceAttention } from '../../lib/usbDevices.js';
 import DeskClock from './DeskClock.jsx';
 import Glass from './Glass.jsx';
+import InfoTip from './InfoTip.jsx';
 import Key from './Key.jsx';
 import Lamp from './Lamp.jsx';
 import TwoPressKey from './TwoPressKey.jsx';
@@ -19,7 +21,7 @@ import TwoPressKey from './TwoPressKey.jsx';
  * setup) and the clock. Replaces the old status bar, the in-app menu bar and the bottom console.
  */
 export default function DeskHeader({
-  isLive, isPlayingFile, audioStats, gateClosed, onToggleEngine, onShowSettings,
+  isLive, isPlayingFile, audioStats, gateClosed, onToggleEngine, onShowSettings, deviceLinks,
   monitor, bypassed, onToggleBypass, onReset, onShowObs, onShowLink, onShowHelp, loudness = {},
 }) {
   const { finish, cycleFinish } = useTheme();
@@ -29,6 +31,8 @@ export default function DeskHeader({
 
   const state = engineState(isLive, isPlayingFile);
   const lamps = [gateLamp(isLive || isPlayingFile, gateClosed), obsLamp(obs), recLamp(rec)];
+  // Shown only when a device needs attention (lost, failed, waiting, or a clock slipping).
+  const device = isLive ? deviceAttention(deviceLinks?.links, deviceLinks?.slipping) : null;
 
   const runEngine = async () => {
     if (busy) return;
@@ -62,6 +66,15 @@ export default function DeskHeader({
 
       <div className="fp-grp" role="group" aria-label="Status">
         {lamps.map((l) => <Lamp key={l.word.split(' ')[0]} tone={l.tone}>{l.word}</Lamp>)}
+        {device && (
+          <span role="status" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <Lamp tone={device.tone}>{device.word}</Lamp>
+            <InfoTip label="Audio device">
+              A lost device reconnects by itself when it is plugged back in. Waiting: chosen in setup
+              but not connected. Clock slips: an output on its own clock ran dry; setup shows which.
+            </InfoTip>
+          </span>
+        )}
       </div>
 
       <div className="fp-end">
