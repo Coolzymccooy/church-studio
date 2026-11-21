@@ -65,11 +65,13 @@ pub(super) fn tick<R: Runtime>(app: &AppHandle<R>, host: &cpal::Host, watch: &mu
     check_engine(app, watch);
 }
 
-/// Device ids bound by the engine's other working streams in one direction.
+/// Device ids bound by the engine's other streams in one direction,
+/// connected or not: a returning unit is only taken by its own stream, even
+/// when two identical interfaces dropped out together.
 fn taken_ids(streams: &[(usize, &str, bool, &StreamHealth)], index: usize, input: bool) -> Vec<String> {
     streams
         .iter()
-        .filter(|(i, _, is_input, health)| *i != index && *is_input == input && health.state() == LinkState::Ok)
+        .filter(|(i, _, is_input, _)| *i != index && *is_input == input)
         .filter_map(|(_, _, _, health)| health.bound())
         .collect()
 }

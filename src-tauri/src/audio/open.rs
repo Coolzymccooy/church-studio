@@ -5,7 +5,7 @@ use cpal::traits::{DeviceTrait, HostTrait};
 use cpal::{Device, Host, SupportedStreamConfig, SupportedStreamConfigRange};
 
 use super::config::{negotiate_stream_configs, widest_config};
-use super::device_names::{device_name, named_devices};
+use super::device_names::{device_name, device_uid, listed_name_of, named_devices, ListedDevice};
 use super::output_plan::{plan_outputs, BusRequest, OutputPlan};
 use super::DeviceSelection;
 use crate::dsp::mixer::{BUS_MAIN, BUS_MONITOR, BUS_MONITOR2, BUS_MONITOR3, BUS_STREAM};
@@ -44,6 +44,17 @@ pub(super) fn missing_name(selection: &str) -> String {
     }
 }
 
+/// The default device's unique listed name ("X (2)" when it is the second
+/// of two identical units), so it groups and reconnects as that unit.
+fn default_name(listed: &[(String, Device)], device: &Device, fallback: &str) -> String {
+    let entries: Vec<ListedDevice> = listed
+        .iter()
+        .map(|(name, d)| ListedDevice { name: name.clone(), uid: device_uid(d) })
+        .collect();
+    let raw = device_name(device).unwrap_or_else(|_| fallback.to_string());
+    listed_name_of(&entries, device_uid(device).as_deref(), &raw)
+}
+
 fn resolve_input(host: &Host, selection: &Option<String>) -> Result<(String, Device), String> {
     match selection {
         Some(selected) => {
@@ -57,8 +68,8 @@ fn resolve_input(host: &Host, selection: &Option<String>) -> Result<(String, Dev
             let device = host
                 .default_input_device()
                 .ok_or_else(|| "No default input device".to_string())?;
-            let name = device_name(&device).unwrap_or_else(|_| "Unknown input".to_string());
-            Ok((name, device))
+            let listed = named_devices(host, true)?;
+            Ok((default_name(&listed, &device, "Unknown input"), device))
         }
     }
 }
@@ -94,8 +105,7 @@ fn bus_requests(
             let device = host
                 .default_output_device()
                 .ok_or_else(|| "No default monitor output device".to_string())?;
-            let name = device_name(&device).unwrap_or_else(|_| "Unknown output".to_string());
-            (name, Some(device))
+            (default_name(&listed, &device, "Unknown output"), Some(device))
         }
     };
     add(BUS_MONITOR, "monitor output", monitor_name, monitor_dev, false);

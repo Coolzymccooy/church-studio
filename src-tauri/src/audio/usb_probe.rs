@@ -154,7 +154,7 @@ pub(super) mod aggregate {
     }
 
     /// Destroy a leftover aggregate with this UID (from an interrupted run).
-    pub fn destroy_uid(uid: &str) {
+    pub fn destroy_uid(uid: &str) -> bool {
         let address = AudioObjectPropertyAddress {
             mSelector: kAudioHardwarePropertyTranslateUIDToDevice,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -175,7 +175,25 @@ pub(super) mod aggregate {
             )
         };
         if status == 0 && id != kAudioObjectUnknown {
-            destroy(id);
+            let destroyed = unsafe { AudioHardwareDestroyAggregateDevice(id) };
+            println!("destroyed leftover {uid} ({id}): status {destroyed}");
+            return destroyed == 0;
+        }
+        false
+    }
+
+    /// Every aggregate UID the probes create.
+    pub const PROBE_UIDS: [&str; 4] = [
+        "tiwaton.hotplug.probe",
+        "tiwaton.engine.probe",
+        "tiwaton.monitor.probe",
+        "tiwaton.plugin.probe",
+    ];
+
+    /// Destroy any probe aggregate still present.
+    pub fn cleanup() {
+        for uid in PROBE_UIDS {
+            destroy_uid(uid);
         }
     }
 
@@ -189,7 +207,7 @@ pub(super) mod aggregate {
     }
 
     pub fn create(name: &str, uid: &str, sub_uids: &[String]) -> Aggregate {
-        destroy_uid(uid);
+        let _ = destroy_uid(uid);
         let subs: Vec<CFRetained<CFMutableDictionary>> = sub_uids
             .iter()
             .map(|sub_uid| {
@@ -221,10 +239,6 @@ pub(super) mod aggregate {
         Aggregate(id)
     }
 
-    pub fn destroy(id: AudioObjectID) {
-        let status = unsafe { AudioHardwareDestroyAggregateDevice(id) };
-        assert_eq!(status, 0, "destroy aggregate");
-    }
 }
 
 #[cfg(target_os = "macos")]
@@ -310,6 +324,7 @@ fn usb_hotplug_probe() {
     assert!(after > 1_000, "the reopened stream is not playing");
     drop(stream);
     drop(agg);
+    aggregate::cleanup();
 }
 
 /// The whole engine and the device watcher on a mock app: input and monitor
@@ -417,4 +432,144 @@ fn usb_engine_probe() {
         engine.stop();
     }
     drop(agg);
+    aggregate::cleanup();
+}
+
+/// Mid-service: the input on the built-in mic, main on the USB device (its
+/// own clock), the monitor on a probe device. A second device is plugged in,
+/// then the monitor's device is unplugged and plugged back. Main must keep
+/// playing with no underrun and the engine lock must never stall. Run it in
+/// release (the debug DSP is slower than real time):
+/// `cargo test --release --lib usb_midservice_probe -- --ignored --nocapture`
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "needs a USB audio device; run manually"]
+fn usb_midservice_probe() {
+    use super::device_watch::{tick, Watch};
+    use super::{DeviceSelection, EngineState, RunningEngine};
+    use crate::dsp::DspParams;
+    use crate::mixer_control::MixerControl;
+    use std::sync::atomic::{AtomicBool, AtomicU64};
+    use tauri::Manager;
+
+    const MON: &str = "TIWATON monitor probe";
+    const NEW: &str = "TIWATON plug-in probe";
+    let host = cpal::default_host();
+    let usb = usb_name();
+    let uid_of = |input: bool, name: &str| {
+        let (_, device) = find_device(&host, input, name).unwrap().expect("device");
+        device.id().unwrap().id().to_string()
+    };
+    let usb_out = uid_of(false, &usb);
+    let speakers = uid_of(false, "MacBook Pro Speakers");
+    let make_mon = || aggregate::create(MON, "tiwaton.monitor.probe", &[usb_out.clone()]);
+    let mut mon = make_mon();
+    std::thread::sleep(Duration::from_millis(800));
+
+    let app = tauri::test::mock_app();
+    app.manage(std::sync::Mutex::new(None::<RunningEngine>) as EngineState);
+    let params = Arc::new(DspParams::defaults());
+    params.monitor_gain_db.store(-40.0, Ordering::Relaxed);
+    let mixer = MixerControl::new();
+    let engine = RunningEngine::spawn(
+        app.handle().clone(),
+        params,
+        mixer.link(),
+        DeviceSelection {
+            input_id: Some("MacBook Pro Microphone".to_string()),
+            monitor_output_id: Some(MON.to_string()),
+            broadcast_output_id: None,
+            main_output_id: Some(usb.clone()),
+            monitor2_output_id: None,
+            monitor3_output_id: None,
+            output_pairs: [0; crate::dsp::mixer::NUM_BUSES],
+            input_range: None,
+        },
+        Default::default(),
+        Default::default(),
+        false,
+    )
+    .expect("engine start");
+    let state = app.state::<EngineState>();
+    *state.lock().unwrap() = Some(engine);
+    let entry = |role: &str| {
+        let devices = state.lock().unwrap().as_ref().unwrap().devices_json();
+        devices.as_array().unwrap().iter().find(|d| d["role"] == role).cloned().unwrap()
+    };
+
+    // A thread that keeps taking the engine lock, like the UI's status poll.
+    let stop = Arc::new(AtomicBool::new(false));
+    let worst_us = Arc::new(AtomicU64::new(0));
+    let poller = {
+        let (stop, worst_us, handle) = (stop.clone(), worst_us.clone(), app.handle().clone());
+        std::thread::spawn(move || {
+            while !stop.load(Ordering::Relaxed) {
+                let started = Instant::now();
+                drop(handle.state::<EngineState>().lock().unwrap());
+                worst_us.fetch_max(started.elapsed().as_micros() as u64, Ordering::Relaxed);
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        })
+    };
+
+    let handle = app.handle().clone();
+    let mut watch = Watch::default();
+    let ticks = |n: usize, watch: &mut Watch| {
+        for _ in 0..n {
+            std::thread::sleep(Duration::from_secs(1));
+            tick(&handle, &host, watch);
+        }
+    };
+    ticks(4, &mut watch);
+    let main_start = entry("main");
+    println!("settled: main {main_start}\n         monitor {}", entry("monitor"));
+    let underruns = |e: &serde_json::Value| e["underruns"].as_u64().unwrap();
+    let base = underruns(&main_start);
+
+    // 1. Another device is plugged in mid-service.
+    let plugged = aggregate::create(NEW, "tiwaton.plugin.probe", &[speakers.clone()]);
+    let seen = Instant::now();
+    ticks(2, &mut watch);
+    let listed = super::device_names::device_names(&host, false).iter().any(|n| n == NEW);
+    println!("plug-in: listed {listed} within {:?}; main {}", seen.elapsed(), entry("main"));
+    assert!(listed, "a plugged-in device must be listed");
+    assert_eq!(entry("main")["state"], "ok");
+
+    // 2. The monitor's device is pulled.
+    drop(mon);
+    ticks(3, &mut watch);
+    println!("unplugged: monitor {}\n           main {}", entry("monitor"), entry("main"));
+    assert_eq!(entry("monitor")["state"], "lost");
+    assert_eq!(entry("main")["state"], "ok");
+
+    // 3. It comes back.
+    mon = make_mon();
+    ticks(4, &mut watch);
+    let main_end = entry("main");
+    println!("replugged: monitor {}\n           main {main_end}", entry("monitor"));
+    assert_eq!(entry("monitor")["state"], "ok");
+    assert_eq!(main_end["state"], "ok");
+
+    stop.store(true, Ordering::Relaxed);
+    poller.join().unwrap();
+    let worst = worst_us.load(Ordering::Relaxed);
+    println!("main underruns {} -> {}; worst engine-lock wait {worst} us", base, underruns(&main_end));
+    assert_eq!(underruns(&main_end), base, "main ran dry while other devices came and went");
+    assert!(worst < 100_000, "the engine lock stalled for {worst} us");
+
+    if let Some(engine) = state.lock().unwrap().take() {
+        engine.stop();
+    }
+    drop(plugged);
+    drop(mon);
+    std::thread::sleep(Duration::from_millis(300));
+    aggregate::cleanup();
+}
+
+/// Remove any probe device an interrupted run left behind.
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "touches Core Audio devices; run manually"]
+fn usb_probe_cleanup() {
+    aggregate::cleanup();
 }

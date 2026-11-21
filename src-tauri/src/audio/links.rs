@@ -33,6 +33,8 @@ pub struct OutputLink {
     /// Members whose pair is not on the opened device.
     unfit: Mutex<Vec<usize>>,
     pub channels: AtomicUsize,
+    /// Extra delay of the feed's buffer (`output_feed::clock_buffer_ms`).
+    pub buffer_ms: f32,
 }
 
 impl OutputLink {
@@ -45,7 +47,13 @@ impl OutputLink {
             stats: Arc::new(OutputStats::default()),
             unfit: Mutex::new(Vec::new()),
             channels: AtomicUsize::new(0),
+            buffer_ms: 0.0,
         }
+    }
+
+    pub fn with_buffer_ms(mut self, buffer_ms: f32) -> Self {
+        self.buffer_ms = buffer_ms;
+        self
     }
 
     /// Record the opened device's channels and the members that do not fit.
@@ -79,6 +87,7 @@ impl OutputLink {
             "clock": self.clock.word(),
             "drift_ppm": self.stats.drift_ppm(),
             "underruns": self.stats.underruns(),
+            "buffer_ms": self.buffer_ms,
         })
     }
 }

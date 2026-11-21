@@ -1,4 +1,4 @@
-use super::device_names::{match_listed, transport_word, unique_names, ListedDevice};
+use super::device_names::{listed_name_of, match_listed, transport_word, unique_names, ListedDevice};
 use cpal::InterfaceType;
 
 fn names(list: &[&str]) -> Vec<String> {
@@ -66,4 +66,15 @@ fn a_device_never_opened_is_matched_by_name() {
     let list = listed(&[("Pastor IEM", "C")]);
     assert_eq!(match_listed("Pastor IEM", None, &list, &[]).unwrap().uid.as_deref(), Some("C"));
     assert_eq!(match_listed("Other", None, &list, &[]), None);
+}
+
+#[test]
+fn the_default_device_gets_its_unique_listed_name() {
+    // Codex review on PR 83: the default is the second of two identical units.
+    let list = listed(&[("X", "unit-1"), ("X (2)", "unit-2")]);
+    assert_eq!(listed_name_of(&list, Some("unit-2"), "X"), "X (2)");
+    assert_eq!(listed_name_of(&list, Some("unit-1"), "X"), "X");
+    // No id: the first device with that name, else the raw name.
+    assert_eq!(listed_name_of(&list, None, "X"), "X");
+    assert_eq!(listed_name_of(&list, Some("gone"), "Y"), "Y");
 }

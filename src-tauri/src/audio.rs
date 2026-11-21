@@ -58,6 +58,8 @@ mod health_tests;
 mod usb_tests;
 #[cfg(test)]
 mod usb_probe;
+#[cfg(test)]
+mod hotplug_scenario_tests;
 pub use device_names::list_devices;
 use health::LinkState;
 use input_proc::{DeviceRoute, HardwareInput, InputProcessor, OutputRoute};
@@ -401,13 +403,14 @@ impl AudioEngine {
             let (producer, consumer) =
                 ringbuf::HeapRb::<f32>::new(ring_frames * group.width()).split();
             let state = if opened.is_some() { LinkState::Ok } else { LinkState::Waiting };
-            let link = OutputLink::new(group.name.clone(), group.members.clone(), clock_for(&group.name), state);
+            let clock = clock_for(&group.name);
+            let link = OutputLink::new(group.name.clone(), group.members.clone(), clock, state)
+                .with_buffer_ms(output_feed::clock_buffer_ms(clock, buf_frames as usize, sr));
             routes.push(DeviceRoute {
                 producer,
                 buses: group.members.iter().map(|m| m.bus).collect(),
                 health: link.health.clone(),
             });
-            let clock = link.clock;
             let mut feed = OutputFeed::new(
                 consumer,
                 group.pairs(),

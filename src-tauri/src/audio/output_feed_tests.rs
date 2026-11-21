@@ -1,4 +1,4 @@
-use super::output_feed::{map_frame, pair_fits, ClockMode, OutputFeed, OutputStats};
+use super::output_feed::{clock_buffer_ms, map_frame, pair_fits, ClockMode, OutputFeed, OutputStats};
 use ringbuf::traits::{Producer, Split};
 use ringbuf::HeapRb;
 use std::sync::Arc;
@@ -137,4 +137,11 @@ fn restart_drops_stale_audio() {
     let mut out = vec![9.0f32; 8];
     feed.fill(&mut out, |s| s);
     assert!(out.iter().all(|&s| s == 0.0), "{out:?}");
+}
+
+#[test]
+fn only_a_feed_on_its_own_clock_adds_delay() {
+    assert_eq!(clock_buffer_ms(ClockMode::Shared, 256, 48_000), 0.0);
+    assert!((clock_buffer_ms(ClockMode::Corrected, 256, 48_000) - 16.0).abs() < 1e-3);
+    assert_eq!(clock_buffer_ms(ClockMode::Corrected, 256, 0), 0.0);
 }

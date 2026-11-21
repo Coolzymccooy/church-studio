@@ -106,6 +106,16 @@ pub fn device_names(host: &Host, input: bool) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// The unique listed name of a device known by its id and raw name (the
+/// system default): by id first, so the second of two identical units is
+/// "X (2)"; else the first device with that name; else the raw name.
+pub fn listed_name_of(listed: &[ListedDevice], uid: Option<&str>, raw: &str) -> String {
+    uid.and_then(|uid| listed.iter().find(|d| d.uid.as_deref() == Some(uid)))
+        .or_else(|| listed.iter().find(|d| d.name == raw))
+        .map(|d| d.name.clone())
+        .unwrap_or_else(|| raw.to_string())
+}
+
 /// The listed device a stream belongs on. The device it was opened on (by
 /// id) wins; otherwise one with its name, unless that one is already in use
 /// by another of the engine's streams (`taken` ids), so a bus never moves

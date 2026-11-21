@@ -43,8 +43,9 @@ Each engine stream (the input and each output device) has a link state:
   ticks in a row. A listing that fails keeps the previous lists: it is not an unplug.
 - Each stream remembers the platform id of the device it opened (Core Audio UID, WASAPI endpoint
   id). A reconnect looks for that id first, then for the name, but never takes a device that
-  another of the engine's streams is using, so with two identical interfaces a bus cannot move
-  onto the other unit.
+  another of the engine's streams was opened on (connected or not), so with two identical
+  interfaces a bus cannot move onto the other unit. The system default resolves to its unique
+  listed name ("X (2)" when it is the second unit).
 - When a `lost` or `waiting` device has been listed again for two watcher ticks in a row, the
   engine reopens only that stream, by name, at the engine's sample rate. The watcher does not hold
   the engine lock while it waits for the reopen. The mixer, the other
@@ -59,7 +60,11 @@ Each engine stream (the input and each output device) has a link state:
   (`Input 'X' is not connected`). A missing output does not stop the start: it is `waiting`
   and joins when plugged in.
 - `engine_status.devices` lists every stream:
-  `{ role, name, state, error, pair, channels, clock, drift_ppm, underruns }` (see 4 and 5).
+  `{ role, name, state, error, pair, channels, clock, drift_ppm, underruns, buffer_ms }` (see 4
+  and 5). `buffer_ms` is the extra delay of that output's clock buffer (0 on the input's clock,
+  about 16 ms at 48 kHz otherwise), for lip-sync downstream; this engine adds no other delay.
+- Live service: plugging a device in changes no running stream; it is listed within about two
+  seconds. Unplugging one device leaves every other output playing.
   `role` is `input`, `main`, `stream`, `monitor`, `monitor2`, `monitor3`.
 - The event `audio-device-health` carries the same list whenever a state changes.
 - The desk header shows one device lamp only when something needs attention:

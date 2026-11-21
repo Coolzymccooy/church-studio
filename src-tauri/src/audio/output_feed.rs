@@ -60,6 +60,19 @@ impl OutputStats {
     }
 }
 
+/// The extra delay a feed adds before its device (ms): none on the input's
+/// clock, the held buffer (`TARGET_BLOCKS` engine blocks) on its own clock.
+/// Reported so lip-sync downstream can account for it.
+pub fn clock_buffer_ms(mode: ClockMode, block_frames: usize, sample_rate: u32) -> f32 {
+    match mode {
+        ClockMode::Shared => 0.0,
+        ClockMode::Corrected if sample_rate > 0 => {
+            (block_frames * TARGET_BLOCKS) as f32 * 1000.0 / sample_rate as f32
+        }
+        ClockMode::Corrected => 0.0,
+    }
+}
+
 /// Whether pair `pair` (0 = 1-2) fits a `channels`-channel device. A mono
 /// device takes pair 0 only.
 pub fn pair_fits(pair: usize, channels: usize) -> bool {
