@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en" data-finish="graphite">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TIWATON remote mixer</title>
+  <link rel="stylesheet" href="/desk.css">
+  <script src="/desk.js" type="module"></script>
+</head>
+<body>
+  <main>
+    <header class="header">
+      <h1>TIWATON <span id="role">Remote mixer</span></h1>
+      <button type="button" class="fp-key" id="finish" aria-label="Finish: Graphite">Graphite</button>
+    </header>
+    <p id="error" class="error" role="alert" hidden></p>
+    <form id="pair" class="pair" hidden>
+      <label for="name">Device name</label>
+      <input id="name" class="field" maxlength="24" required autocomplete="off">
+      <label for="code">Pairing code</label>
+      <input id="code" class="field code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autocomplete="one-time-code">
+      <label><input id="renew" type="checkbox"> Keep paired</label>
+      <button class="fp-key" type="submit">Pair</button>
+      <details>
+        <summary>Certificate</summary>
+        <div>Use a certificate trusted by this device. Compare the SHA-256 fingerprint with the desk.</div>
+        <output id="fingerprint"></output>
+      </details>
+    </form>
+    <section id="mixer" hidden>
+      <div class="status fp-lamp" role="status"><span id="led" class="fp-led"></span><span id="message"></span></div>
+      <div id="channels" class="channels"></div>
+      <div id="buses" class="channels buses" aria-label="Mix outputs" hidden></div>
+    </section>
+  </main>
+</body>
+</html>

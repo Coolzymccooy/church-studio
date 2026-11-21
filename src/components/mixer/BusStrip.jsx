@@ -13,7 +13,7 @@ const FADER_MARKS = [10, 0, -10, -30].map((db) => ({ at: faderDbToPosition(db), 
  * limiter is always on), mute (and, on mon 2 / mon 3, a two-press copy of the mon sends), and the
  * bus fader between its left and right peak ladders.
  */
-export default function BusStrip({ bus, metersRef, onSetParam, onSetBool, onCopyFromMon1 = null }) {
+export default function BusStrip({ bus, metersRef, onSetParam, onSetBool, onFaderTouch, onCopyFromMon1 = null }) {
   const label = busLabel(bus.id);
   const meter = useCallback(() => metersRef.current.buses.find((b) => b.id === bus.id) || {}, [metersRef, bus.id]);
   const leftDb = useCallback(() => meter().peak_l_db ?? -96, [meter]);
@@ -53,6 +53,7 @@ export default function BusStrip({ bus, metersRef, onSetParam, onSetBool, onCopy
         <MeterLadder getDb={leftDb} height={LADDER_HEIGHT} width={5} label={`${label} left level`} />
         <Fader
           position={faderDbToPosition(bus.fader_db)}
+          onTouch={onFaderTouch}
           onChange={(p) => onSetParam('fader_db', positionToFaderDb(p))}
           label={`${label} fader`}
           valueText={`${formatDb(bus.fader_db)} dB`}

@@ -87,7 +87,7 @@ function StripAuto({ getMeter, mode }) {
  * between pre- and post-fader meters.
  */
 export default function ChannelStrip({
-  playbackTone, strip, metersRef, onSetParam, onSetBool, onRename, extraMonitors = [], groups, groupLabels,
+  playbackTone, strip, metersRef, onSetParam, onSetBool, onFaderTouch, onRename, extraMonitors = [], groups, groupLabels,
 }) {
   const [nameDraft, setNameDraft] = useState(strip.name);
   const [syncedName, setSyncedName] = useState(strip.name);
@@ -209,6 +209,7 @@ export default function ChannelStrip({
         <MeterLadder getDb={preDb} height={LADDER_HEIGHT} width={5} label={`${name} pre-fader level`} />
         <Fader
           position={faderDbToPosition(strip.fader_db)}
+          onTouch={onFaderTouch}
           onChange={(p) => onSetParam('fader_db', positionToFaderDb(p))}
           label={`${name} fader`}
           valueText={`${formatDb(strip.fader_db)} dB`}

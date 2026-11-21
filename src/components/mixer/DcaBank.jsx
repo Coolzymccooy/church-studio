@@ -8,7 +8,7 @@ const HEIGHT = 132;
 const marks = [10, 0, -10, -30].map((db) => ({ at: faderDbToPosition(db), zero: db === 0 }));
 const numbers = Array.from({ length: GROUP_COUNT }, (_, i) => i);
 
-export default function DcaBank({ groups, labels, strips, metersRef, onChange }) {
+export default function DcaBank({ groups, labels, strips, metersRef, onChange, onFaderTouch }) {
   const [selection, setSelection] = useState('');
   const [kind, raw] = selection.split(':');
   const index = Number(raw);
@@ -28,7 +28,7 @@ export default function DcaBank({ groups, labels, strips, metersRef, onChange })
               <Key aria-label={`${label} mute`} lit={muted ? 'amber' : null} pressed={muted}
                 onClick={() => onChange({ type: 'dcaMute', index, enabled: !muted })}>mute</Key>
               <div className="fp-fz">
-                <Fader label={`${label} fader`} colour="bus" position={faderDbToPosition(db)}
+                <Fader onTouch={(down) => onFaderTouch(index, down)} label={`${label} fader`} colour="bus" position={faderDbToPosition(db)}
                   valueText={`${formatDb(db)} dB`} height={HEIGHT} marks={marks}
                   onChange={(position) => onChange({ type: 'fader', index, db: positionToFaderDb(position) })} />
                 <MeterLadder getDb={() => metersRef.current.dca_peaks?.[index] ?? -96}

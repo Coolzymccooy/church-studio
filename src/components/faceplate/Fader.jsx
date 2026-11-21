@@ -1,3 +1,5 @@
+import { useEffect, useRef } from 'react';
+
 const COLOURS = new Set(['amber', 'clay', 'teal', 'olive', 'sky', 'rose', 'stone', 'bus']);
 
 /**
@@ -6,8 +8,29 @@ const COLOURS = new Set(['amber', 'clay', 'teal', 'olive', 'sky', 'rose', 'stone
  * rotated rather than using vertical writing mode so older desktop webviews behave the same.
  */
 export default function Fader({
-  position, onChange, label, valueText, colour = 'stone', height = 196, marks = [], disabled = false,
+  position, onChange, onTouch, label, valueText, colour = 'stone', height = 196, marks = [], disabled = false,
 }) {
+  const endTouch = useRef(null);
+  useEffect(() => () => endTouch.current?.(), []);
+
+  const startTouch = () => {
+    if (!onTouch || endTouch.current) return;
+    onTouch(true);
+    const refresh = window.setInterval(() => onTouch(true), 500);
+    const end = () => {
+      window.clearInterval(refresh);
+      endTouch.current = null;
+      window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', end);
+      window.removeEventListener('blur', end);
+      onTouch(false);
+    };
+    endTouch.current = end;
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
+    window.addEventListener('blur', end);
+  };
+
   const travel = height - 18;
   const capBottom = 9 + position * travel;
   const cc = COLOURS.has(colour) ? colour : 'stone';
@@ -30,6 +53,7 @@ export default function Fader({
         max={1}
         step={0.001}
         value={position}
+        onPointerDown={startTouch}
         onChange={(e) => onChange(Number(e.target.value))}
         aria-label={label}
         aria-valuetext={valueText}
