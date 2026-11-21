@@ -9,13 +9,15 @@
 :root {
   --rm-touch: 44px;
   --rm-bar: 52px;
-  --rm-strip: 76px;
-  --rm-cap-w: 44px;
+  --rm-strip-max: 76px;
+  --rm-cap-max: 44px;
+  --rm-meter: 6px;
+  --rm-gap: 3px;
   --rm-cap-h: 28px;
   --rm-scrib: 56px;
-  --rm-scale: calc(28px + max(12px, env(safe-area-inset-left)));
+  --rm-scale: calc(26px + max(8px, env(safe-area-inset-left)));
   --rm-val: 24px;
-  --rm-digit: 44px;
+  --rm-digit: 38px;
   --rm-side: 340px;
   --rm-key-travel: 2px;
 }
@@ -99,17 +101,18 @@ button { font: inherit; color: inherit; }
 .mixer { flex: 1; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; }
 .bank {
   min-height: 0; display: flex; gap: 4px; overflow-x: auto; overflow-y: hidden;
-  padding: 8px max(12px, env(safe-area-inset-right)) 8px 0; scroll-padding-left: calc(var(--rm-scale) + 4px);
+  padding: 8px max(8px, env(safe-area-inset-right)) 8px 0; scroll-padding-left: calc(var(--rm-scale) + var(--rm-gap));
+  gap: var(--rm-gap);
   overscroll-behavior-x: contain; scrollbar-width: none;
 }
 .bank::-webkit-scrollbar { display: none; }
-.strips { display: flex; gap: 4px; flex: none; }
-.buses { padding-left: 8px; margin-left: 4px; border-left: 1px solid var(--fp-seam); }
+.strips { display: flex; gap: var(--rm-gap); flex: none; }
+.buses { padding-left: 6px; margin-left: 3px; border-left: 1px solid var(--fp-seam); }
 
 /* the printed scale, pinned to the left edge while the strips scroll */
 .scale {
   position: sticky; left: 0; z-index: 2; flex: none; width: var(--rm-scale);
-  padding-left: max(12px, env(safe-area-inset-left)); display: grid; grid-template-rows: var(--rm-scrib) minmax(0, 1fr) var(--rm-val);
+  padding-left: max(8px, env(safe-area-inset-left)); display: grid; grid-template-rows: var(--rm-scrib) minmax(0, 1fr) var(--rm-val);
   row-gap: 6px; background: var(--fp-chassis);
 }
 .desk .scale { grid-template-rows: var(--rm-scrib) minmax(0, 1fr) var(--rm-val) var(--rm-touch); }
@@ -123,47 +126,55 @@ button { font: inherit; color: inherit; }
 
 /* ---------- strip ---------- */
 .strip {
-  width: var(--rm-strip); flex: none; display: grid; row-gap: 6px;
+  width: var(--rm-strip, var(--rm-strip-max)); flex: none; display: grid; row-gap: 6px;
   grid-template-rows: var(--rm-scrib) minmax(0, 1fr) var(--rm-val);
-  padding: 0 4px 6px; background: var(--fp-raised); border: 1px solid var(--fp-seam); border-radius: var(--fp-radius-strip);
+  padding: 0 2px 6px; background: var(--fp-raised); border: 1px solid var(--fp-seam); border-radius: var(--fp-radius-strip);
 }
 .desk .strip { grid-template-rows: var(--rm-scrib) minmax(0, 1fr) var(--rm-val) var(--rm-touch); }
-.strip.pin-end { margin-right: 8px; }
+.strip.pin-end { margin-right: 6px; }
 .scrib {
-  position: relative; margin: 0 -4px; display: grid; align-content: start; row-gap: 4px; padding: 6px 8px;
+  position: relative; margin: 0 -2px; display: grid; align-content: start; row-gap: 4px; padding: 6px 8px;
   min-width: 0; text-align: left; border: 0; border-bottom: 1px solid var(--fp-seam);
   border-radius: var(--fp-radius-strip) var(--fp-radius-strip) 0 0; background: var(--fp-plate); cursor: pointer;
   transition: background-color var(--fp-motion-fast), color var(--fp-motion-fast);
 }
 .scrib .no { font: var(--fp-weight-regular) var(--fp-text-xs)/1 var(--fp-font-mono); color: var(--fp-muted); }
 .scrib .nm {
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+  overflow-wrap: break-word; -webkit-hyphens: auto; hyphens: auto;
   font: var(--fp-weight-semibold) var(--fp-text-lg)/1.05 var(--fp-font-legend);
 }
-.scrib .pinled { position: absolute; top: 7px; right: 7px; width: 6px; height: 6px; border-radius: var(--fp-radius-led); background: var(--fp-led-off); }
+.scrib .pinled { position: absolute; top: 6px; right: 5px; width: 6px; height: 6px; border-radius: var(--fp-radius-led); background: var(--fp-led-off); }
 .strip.pinned .pinled { background: var(--fp-lit-g); }
 .strip.selected .scrib { background: var(--fp-sel); color: var(--fp-sel-ink); }
 .strip.selected .scrib .no { color: var(--fp-sel-ink); }
-.fz { min-height: 0; display: grid; grid-template-columns: 8px minmax(0, 1fr); column-gap: 4px; }
-.ladder { width: 8px; height: calc(100% - var(--rm-cap-h)); margin-top: calc(var(--rm-cap-h) / 2); border-radius: var(--fp-radius-meter); background: var(--fp-meter-bg); }
-
-.track { position: relative; container-type: size; touch-action: pan-x; cursor: ns-resize; user-select: none; -webkit-user-select: none; border-radius: var(--fp-radius-key); }
+/* The fader takes the whole strip width (the touch target); the meter sits inside it, at the left. */
+.fz { position: relative; min-height: 0; --rm-shift: calc((var(--rm-meter) + 2px) / 2); }
+.ladder {
+  position: absolute; left: 1px; top: calc(var(--rm-cap-h) / 2); width: var(--rm-meter); height: calc(100% - var(--rm-cap-h));
+  border-radius: var(--fp-radius-meter); background: var(--fp-meter-bg); pointer-events: none;
+}
+.track {
+  position: absolute; inset: 0; container-type: size; touch-action: pan-x; cursor: ns-resize;
+  user-select: none; -webkit-user-select: none; border-radius: var(--fp-radius-key);
+}
 .slot {
-  position: absolute; left: 50%; top: calc(var(--rm-cap-h) / 2); bottom: calc(var(--rm-cap-h) / 2); width: 4px; margin-left: -2px;
+  position: absolute; left: calc(50% + var(--rm-shift)); top: calc(var(--rm-cap-h) / 2); bottom: calc(var(--rm-cap-h) / 2); width: 4px; margin-left: -2px;
   border-radius: var(--fp-radius-led); background: var(--fp-slot); box-shadow: 0 0 0 1px var(--fp-slot-edge);
 }
 .tick {
-  position: absolute; left: calc(50% - 14px); width: 28px; height: 1px;
+  position: absolute; left: calc(50% + var(--rm-shift) - 13px); width: 26px; height: 1px;
   bottom: calc(var(--p) * (100% - var(--rm-cap-h)) + var(--rm-cap-h) / 2);
 }
-.tick::before, .tick::after { content: ""; position: absolute; top: 0; width: 7px; height: 100%; background: var(--fp-muted); transition: background-color var(--fp-motion-fast); }
+.tick::before, .tick::after { content: ""; position: absolute; top: 0; width: 6px; height: 100%; background: var(--fp-muted); transition: background-color var(--fp-motion-fast); }
 .tick::before { left: 0; }
 .tick::after { right: 0; }
-.tick.unity { left: calc(50% - 17px); width: 34px; height: 2px; margin-bottom: -1px; }
-.tick.unity::before, .tick.unity::after { width: 10px; background: var(--fp-legend); }
+.tick.unity { left: calc(50% + var(--rm-shift) - 15px); width: 30px; height: 2px; margin-bottom: -1px; }
+.tick.unity::before, .tick.unity::after { width: 8px; background: var(--fp-legend); }
 .track.detent .tick.unity::before, .track.detent .tick.unity::after { background: var(--fp-lit-g); }
 .cap {
-  position: absolute; top: 0; left: 50%; width: var(--rm-cap-w); height: var(--rm-cap-h); margin-left: calc(var(--rm-cap-w) / -2);
+  position: absolute; top: 0; left: calc(50% + var(--rm-shift)); width: var(--rm-cap-w, var(--rm-cap-max)); height: var(--rm-cap-h);
+  margin-left: calc(var(--rm-cap-w, var(--rm-cap-max)) / -2);
   transform: translateY(calc((1 - var(--pos, 0)) * (100cqh - var(--rm-cap-h))));
   transition: transform var(--fp-motion-base), scale var(--fp-motion-fast);
   border-radius: var(--fp-radius-key); border: 1px solid var(--fp-cap-rim); background: var(--fp-ch-stone);
@@ -183,6 +194,12 @@ button { font: inherit; color: inherit; }
 }
 .strip.off .val { color: var(--fp-muted); }
 .strip .key.mute { width: 100%; min-width: 0; padding: 0; }
+
+/* Narrow strips, when every channel is fitted on screen. */
+.bank.tight .scrib { padding: 5px 4px; row-gap: 3px; }
+.bank.tight .scrib .nm { font-size: var(--fp-text-sm); line-height: 1.1; }
+.bank.tight .val { font-size: var(--fp-text-xs); }
+.bank.tight .strip .key.mute { font-size: var(--fp-text-xs); }
 .mixer.idle .track { cursor: not-allowed; opacity: 0.45; }
 
 /* ---------- console: LCD, fine adjust, master ---------- */
@@ -237,7 +254,7 @@ button { font: inherit; color: inherit; }
 
 /* ---------- landscape: strips left, console in the right thumb column ---------- */
 @media (orientation: landscape) {
-  :root { --rm-bar: 44px; --rm-scrib: 46px; --rm-digit: 40px; }
+  :root { --rm-bar: 44px; --rm-scrib: 46px; --rm-digit: 34px; --rm-side: 300px; }
   .mixer { grid-template-rows: minmax(0, 1fr); grid-template-columns: minmax(0, 1fr) var(--rm-side); }
   .console { display: flex; flex-direction: column; border-top: 0; border-left: 1px solid var(--fp-seam); overflow-y: auto; }
   .console .master { margin-top: auto; }
@@ -247,7 +264,7 @@ button { font: inherit; color: inherit; }
 
 /* ---------- tablets: wider strips and caps ---------- */
 @media (min-width: 700px) and (min-height: 700px) {
-  :root { --rm-strip: 96px; --rm-cap-w: 60px; --rm-cap-h: 32px; --rm-side: 400px; --rm-digit: 56px; --rm-bar: 56px; --rm-scrib: 60px; }
+  :root { --rm-strip-max: 112px; --rm-cap-max: 60px; --rm-meter: 8px; --rm-gap: 4px; --rm-cap-h: 32px; --rm-side: 400px; --rm-digit: 52px; --rm-bar: 56px; --rm-scrib: 60px; }
   .scrib .nm { font-size: var(--fp-text-xl); -webkit-line-clamp: 2; }
 }
 @media (min-width: 700px) and (min-height: 700px) and (orientation: portrait) {

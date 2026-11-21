@@ -6,7 +6,7 @@
 const { webkit } = await import(process.env.PLAYWRIGHT ?? 'playwright');
 const out = process.argv[2];
 const SCALE = Number(process.env.SCALE ?? 1);
-const base = 'http://127.0.0.1:4476';
+const base = process.env.BASE ?? 'http://127.0.0.1:4476';
 const devices = {
   'phone-portrait': { viewport: { width: 440, height: 956 }, deviceScaleFactor: SCALE, isMobile: true, hasTouch: true },
   'phone-landscape': { viewport: { width: 956, height: 440 }, deviceScaleFactor: SCALE, isMobile: true, hasTouch: true },

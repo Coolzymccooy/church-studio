@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  DB_OFF, clipUntil, faderDb, faderPosition, inMixDb, lcdReadout, nudge, orderStrips, peakLabel,
+  DB_OFF, clipUntil, fitStrip, faderDb, faderPosition, inMixDb, lcdReadout, nudge, orderStrips, peakLabel,
   initialMeter, stepMeter, withDetent,
 } from '../../src-tauri/src/remote_mixer/web/mixmath.js';
 
@@ -86,4 +86,12 @@ test('the readout keeps a fixed width so digits never shift', () => {
   assert.equal(peakLabel(-75), '−∞');
   assert.equal(peakLabel(-6.24), '−6.2');
   assert.equal(peakLabel(1.5), '+1.5');
+});
+
+test('strips shrink to fit every channel on screen, but never below a thumb target', () => {
+  // iPhone portrait: 8 channels in 400 px with 3 px gaps fit at 47 px each.
+  assert.equal(fitStrip({ available: 400, count: 8, gap: 3, min: 44, max: 76 }), 47);
+  assert.equal(fitStrip({ available: 1200, count: 8, gap: 3, min: 44, max: 76 }), 76, 'capped at full size');
+  assert.equal(fitStrip({ available: 400, count: 16, gap: 3, min: 44, max: 76 }), 44, 'too many: scroll at the minimum');
+  assert.equal(fitStrip({ available: 400, count: 0, gap: 3, min: 44, max: 76 }), 76);
 });

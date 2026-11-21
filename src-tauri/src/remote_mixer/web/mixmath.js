@@ -130,3 +130,10 @@ export function lcdReadout(db) {
 export function peakLabel(db) {
   return db <= METER_MIN_DB ? `${MINUS}∞` : signed(db);
 }
+
+/** The widest strip that fits `count` strips in `available` px, kept within [min, max]. */
+export function fitStrip({ available, count, gap, min, max }) {
+  if (!(count > 0)) return max;
+  const each = Math.floor((available - gap * (count - 1)) / count);
+  return Math.max(min, Math.min(max, each));
+}

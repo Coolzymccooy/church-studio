@@ -2,12 +2,15 @@
 // meter wiring. desk.js owns the connection and the write queue and calls in here.
 import { attachFader, buildScale, buildTrack, showLevel } from './fader.js';
 import { createMeters } from './meters.js';
-import { clipUntil, CLIP_DB, DB_OFF, inMixDb, lcdReadout, nudge, orderStrips, peakLabel } from './mixmath.js';
+import { clipUntil, CLIP_DB, DB_OFF, fitStrip, inMixDb, lcdReadout, nudge, orderStrips, peakLabel } from './mixmath.js';
 import { dbLabel } from './protocol.js';
 
 const MIX_NAMES = { desk: 'Desk', monitor1: 'Mon 1', monitor2: 'Mon 2', monitor3: 'Mon 3' };
 const KINDS = { bus: 'bus', return: 'fx', dca: 'dca' };
 const STALE_METERS_MS = 600;
+const MIN_STRIP_PX = 44;
+const TIGHT_STRIP_PX = 64;
+const CAP_MARGIN_PX = 12;
 const el = (id) => document.getElementById(id);
 
 export function targetKey(target) {
@@ -58,7 +61,8 @@ export function createBoard({ onLevel, onMute, busy }) {
   const fine = el('fine');
   const mute = el('mute-mix');
   buildScale(el('scale'));
-  if (window.matchMedia('(min-width: 700px) and (min-height: 700px)').matches) {
+  // Where there is room beside or below the strips (tablets, landscape), the fine keys start open.
+  if (window.matchMedia('(min-width: 700px) and (min-height: 700px), (orientation: landscape)').matches) {
     fine.hidden = false;
     readout.setAttribute('aria-expanded', 'true');
   }
@@ -222,6 +226,25 @@ export function createBoard({ onLevel, onMute, busy }) {
     mute.setAttribute('aria-label', `Mute ${MIX_NAMES[view.role]} mix`);
   }
 
+  /** Size the strips so every channel fits on screen, down to a thumb-sized minimum. */
+  function fit() {
+    const bank = el('bank');
+    if (!bank.clientWidth || !strips.size) return;
+    const root = getComputedStyle(document.documentElement);
+    const token = (name) => parseFloat(root.getPropertyValue(name)) || 0;
+    const gap = token('--rm-gap');
+    const box = getComputedStyle(bank);
+    const divider = buses.hidden ? 0 : gap + parseFloat(getComputedStyle(buses).paddingLeft)
+      + parseFloat(getComputedStyle(buses).marginLeft) + 1;
+    const pinGap = channels.querySelector('.pin-end') ? parseFloat(getComputedStyle(channels.querySelector('.pin-end')).marginRight) : 0;
+    const available = bank.clientWidth - el('scale').parentElement.offsetWidth - parseFloat(box.paddingRight) - gap - divider - pinGap;
+    const width = fitStrip({ available, count: strips.size, gap, min: MIN_STRIP_PX, max: token('--rm-strip-max') });
+    bank.style.setProperty('--rm-strip', `${width}px`);
+    bank.style.setProperty('--rm-cap-w', `${Math.min(token('--rm-cap-max'), width - token('--rm-meter') - CAP_MARGIN_PX)}px`);
+    bank.classList.toggle('tight', width < TIGHT_STRIP_PX);
+  }
+  new ResizeObserver(() => fit()).observe(el('bank'));
+
   function firstKey() {
     const first = channels.firstElementChild ?? buses.firstElementChild;
     return [...strips.values()].find((strip) => strip.el === first)?.key;
@@ -262,6 +285,7 @@ export function createBoard({ onLevel, onMute, busy }) {
       if (pins.has(name)) pins.delete(name); else pins.add(name);
       savePins(view.role, pins);
       arrange();
+      fit();
       paintLcd();
       strip.el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
       return;
@@ -291,6 +315,7 @@ export function createBoard({ onLevel, onMute, busy }) {
       }
       buses.hidden = buses.childElementCount === 0;
       arrange();
+      fit();
       if (!selected || !strips.has(selected)) select(firstKey());
       paintMaster();
       paintLcd();

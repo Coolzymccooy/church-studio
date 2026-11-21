@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Preview server for the remote mixer page, with a fake board and synthetic meters, so the
 // phone and tablet layouts can be checked in any browser without the desktop app.
-//   node scripts/remote-mixer-preview.mjs [port]
+//   node scripts/remote-mixer-preview.mjs [port] [host]   (host defaults to 127.0.0.1; a tailnet IP reaches a phone)
 // Open /__as/monitor2 (or monitor1, monitor3, desk) to pair as that role, /__as/none to unpair.
 // Plain HTTP on localhost only: it has none of the real listener's TLS, pairing or auth.
 import { createServer } from 'node:http';
@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const web = join(root, 'src-tauri/src/remote_mixer/web');
 const port = Number(process.argv[2] ?? 4476);
+const host = process.argv[3] ?? '127.0.0.1';
 const ROLES = ['monitor1', 'monitor2', 'monitor3', 'desk'];
 const SEND_KEY = { monitor1: 'mon1', monitor2: 'mon2', monitor3: 'mon3' };
 const BUSES = ['main', 'stream', 'monitor', 'monitor2', 'monitor3'];
@@ -153,4 +154,4 @@ createServer((req, res) => {
     return undefined;
   }
   return send(res, 404);
-}).listen(port, '127.0.0.1', () => console.log(`remote mixer preview on http://127.0.0.1:${port}/__as/monitor2`));
+}).listen(port, host, () => console.log(`remote mixer preview on http://${host}:${port}/__as/monitor2`));
