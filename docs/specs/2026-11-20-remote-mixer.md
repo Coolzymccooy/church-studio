@@ -25,6 +25,10 @@ Pairing issues a random 256-bit token as an HttpOnly, Secure, SameSite=Strict ho
 
 A stopped engine shows settings and rejects remote writes. Pairing is available with the engine stopped.
 
+## The desktop panel
+
+The rail's remote key opens a popover that follows the flow: start listening, then the address with a copy key, then pick a role (mon 1, mon 2, mon 3, desk) and pair. An active code shows large with its role, a two-minute countdown and the QR. Paired devices list their name, a role chip, when they were last seen ("live" while connected) and a two-press revoke. Stop is two-press. Keys are lowercase; explanations sit in info tips.
+
 ## The phone and tablet page
 
 The page is a personal monitor mixer in the faceplate language (graphite and bone, `--fp-*` tokens, glass windows dark in both finishes). Screenshots: `docs/screenshots/2026-11-21-phone-mix/`.

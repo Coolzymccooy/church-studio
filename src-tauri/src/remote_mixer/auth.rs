@@ -43,6 +43,13 @@ pub struct Device {
     tokens: f32,
     #[serde(skip)]
     last_write: Instant,
+    /// The last authenticated request, shown on the desktop as seconds ago.
+    #[serde(rename = "seenSeconds", serialize_with = "seconds_ago")]
+    seen: Instant,
+}
+
+fn seconds_ago<S: serde::Serializer>(at: &Instant, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_u64(at.elapsed().as_secs())
 }
 
 #[derive(Default)]
@@ -219,6 +226,7 @@ impl Auth {
                 renewable,
                 tokens: WRITE_BURST,
                 last_write: now,
+                seen: now,
             },
         );
         self.pair = None;
@@ -256,6 +264,7 @@ impl Auth {
             return None;
         }
         device.ip = ip;
+        device.seen = Instant::now();
         Some(device)
     }
 
@@ -325,6 +334,26 @@ mod tests {
         let id = auth.devices()[0].id;
         auth.revoke(id);
         assert!(auth.renew(&cookie, other).is_none());
+    }
+
+    #[test]
+    fn the_desktop_list_shows_each_device_role_and_when_it_was_last_seen() {
+        let mut auth = Auth::default();
+        let ip = "127.0.0.1".parse().unwrap();
+        let code = auth.issue(Role::Monitor2).unwrap();
+        let cookie = auth.pair(&code, "Bass amp phone", ip, false).unwrap();
+        for device in auth.devices.values_mut() {
+            device.seen = Instant::now() - Duration::from_secs(90);
+        }
+        let listed = serde_json::to_value(auth.devices()).unwrap();
+        assert_eq!(listed[0]["name"], "Bass amp phone");
+        assert_eq!(listed[0]["role"], "monitor2");
+        assert_eq!(listed[0]["seenSeconds"], 90);
+        let token = cookie.split(';').next().unwrap();
+        assert_eq!(auth.role(token, ip), Some(Role::Monitor2));
+        let listed = serde_json::to_value(auth.devices()).unwrap();
+        assert_eq!(listed[0]["seenSeconds"], 0, "any authenticated request counts as seen");
+        assert!(listed[0].get("ip").is_none());
     }
 
     #[test]
