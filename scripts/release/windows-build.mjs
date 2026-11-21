@@ -44,6 +44,8 @@ export function windowsBuildScript({ sha, paths = remotePaths() }) {
     `cd /d "${paths.jobDir}" || exit /b 25`,
     'echo RELEASE-LOCAL: npm ci',
     'call npm ci --no-audit --no-fund || exit /b 26',
+    'echo RELEASE-LOCAL: ndi:fetch',
+    'call npm run ndi:fetch || exit /b 28',
     'echo RELEASE-LOCAL: tauri build',
     `call npx tauri build --config "${paths.config}" || exit /b 27`,
     'echo RELEASE-LOCAL-DONE',

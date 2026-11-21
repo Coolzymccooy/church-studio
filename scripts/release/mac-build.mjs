@@ -43,7 +43,7 @@ export function locateMacArtifacts({ version, jobDir = MAC.jobDir }) {
 }
 
 /**
- * npm ci → tauri build (universal, updater-signed) → frontend + native tests
+ * npm ci → ndi:fetch → tauri build (universal, updater-signed) → frontend + native tests
  * → verify-macos.py (architectures, entitlements, 10 s native launch).
  */
 export async function buildMac({ jobDir = MAC.jobDir, signingKey, skipTests, logFile, onStep }) {
@@ -53,6 +53,9 @@ export async function buildMac({ jobDir = MAC.jobDir, signingKey, skipTests, log
     // Ad-hoc sign unless a real identity is configured, as CI does for test builds.
     APPLE_SIGNING_IDENTITY: process.env.APPLE_SIGNING_IDENTITY || '-',
   };
+  // The app bundles the NDI runtime (src-tauri/ndi-runtime); build.rs stops without it.
+  onStep('ndi:fetch');
+  await run('npm', ['run', 'ndi:fetch'], { cwd: jobDir, logFile });
   onStep('tauri build --target universal-apple-darwin');
   await run('npx', ['tauri', 'build', '--target', MAC.target], { cwd: jobDir, env, logFile });
   if (!skipTests) {
